@@ -1,0 +1,435 @@
+/* Babel Tower - 聊天翻译 UI 样式
+   仅使用 Source 2 Panorama 支持的 CSS(flow-children / align / visibility 等),
+   技术写法参照已发布的同类 mod(如 DLCT)验证过的模式。 */
+
+/* ---- 隐藏 HTML 桥面板(2x2 透明,不参与交互) ---- */
+.LCTBridgePanel {
+  width: 2px;
+  height: 2px;
+  opacity: 0;
+  horizontal-align: left;
+  vertical-align: top;
+  margin-left: -4px;
+  margin-top: -4px;
+  z-index: -1;
+  hittest: false;
+  hittestchildren: false;
+}
+
+/* ---- 设置按钮(输入框右侧的"译") ---- */
+.LCTSettingsButton {
+  background-color: rgba(18, 22, 32, 0.85);
+  border: 1px solid rgba(255, 210, 127, 0.55);
+  border-radius: 3px;
+  color: #ffd27f;
+  font-size: 13px;
+  font-weight: bold;
+  height: 22px;
+  margin-left: 6px;
+  padding: 0px 8px;
+  vertical-align: middle;
+  width: 30px;
+}
+
+.LCTSettingsButton:hover {
+  background-color: rgba(255, 210, 127, 0.18);
+}
+
+/* ---- 设置面板(默认隐藏,居中弹窗) ---- */
+.LCTSettingsPanel {
+  align: center center;
+  width: 660px;
+  height: 600px;
+  background-color: gradient( linear, 0% 0%, 0% 100%, from( #141a20 ), color-stop( 0.48, #0e1318 ), to( #0a0d10 ) );
+  border: 1px solid rgba(255, 252, 244, 0.08);
+  border-radius: 6px;
+  box-shadow: rgba(0, 0, 0, 0.45) 0px 16px 34px 0px;
+  flow-children: down;
+  z-index: 5000;
+  visibility: collapse;
+}
+
+.LCTSettingsPanel.LCTVisible {
+  visibility: visible;
+}
+
+/* 标题栏 */
+.LCTSettingsHeader {
+  width: 100%;
+  height: 50px;
+  background-color: gradient( linear, 0% 0%, 0% 100%, from( #1b2128 ), to( #13181d ) );
+  flow-children: right;
+  padding: 0px 15px;
+  border-bottom: 1px solid rgba(255, 252, 244, 0.06);
+}
+
+.LCTPanelTitle {
+  font-size: 18px;
+  color: #ffffff;
+  font-weight: bold;
+  letter-spacing: 1px;
+  vertical-align: center;
+}
+
+.LCTCloseButton {
+  align: right center;
+  width: 32px;
+  height: 32px;
+  background-color: transparent;
+  border: 0px solid transparent;
+  border-radius: 4px;
+  color: #a39c8e;
+  font-size: 15px;
+  font-weight: bold;
+}
+
+.LCTCloseButton:hover {
+  background-color: rgba(255, 255, 255, 0.06);
+  color: #ffffff;
+}
+
+/* 主体与滚动列表
+   注意:Body 必须给确定高度(fill-parent-flow),否则 List 的 fill-parent-flow
+   会按内容高度解析(~650px),把底部保存/测试按钮挤出 560px 面板外(用户看不到保存按钮)。 */
+.LCTSettingsBody {
+  width: 100%;
+  height: fill-parent-flow(1.0);
+  flow-children: down;
+}
+
+.LCTSettingsList {
+  width: 100%;
+  height: fill-parent-flow(1.0);
+  flow-children: down;
+  overflow: squish scroll;
+  padding: 12px 16px;
+}
+
+/* 设置行:纵向(标签在上,控件在下) */
+.LCTSettingsRow {
+  width: 100%;
+  flow-children: down;
+  padding: 5px 8px;
+  margin-bottom: 2px;
+  border-radius: 6px;
+}
+
+.LCTSettingsRow:hover {
+  background-color: gradient( linear, -8% 0%, 100% 0%, from( rgba(102, 204, 153, 0.05) ), to( rgba(102, 204, 153, 0.00) ) );
+}
+
+.LCTRowLabel {
+  color: #cde5db;
+  font-size: 13px;
+  font-weight: bold;
+  letter-spacing: 0.3px;
+  margin-bottom: 4px;
+}
+
+/* 输入框:文字颜色显式设置(否则可能不可见) */
+.LCTInput {
+  width: 100%;
+  height: 28px;
+  background-color: gradient( linear, 0% 0%, 0% 100%, from( #1c1f24 ), to( #14171b ) );
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+  color: #e8e2d6;
+  font-size: 14px;
+  padding: 0px 8px;
+}
+
+.LCTInput:hover {
+  border: 1px solid rgba(255, 210, 127, 0.35);
+}
+
+/* 按钮(共用) */
+.LCTBtn, .LCTToggle {
+  padding: 2px 12px;
+  background-color: #20242a;
+  border: 0px solid transparent;
+  border-radius: 4px;
+  min-width: 68px;
+  height: 28px;
+  color: #c9c2b4;
+  font-size: 14px;
+  font-weight: bold;
+  text-align: center;
+  transition-property: background-color, brightness;
+  transition-duration: 0.18s;
+  transition-timing-function: ease-in-out;
+}
+
+.LCTBtn:hover, .LCTToggle:hover {
+  brightness: 1.08;
+  background-color: #2a2f36;
+  color: #ffffff;
+}
+
+.LCTBtn:active, .LCTToggle:active {
+  brightness: 0.85;
+}
+
+.LCTBtnSave {
+  background-color: #2f5d3a;
+  color: #ffffff;
+}
+
+.LCTBtnSave:hover {
+  background-color: #3a7048;
+  color: #ffffff;
+}
+
+.LCTBtnTest {
+  background-color: #2a4a6b;
+  color: #ffffff;
+}
+
+.LCTBtnTest:hover {
+  background-color: #355d85;
+  color: #ffffff;
+}
+
+/* 底部操作栏 */
+.LCTSettingsFooter {
+  width: 100%;
+  height: 56px;
+  flow-children: right;
+  padding: 0px 15px;
+  border-top: 1px solid rgba(255, 252, 244, 0.06);
+  background-color: gradient( linear, 0% 0%, 0% 100%, from( #13181d ), to( #0d1115 ) );
+}
+
+/* 状态栏(独立一行, 避免被 footer 水平流挤压) */
+.LCTStatusBar {
+  width: 100%;
+  height: 30px;
+  flow-children: none;
+  padding: 0px 15px;
+  border-bottom: 1px solid rgba(255, 252, 244, 0.06);
+  background-color: rgba(13, 17, 21, 0.85);
+}
+.LCTStatusLabel {
+  vertical-align: center;
+  color: #9fb4d0;
+  font-size: 12px;
+  width: 100%;
+  text-overflow: shrink;
+  white-space: normal;
+  max-height: 100%;
+}
+
+.LCTKeyHint {
+  vertical-align: center;
+  color: #6b7684;
+  font-size: 11px;
+  margin-left: 8px;
+  white-space: nowrap;
+}
+
+/* ---- 选择控件(点击切换/展开菜单) ---- */
+.LCTSelect {
+  padding: 2px 12px;
+  background-color: #20242a;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  min-width: 200px;
+  height: 28px;
+  color: #e8e2d6;
+  font-size: 14px;
+  font-weight: bold;
+  text-align: center;
+  transition-property: background-color, brightness;
+  transition-duration: 0.18s;
+  transition-timing-function: ease-in-out;
+}
+
+.LCTSelect:hover {
+  brightness: 1.08;
+  background-color: #2a2f36;
+  border: 1px solid rgba(255, 210, 127, 0.4);
+}
+
+.LCTSelect:active {
+  brightness: 0.85;
+}
+
+/* 下拉菜单(默认隐藏;在行内流式展开,下方内容被推开属正常) */
+.LCTSelectMenu {
+  visibility: collapse;
+  flow-children: down;
+  width: 100%;
+  margin-top: 4px;
+  background-color: #161a1f;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+  padding: 3px;
+}
+
+.LCTSelectMenu.LCTVisible {
+  visibility: visible;
+}
+
+.LCTMenuOption {
+  width: 100%;
+  height: 26px;
+  padding: 0px 8px;
+  background-color: transparent;
+  border: 0px solid transparent;
+  border-radius: 3px;
+  color: #c9c2b4;
+  font-size: 13px;
+  text-align: left;
+  transition-property: background-color, brightness;
+  transition-duration: 0.12s;
+}
+
+.LCTMenuOption:hover {
+  background-color: rgba(255, 210, 127, 0.14);
+  color: #ffffff;
+}
+
+/* 自定义语言输入框(选"自定义"时显示) */
+.LCTCustomInput {
+  visibility: collapse;
+  margin-top: 4px;
+}
+
+.LCTCustomInput.LCTVisible {
+  visibility: visible;
+}
+
+/* 服务商专属配置行(默认隐藏,由脚本按当前服务商显示) */
+#LCTRowRegion, #LCTRowOpenaiBase, #LCTRowOpenaiModel, #LCTRowDeeplEndpoint {
+  visibility: collapse;
+}
+
+/* 桥状态标签(状态栏右侧) */
+.LCTBridgeStatus {
+  vertical-align: center;
+  align: right center;
+  color: #7fd8a8;
+  font-size: 12px;
+  margin-left: auto;
+  margin-right: 4px;
+  white-space: nowrap;
+}
+
+/* ---- 译文标签(追加在原文下方,蓝色气泡:浅蓝斜体 + 深色半透明底) ---- */
+.LCTTranslation {
+  color: #8fd8ff;
+  font-size: 13px;
+  font-style: italic;
+  background-color: rgba(8, 12, 20, 0.85);
+  border: 1px solid rgba(143, 216, 255, 0.35);
+  border-radius: 4px;
+  padding: 2px 7px;
+  margin-top: 3px;
+  margin-left: 58px;
+  max-width: 290px;
+  width: fit-children;
+  text-shadow: 0px 1px 2px rgba(0, 0, 0, 0.9);
+  white-space: normal;
+}
+
+/* 翻译失败红字(蓝底红字,气泡风格一致) */
+.LCTTranslationError {
+  color: #ff9b94;
+  font-size: 13px;
+  background-color: rgba(40, 10, 12, 0.85);
+  border: 1px solid rgba(255, 120, 110, 0.4);
+  border-radius: 4px;
+  padding: 2px 7px;
+  margin-left: 58px;
+  margin-top: 3px;
+  max-width: 290px;
+  width: fit-children;
+  text-shadow: 0px 1px 2px rgba(0, 0, 0, 0.9);
+  white-space: normal;
+}
+
+/* ---- HUD 顶栏聊天气泡内译文(citadel_hud_top_bar_chat) ----
+   译文挂在 MessageContents 内(ChatBubble 正下方,该容器 flow-children:down 已确认),
+   蓝色气泡风格与普通行统一(浅蓝斜体 + 深色半透明底)。 */
+.LCTTranslationHud {
+  background-color: rgba(8, 12, 20, 0.92);
+  border: 1px solid rgba(143, 216, 255, 0.4);
+  border-radius: 4px;
+  color: #8fd8ff;
+  font-size: 13px;
+  font-style: italic;
+  letter-spacing: 0.2px;
+  margin-top: 4px;
+  margin-bottom: 4px;
+  margin-left: 10px;
+  margin-right: 10px;
+  max-width: 220px;
+  padding: 2px 8px;
+  white-space: normal;
+}
+
+/* 敌方 HUD 气泡右对齐 -> 译文也跟着右对齐 */
+.enemy .ChatMessage .LCTTranslationHud,
+.team2 .ChatMessage .LCTTranslationHud {
+  horizontal-align: right;
+  margin-left: 0px;
+  margin-right: 20px;
+}
+
+/* HUD 译文失败提示:保持深色胶囊,文字用浅红(覆盖普通行错误样式的 58px 左偏移) */
+.LCTTranslationHud.LCTTranslationError {
+  color: #ff9b94;
+  margin-left: 10px;
+  margin-right: 10px;
+}
+
+/* ---- 大厅(hudchat)聊天行译文 ----
+   行本身 flow-children:right(气泡横排),首次遇到时由脚本包一层 LCTLobbyWrap(横向)
+   并把行改为纵向流,译文标签作为行内第二个子面板显示在原文气泡下方。
+   若运行时不支持 SetParent(极少数),译文退化为内联显示在行尾,仍可见。 */
+.LCTLobbyWrap {
+  flow-children: right;
+  width: 100%;
+  height: fit-children;
+}
+
+.LCTTranslationLobby {
+  background-color: rgba(8, 12, 20, 0.92);
+  border: 1px solid rgba(143, 216, 255, 0.4);
+  border-radius: 4px;
+  color: #8fd8ff;
+  font-size: 13px;
+  font-style: italic;
+  margin-top: 3px;
+  margin-left: 4px;
+  max-width: 380px;
+  padding: 2px 8px;
+  white-space: normal;
+}
+
+.LCTTranslationLobby.LCTTranslationError {
+  color: #ff9b94;
+}
+
+/* ---- HUD 测试译文浮层(!lcttest 专用;挂在顶栏 chat 根面板下,
+   不占游戏消息行,避开游戏清理器,5 秒自删) ---- */
+.LCTTransOverlay {
+  background-color: rgba(10, 12, 16, 0.92);
+  border: 1px solid rgba(255, 210, 127, 0.6);
+  border-radius: 4px;
+  margin: 4px;
+  padding: 6px 10px;
+  flow-children: down;
+  width: fit-children;
+  height: fit-children;
+  z-index: 100;
+}
+
+.LCTTransOverlayText {
+  color: #ffd27f;
+  font-size: 15px;
+  font-weight: bold;
+  letter-spacing: 0.2px;
+  white-space: normal;
+  max-width: 300px;
+  text-shadow: 0px 1px 2px rgba(0, 0, 0, 0.95);
+}
