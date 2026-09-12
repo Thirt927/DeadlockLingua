@@ -61,6 +61,7 @@ Copy-Item (Join-Path $Root "portable-node\node.exe") (Join-Path $Stage "portable
 Write-Host "==> 复制文档与许可..."
 Copy-Item (Join-Path $Root "安装使用说明.txt") (Join-Path $Stage "安装使用说明.txt") -ErrorAction SilentlyContinue
 Copy-Item (Join-Path $Root "README.md") (Join-Path $Stage "README.md")
+Copy-Item (Join-Path $Root "README_EN.md") (Join-Path $Stage "README_EN.md")
 Copy-Item (Join-Path $Root "CHANGELOG.md") (Join-Path $Stage "CHANGELOG.md") -ErrorAction SilentlyContinue
 Copy-Item (Join-Path $Root "VERSION") (Join-Path $Stage "VERSION")
 Copy-Item (Join-Path $Root "LICENSE") (Join-Path $Stage "LICENSE")

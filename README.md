@@ -1,5 +1,7 @@
 # DeadlockLingua
 
+**简体中文** | [English](README_EN.md)
+
 > Deadlock 游戏内聊天实时翻译 Mod，fork 自 [BabelTower](https://github.com/c1375rick/BabelTower)，由 [Thirt927](https://github.com/Thirt927) 继续维护和优化。
 
 把《Deadlock》聊天里的外语消息实时翻译成你的语言，译文直接显示在原消息下方；也可以把你发送的内容先翻译成目标语言再发出。
