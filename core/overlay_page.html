@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DeadlockLingua 悬浮窗</title>
+<style>
+  :root {
+    --bg: #14161c;
+    --panel: #1c2029;
+    --line: #2a3040;
+    --text: #e8ecf3;
+    --dim: #96a0b3;
+    --accent: #e0a34a;
+    --own: #4aa3e0;
+    --danger: #e05a5a;
+    --ok: #4ad07a;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font: 12px/1.45 "Microsoft YaHei", "Segoe UI", system-ui, sans-serif;
+    overflow: hidden;
+  }
+  /* Game-friendly: stay nearly transparent (outline only) by default; go fully
+     opaque while a new chat arrives or the pointer is over the window. */
+  body {
+    display: flex; flex-direction: column;
+    opacity: .18;
+    transition: opacity .35s ease;
+  }
+  body.awake, body:hover { opacity: 1; }
+
+  header {
+    display: flex; align-items: center; gap: 6px;
+    padding: 5px 8px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--line);
+    flex: 0 0 auto;
+  }
+  .brand { font-weight: 600; color: var(--accent); white-space: nowrap; }
+  .status { display: flex; align-items: center; gap: 5px; color: var(--dim); margin-left: auto; white-space: nowrap; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--dim); }
+  .dot.on { background: var(--ok); }
+  .dot.off { background: var(--danger); }
+
+  button {
+    background: #262c38; color: var(--text); border: 1px solid var(--line);
+    border-radius: 5px; padding: 3px 7px; cursor: pointer; font-size: 11px;
+  }
+  button:hover { background: #303846; }
+  button:disabled { opacity: .55; cursor: default; }
+
+  main { flex: 1 1 auto; overflow-y: auto; padding: 6px 7px; }
+  main::-webkit-scrollbar { width: 8px; }
+  main::-webkit-scrollbar-thumb { background: #333b4b; border-radius: 4px; }
+
+  .empty { color: var(--dim); text-align: center; padding: 18px 6px; }
+
+  .msg {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--line);
+    border-radius: 6px;
+    padding: 5px 7px;
+    margin-bottom: 5px;
+  }
+  .msg.own { border-left-color: var(--own); }
+  .msg.other { border-left-color: var(--accent); }
+  .meta { display: flex; align-items: baseline; gap: 5px; margin-bottom: 2px; }
+  .sender { font-weight: 600; font-size: 11px; color: var(--own); }
+  .msg.other .sender { color: var(--accent); }
+  .hero { color: var(--dim); font-size: 10px; }
+  .orig { color: var(--dim); font-size: 11px; word-break: break-word; white-space: pre-wrap; }
+  .trans { color: var(--text); font-size: 12.5px; margin-top: 2px; word-break: break-word; white-space: pre-wrap; }
+  .trans.pending { color: var(--dim); font-style: italic; }
+  .trans.failed { color: var(--danger); font-size: 11px; }
+
+  footer {
+    flex: 0 0 auto;
+    background: var(--panel);
+    border-top: 1px solid var(--line);
+    padding: 6px 7px;
+  }
+  textarea {
+    width: 100%; height: 40px; resize: none;
+    background: #12151b; color: var(--text);
+    border: 1px solid var(--line); border-radius: 5px;
+    padding: 5px 6px; font: 12px/1.4 inherit;
+  }
+  textarea:focus { outline: none; border-color: var(--accent); }
+  .composeActions { display: flex; gap: 6px; align-items: center; margin-top: 5px; }
+  .composeActions .primary { flex: 1 1 auto; background: #3a3122; border-color: #5b4a2a; }
+  .composeActions .primary:hover { background: #4a3d28; }
+  .hint { color: var(--dim); font-size: 11px; }
+  .hint.warn { color: var(--danger); }
+  .hint.ok { color: var(--ok); }
+
+  .out { margin-top: 5px; border: 1px dashed var(--line); border-radius: 5px; padding: 5px 6px; }
+  .out.hidden { display: none; }
+  .outText { font-size: 13px; color: var(--text); word-break: break-word; white-space: pre-wrap; }
+  .outActions { display: flex; gap: 6px; align-items: center; margin-top: 5px; }
+</style>
+</head>
+<body>
+<header>
+  <span class="brand">DeadlockLingua</span>
+  <span class="status"><span id="dot" class="dot"></span><span id="statusText">连接中…</span></span>
+  <button id="pinBtn" title="把窗口置顶(画中画)">置顶</button>
+</header>
+
+<main id="list">
+  <div class="empty" id="empty">等待游戏内聊天…<br><br>需要先启动 Deadlock 并进入对局/大厅。</div>
+</main>
+
+<footer>
+  <textarea id="input" placeholder="输入中文,点“翻译并复制”(Enter 发送,Shift+Enter 换行)"></textarea>
+  <div class="composeActions">
+    <button id="sendBtn" class="primary">翻译并复制</button>
+    <span id="hint" class="hint"></span>
+  </div>
+  <div class="out hidden" id="outWrap">
+    <div class="outText" id="outText"></div>
+    <div class="outActions">
+      <button id="copyBtn">复制</button>
+      <span class="hint">回游戏按 Ctrl+V 粘贴发送</span>
+    </div>
+  </div>
+</footer>
+
+<script>
+(function () {
+  "use strict";
+
+  var listEl = document.getElementById("list");
+  var emptyEl = document.getElementById("empty");
+  var dotEl = document.getElementById("dot");
+  var statusEl = document.getElementById("statusText");
+  var inputEl = document.getElementById("input");
+  var sendBtn = document.getElementById("sendBtn");
+  var copyBtn = document.getElementById("copyBtn");
+  var hintEl = document.getElementById("hint");
+  var outWrap = document.getElementById("outWrap");
+  var outText = document.getElementById("outText");
+  var pinBtn = document.getElementById("pinBtn");
+
+  var nodes = {};       // seq -> DOM 节点(原地更新,避免整列表重绘)
+  var lastSeq = 0;      // 已见过的最大 seq
+  var lastStatus = null;
+  var hintTimer = null;
+  var FADE_MS = 6000;   // how long the window stays fully opaque after new chat
+  var fadeTimer = null;
+
+  // Default state is nearly transparent (outline only) so the window does not
+  // block the game view. New chat / pointer-over brings it back to full opacity.
+  // The awake flag is a body class, so it must be mirrored onto the PiP body.
+  function setAwake(on) {
+    var cls = on ? "awake" : "";
+    document.body.className = cls;
+    try {
+      if (documentPictureInPicture.window) {
+        documentPictureInPicture.window.document.body.className = cls;
+      }
+    } catch (e) {}
+  }
+  function wake() {
+    setAwake(true);
+    if (fadeTimer) clearTimeout(fadeTimer);
+    fadeTimer = setTimeout(function () { setAwake(false); }, FADE_MS);
+  }
+
+  function hint(text, kind) {
+    hintEl.textContent = text || "";
+    hintEl.className = "hint" + (kind ? " " + kind : "");
+    if (hintTimer) clearTimeout(hintTimer);
+    if (text) hintTimer = setTimeout(function () { hintEl.textContent = ""; }, 4000);
+    if (text) wake();   // any user-facing feedback should be readable
+  }
+
+  function setStatus(online, extra) {
+    var text = online ? ("桥在线" + (extra ? " · " + extra : "")) : "桥离线";
+    if (lastStatus === text) return;
+    lastStatus = text;
+    dotEl.className = "dot " + (online ? "on" : "off");
+    statusEl.textContent = text;
+  }
+
+  function nearBottom() {
+    return listEl.scrollHeight - listEl.scrollTop - listEl.clientHeight < 80;
+  }
+
+  function renderMsg(m) {
+    var wrap = nodes[m.seq];
+    if (!wrap) {
+      wrap = document.createElement("div");
+      wrap.className = "msg " + (m.own ? "own" : "other");
+      var meta = document.createElement("div");
+      meta.className = "meta";
+      var sender = document.createElement("span");
+      sender.className = "sender";
+      var hero = document.createElement("span");
+      hero.className = "hero";
+      meta.appendChild(sender);
+      meta.appendChild(hero);
+      var orig = document.createElement("div");
+      orig.className = "orig";
+      var trans = document.createElement("div");
+      trans.className = "trans";
+      wrap.appendChild(meta);
+      wrap.appendChild(orig);
+      wrap.appendChild(trans);
+      wrap.__parts = { sender: sender, hero: hero, orig: orig, trans: trans };
+      nodes[m.seq] = wrap;
+      listEl.appendChild(wrap);
+      if (emptyEl && emptyEl.parentNode) emptyEl.parentNode.removeChild(emptyEl);
+      emptyEl = null;
+    }
+    var p = wrap.__parts;
+    p.sender.textContent = m.sender || "未知玩家";
+    p.hero.textContent = m.hero || "";
+    p.orig.textContent = m.text || "";
+    if (m.translation) {
+      p.trans.textContent = m.translation;
+      p.trans.className = "trans";
+    } else if (m.pending) {
+      p.trans.textContent = "翻译中…";
+      p.trans.className = "trans pending";
+    } else if (m.error) {
+      p.trans.textContent = "翻译失败:" + m.error;
+      p.trans.className = "trans failed";
+    } else {
+      // 已是目标语言(中文):不重复显示
+      p.trans.textContent = "";
+      p.trans.className = "trans";
+    }
+    return wrap;
+  }
+
+  function pruneNodes() {
+    var keys = Object.keys(nodes);
+    if (keys.length <= 200) return;
+    keys.sort(function (a, b) { return Number(a) - Number(b); });
+    var drop = keys.slice(0, keys.length - 200);
+    for (var i = 0; i < drop.length; i++) {
+      var n = nodes[drop[i]];
+      if (n && n.parentNode) n.parentNode.removeChild(n);
+      delete nodes[drop[i]];
+    }
+  }
+
+  function poll() {
+    // 请求窗口:永远回看最近 40 条,这样后到的译文能原地补上(只取新增会漏掉翻译完成)
+    var after = Math.max(0, lastSeq - 40);
+    fetch("/api/v1/overlay/messages?after=" + after, { cache: "no-store" })
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        if (!j || !j.ok) throw new Error("bad_response");
+        setStatus(true, j.provider || "");
+        var msgs = j.messages || [];
+        if (!msgs.length && typeof j.latest === "number" && j.latest > lastSeq) lastSeq = j.latest;
+        if (!msgs.length) return;
+        var stick = nearBottom();
+        var fresh = false;
+        for (var i = 0; i < msgs.length; i++) {
+          renderMsg(msgs[i]);
+          if (msgs[i].seq > lastSeq) { lastSeq = msgs[i].seq; fresh = true; }
+        }
+        pruneNodes();
+        if (stick) listEl.scrollTop = listEl.scrollHeight;
+        if (fresh) wake();   // only genuinely new chat should pop the window up
+      })
+      .catch(function () { setStatus(false); });
+  }
+
+  // 置顶(PiP)后原窗口会被隐藏并失焦,此时必须用"当前聚焦的那个窗口"的 clipboard,
+  // 否则 writeText 会以 "Document is not focused" 被拒;兜底的 execCommand 同理。
+  function activeWindow() {
+    try {
+      if (typeof documentPictureInPicture !== "undefined" && documentPictureInPicture.window) {
+        return documentPictureInPicture.window;
+      }
+    } catch (e) {}
+    return window;
+  }
+
+  function copyText(text) {
+    var w = activeWindow();
+    var nav = w.navigator;
+    if (nav && nav.clipboard && nav.clipboard.writeText) {
+      return nav.clipboard.writeText(text).then(
+        function () { return true; },
+        function () { return fallbackCopy(text, w.document); }
+      );
+    }
+    return Promise.resolve(fallbackCopy(text, w.document));
+  }
+
+  function fallbackCopy(text, doc) {
+    try {
+      var ta = doc.createElement("textarea");
+      ta.value = text;
+      ta.setAttribute("readonly", "readonly");
+      ta.style.position = "fixed";
+      ta.style.top = "0";
+      ta.style.left = "0";
+      ta.style.opacity = "0";
+      doc.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      var ok = doc.execCommand("copy");
+      doc.body.removeChild(ta);
+      return !!ok;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  // 自动复制被浏览器策略拦截时的兜底:把英文选中,用户按 Ctrl+C 即可
+  function selectOutput() {
+    try {
+      var w = activeWindow();
+      var range = w.document.createRange();
+      range.selectNodeContents(outText);
+      var sel = w.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+    } catch (e) {}
+  }
+
+  function translateOutgoing() {
+    var text = String(inputEl.value || "").trim();
+    if (!text) { hint("先输入要发的内容", "warn"); return; }
+    sendBtn.disabled = true;
+    hint("翻译中…");
+    fetch("/api/v1/overlay/translate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: text })
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        if (!j || !j.ok) throw new Error((j && j.error) || "translate_failed");
+        outText.textContent = j.translation;
+        outWrap.className = "out";
+        return copyText(j.translation).then(function (ok) {
+          if (ok) hint("已复制到剪贴板,回游戏 Ctrl+V 发送", "ok");
+          else { selectOutput(); hint("浏览器拦截了自动复制,已选中英文,按 Ctrl+C 复制", "warn"); }
+        });
+      })
+      .catch(function (e) {
+        outWrap.className = "out hidden";
+        hint("翻译失败:" + ((e && e.message) || "桥未响应"), "warn");
+      })
+      .then(function () { sendBtn.disabled = false; });
+  }
+
+  // ---- 置顶:Document Picture-in-Picture(真正的 always-on-top 窗口) ----
+  function pinWindow() {
+    if (!("documentPictureInPicture" in window)) {
+      hint("当前浏览器不支持置顶,请用 Chrome/Edge 打开本页", "warn");
+      return;
+    }
+    var pip = documentPictureInPicture.window;
+    if (pip) { try { pip.close(); } catch (e) {} return; }
+    documentPictureInPicture.requestWindow({ width: 320, height: 440 }).then(function (w) {
+      var styles = document.querySelectorAll("style");
+      for (var i = 0; i < styles.length; i++) {
+        w.document.head.appendChild(styles[i].cloneNode(true));
+      }
+      w.document.body.style.cssText = document.body.style.cssText;
+      while (document.body.firstChild) w.document.body.appendChild(document.body.firstChild);
+      setAwake(true);   // carry the current fade state over to the PiP body
+      w.addEventListener("pagehide", function () {
+        while (w.document.body.firstChild) document.body.appendChild(w.document.body.firstChild);
+        wake();   // original window lights up again, then fades on its own
+      });
+      pinBtn.textContent = "取消置顶";
+      hint("已置顶;再点一次可取消");
+    }).catch(function (e) {
+      hint("置顶失败:" + ((e && e.message) || ""), "warn");
+    });
+  }
+
+  sendBtn.addEventListener("click", translateOutgoing);
+  copyBtn.addEventListener("click", function () {
+    copyText(outText.textContent).then(function (ok) {
+      if (ok) hint("已复制到剪贴板,回游戏 Ctrl+V 发送", "ok");
+      else { selectOutput(); hint("浏览器拦截了自动复制,已选中英文,按 Ctrl+C 复制", "warn"); }
+    });
+  });
+  pinBtn.addEventListener("click", pinWindow);
+  inputEl.addEventListener("keydown", function (e) {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      translateOutgoing();
+    }
+  });
+
+  inputEl.addEventListener("focus", wake);
+  wake();   // light up on open so the window is easy to find, then fade out
+  poll();
+  setInterval(poll, 1200);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,102 @@
+{
+  "port": 8791,
+  "provider": "bing",
+  "bing": {},
+  "microsoft": {
+    "apiKey": "",
+    "region": "",
+    "endpoint": "https://api.cognitive.microsofttranslator.com"
+  },
+  "defaults": {
+    "sourceLanguage": "auto",
+    "targetLanguage": "zh-Hans"
+  },
+  "timeoutMs": 15000,
+  "maxQueue": 200,
+  "watchGame": true,
+  "watchGameExe": "deadlock.exe",
+  "deadlockConsoleLog": "E:/Steam/steamapps/common/Deadlock/game/citadel/console.log",
+  "logFile": "logs/bridge.log",
+  "openai": {
+    "apiKey": "",
+    "baseUrl": "https://api.openai.com/v1",
+    "model": "gpt-4o-mini"
+  },
+  "deepl": {
+    "apiKey": "",
+    "endpoint": "https://api-free.deepl.com/v2/translate"
+  },
+  "google": {
+    "apiKey": ""
+  },
+  "fallbackProviders": [],
+  "chatLog": {
+    "enabled": true,
+    "dir": "logs/chat"
+  },
+  "steamIdEnrichment": {
+    "enabled": false,
+    "baseUrl": "https://api.deadlock-api.com",
+    "searchLimit": 20,
+    "minMatchesPlayedLast30d": 0,
+    "exactNameOnly": true,
+    "ambiguousMatchCheck": true,
+    "maxAmbiguousChecks": 3,
+    "maxPlayersPerFile": 12,
+    "maxFilesPerRun": 10,
+    "minFileAgeMs": 180000,
+    "rosterMinFileAgeMs": 21600000,
+    "intervalMs": 3600000,
+    "requestTimeoutMs": 15000,
+    "rosterEnabled": true,
+    "rosterRequestTimeoutMs": 30000,
+    "steamProfileRequestTimeoutMs": 30000,
+    "lookbackHours": 72
+  },
+  "ui": {
+    "enabled": true,
+    "provider": "bing",
+    "displayMode": "bilingual",
+    "outgoing": "off",
+    "outgoingTarget": "en",
+    "targetLanguage": "zh-Hans",
+    "force": false,
+    "timeoutMs": 15000
+  },
+  "overlay": {
+    "enabled": true,
+    "autoOpen": true,
+    "mode": "native",
+    "view": "panel",
+    "opacity": 0.85,
+    "background": "#0D0F14",
+    "backgroundImage": "",
+    "cornerRadius": 10,
+    "accent": "#E0A34A",
+    "fontSize": 12,
+    "edge": "right",
+    "autoHide": true,
+    "awakeMs": 6000,
+    "subtitle": {
+      "xRatio": 0.02,
+      "yRatio": 0.3,
+      "width": 380,
+      "fontSize": 15,
+      "nameSize": 11,
+      "origSize": 11,
+      "bgColor": "#0A0C11",
+      "bgOpacity": 0.55,
+      "radius": 8,
+      "gap": 6,
+      "lifeMs": 9000,
+      "fadeMs": 260,
+      "maxVisible": 6,
+      "persist": false,
+      "textColor": "#F2F4F8",
+      "nameColor": "#A8B0BE",
+      "origColor": "#8A93A3",
+      "showSender": true,
+      "showOriginal": true
+    }
+  }
+}
