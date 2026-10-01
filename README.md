@@ -47,7 +47,8 @@
 
 1. 解压 `DeadlockLingua-<版本>-win64.zip` 到**无空格、无中文**的路径，例如 `D:\DeadlockLingua`。
 2. **把 Mod 放进游戏**
-   - 压缩包内的 `pak01_dir.vpk` 请**先改名为 `pak22_dir.vpk`**（`pak01` 是游戏自己的资源名，不能占用）。
+   - 压缩包内的 VPK 叫 `pak01_dir.vpk`，**先给它改个名字**：只要在 addons 里不重名就行，推荐 `pak22_dir.vpk`（数字随意，22 只是本项目用的空位号）。
+   - ⚠️ **不要直接用 `pak01_dir.vpk` 这个名字**：`pak01` 是游戏本体占用的，同名会冲突；另外**千万不要放到 `citadel\` 目录下**（那会覆盖游戏本体资源），只能放 `citadel\addons\`。
    - 推荐用 **Deadlock Mod Manager** 导入；或手动复制到：
      `<Steam 库>\steamapps\common\Deadlock\game\citadel\addons\`
 3. **启动本地桥**（二选一）
@@ -145,7 +146,7 @@
 ### 更新方法
 
 1. 备份 `config/config.json`
-2. 解压新版本，删除 addons 里的旧 VPK，导入新 VPK（记得改名 `pak22_dir.vpk`）
+2. 解压新版本，删除 addons 里的旧 VPK，导入新 VPK（同样是先改成不重名的名字）
 3. 把备份的配置复制回新目录
 4. 运行 `RestartBridge.bat`
 5. **完全重启 Deadlock**
@@ -201,7 +202,9 @@ A：可在设置里调大「翻译超时」，或配置备用服务商（`fallba
 powershell -ExecutionPolicy Bypass -File scripts/build.ps1 -Csdk12Root "<CSDK_DIR>"
 ```
 
-产物为 `dist/pak01_dir.vpk`。**部署前必须改名为 `pak22_dir.vpk`**，再复制到 Deadlock 的 `game/citadel/addons/`。
+产物为 `dist/pak01_dir.vpk`。**部署前要先改成不与 addons 现有文件重名的名字**（推荐 `pak22_dir.vpk`），再复制到 Deadlock 的 `game/citadel/addons/`。
+
+> 别用裸的 `pak01_dir.vpk`：`pak01` 是游戏本体的 pak 组名，同名会冲突。
 
 ## 测试
 
