@@ -1050,6 +1050,18 @@ overlay.start({
     const result = await runTranslate(cfgT, { text: text, targetLanguage: target });
     return result && result.translation;
   },
+  // 聊天日志落盘。原来只有 HTTP /api/v1/log 会写, 而游戏更新后 mod 发不出请求,
+  // 日志就再也进不来了。这里复用同一个 appendChatLog, 走 console.log 通道补回,
+  // 文件格式与 matchId 兜底逻辑(session_ -> 真实 id 迁移)完全一致。
+  writeChatLog: (entry) => {
+    const cfgW = configStore.load();
+    if (!(cfgW.chatLog && cfgW.chatLog.enabled)) return;
+    try {
+      appendChatLog(cfgW, { lines: [entry] });
+    } catch (e) {
+      log("warn", "chat log write failed (overlay channel): " + (e && e.message ? e.message : String(e)));
+    }
+  },
 });
 startOverlayWatch();
 

@@ -50,6 +50,7 @@ function setDeps(d) {
   if (typeof d.log === "function") deps.log = d.log;
   if (typeof d.getConfig === "function") deps.getConfig = d.getConfig;
   if (typeof d.translate === "function") deps.translate = d.translate;
+  if (typeof d.writeChatLog === "function") deps.writeChatLog = d.writeChatLog;
 }
 
 // ---------- 日志行解析 ----------
@@ -90,6 +91,22 @@ function ingest(line) {
   const prev = dedup.get(sig);
   if (prev && now - prev < DEDUP_WINDOW_MS) return;
   dedup.set(sig, now);
+  // 落盘聊天日志。游戏更新后 mod 已经无法把日志 POST 给桥(HTTP 通道被移除),
+  // 这里是唯一还活着的通道, 用它把 logs/chat 的写入补回来。
+  // 只在新条目(已过去重)时写, 避免日志被重写后重复落盘。
+  if (typeof deps.writeChatLog === "function") {
+    try {
+      deps.writeChatLog({
+        t: now,
+        kind: "chat",
+        isOwn: !!rec.own,
+        sender: rec.sender,
+        channel: rec.channel,
+        hero: rec.hero,
+        text: rec.text,
+      });
+    } catch (e) {}
+  }
   if (dedup.size > DEDUP_LIMIT) {
     const first = dedup.keys().next().value;
     if (first !== undefined) dedup.delete(first);

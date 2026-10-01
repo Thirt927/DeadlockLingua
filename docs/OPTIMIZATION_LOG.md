@@ -1079,3 +1079,15 @@
 - **验证方式**: `node --check core/glossary.js` 通过; `require('./core/glossary')` 读出 `heroNames=46 / itemEnToCn=194 / termsCnToEn=25`, `buildHint()` 长度 5665; 桥重启后 4 条翻译实测全部成功且延迟正常。
 - **仍需用户测试**: 游戏里留意装备名是否按官方中文显示; 若有翻错的记下来补进用户词典。
 - **已知限制**: ①`log` 里的 20 个未发布英雄**不在**表内(刻意); ②装备表是**快照**, 游戏改版后需按 `AGENTS.md` 4.5 节的流程重刷; ③`ability`(395 条技能)与 `weapon`(84 条武器)尚未纳入, 如需要可同样方式补。
+
+## 2026-10-02 第五十二轮:修复「聊天日志功能失效」
+
+- **背景**: 用户反馈日志功能失效, `logs/chat/` 没有新文件。
+- **根因(与翻译失效同一个)**: 唯一的写日志入口是 `bridge_server.js` 的 `appendChatLog()`, 而它**只被 HTTP `/api/v1/log` 调用**。游戏 2026-10-01 更新移除 HTTP 能力后, mod 再也发不出这个请求。实测佐证: `logs/chat/` 最后一个真实日志文件停在 **2026/10/1 0:37**, 正好在游戏更新(16:00)之前。而唯一还活着的 `core/overlay.js`(tail `console.log`)**只把聊天喂给悬浮窗, 没有落盘**。
+- **改动文件**
+  - `core/overlay.js`: 新增 `writeChatLog` 依赖注入; 在 `ingest()` 里**去重之后**调用它, 把 `{t, kind:"chat", isOwn, sender, channel, hero, text}` 交出去。放在去重之后是刻意的 —— console.log 被游戏重写时会从头 re-tail, 不放在去重后面会导致重复落盘。
+  - `core/bridge_server.js`: `overlay.start()` 传入 `writeChatLog`, 内部**复用原有的 `appendChatLog()`**(而不是新写一个写文件逻辑), 因此文件格式、`chatLog.enabled` 开关、以及 "session_ → 真实 matchId 迁移" 这些既有行为全部保持一致; 由 `steamid_enrich.js` 做的昵称→SteamID 回填也能继续作用在这些文件上。
+- **原因/效果**: 聊天日志恢复落盘, 且**直接写到真实 matchId 的文件名**(不是 `session_`) —— 因为 `appendChatLog` 本来就会用 `readLatestGameMatchId()` 从 console.log 兜底解析真实比赛 ID。
+- **验证方式**: `node --check` 两个文件均通过; 重启桥后向游戏 `console.log` 注入一条 `[LCT-CHAT]` → `logs/chat/` 立即出现新文件 **`<matchId>.jsonl`**(真实 matchId, 非 session_); 内容为标准的三种记录: `{"type":"meta","matchId":"<matchId>",...}` / `{"type":"player","name":"LogProbe","hero":"vyper",...}` / `{"type":"msg","t":"...","kind":"chat","sender":"LogProbe",...,"text":"chatlog restore probe message"}` —— 与旧格式完全一致。
+- **仍需用户测试**: 打一局后看 `logs/chat/` 是否出现以本局真实 matchId 命名的 jsonl, 且内容随聊天增长。
+- **已知限制**: ①日志只在**桥运行期间**采集(桥没开时的聊天不会补录); ②`steamIdEnrichment` 的昵称回填仍按原节奏(文件写入 3 分钟后)工作, 需保持开启。
