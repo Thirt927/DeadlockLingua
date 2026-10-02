@@ -23,7 +23,12 @@ module.exports = {
       "Chinese hero nicknames: " + heroLines.join(", ") + ".",
       "Common terms: " + termLines.join(", ") + ".",
       "Items (official EN->CN shop names; when the source names an item, use its official Chinese name): " + itemLines.join(", ") + ".",
-      "Rules: keep hero/ability/item names in English; translate the ENTIRE message completely; never truncate, never omit any part of the meaning."
+      "Rules: keep hero/ability/item names in English; translate the ENTIRE message completely; never truncate, never omit any part of the meaning.",
+      // Anti-hallucination: a word that merely LOOKS like a nickname must not be turned into a
+      // hero the user never mentioned. Observed case: \"牛\" (= Abrams in the CN community) was
+      // absent from the nickname list, and the model guessed \"Mo & Krill\" instead of leaving it
+      // as \"ox\". Substituting a wrong hero is far worse than an untranslated literal.
+      "If a Chinese word or nickname is not in the lists above and you are not certain which hero it means, translate it literally (e.g. 牛 -> ox/bull) and NEVER guess or invent a hero name for it."
     ].join(" ");
   },
   fixHeroTerms: function (source, translation, targetLang) {

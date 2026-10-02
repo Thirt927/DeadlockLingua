@@ -1,4 +1,4 @@
-// Babel Tower - Deadlock 聊天翻译 Panorama 脚本
+﻿// Babel Tower - Deadlock 聊天翻译 Panorama 脚本
 // ------------------------------------------------------------------
 // 独立实现(不复制任何现有 mod 代码),技术路线与 DLCT 一致:
 //   扫描聊天行 -> 去重 -> 隐藏 HTML 面板桥接本地 Core -> 原文下方追加译文
@@ -4949,12 +4949,9 @@ function injectTranslation(row, sig, text) {
     const trimmed = String(raw).trim();
     if (!trimmed) return;
 
-    // /tr 命令:打开设置面板,不发送
-    if (trimmed === "/tr" || trimmed.indexOf("/tr ") === 0) {
-      clearInput();
-      openSettingsPanel();
-      return;
-    }
+    // 注: 原 /tr 命令(打开游戏内设置面板)已随面板一并移除 —— 面板在游戏
+    // 移除 HTTP 后已无法保存任何设置, 保留只会把用户的输入吞掉(/tr 既不开面板
+    // 也不发送)。现在 /tr 会作为普通文本正常发送。
 
     // !lcttest 测试命令:向 HUD 顶栏聊天注入一条英文消息(不真实发送)
     // 用途:无队友/无 bot 时验证 HUD 扫描+翻译通路;进训练场即可测

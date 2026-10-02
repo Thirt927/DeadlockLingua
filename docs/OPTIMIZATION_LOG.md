@@ -1091,3 +1091,58 @@
 - **验证方式**: `node --check` 两个文件均通过; 重启桥后向游戏 `console.log` 注入一条 `[LCT-CHAT]` → `logs/chat/` 立即出现新文件 **`<matchId>.jsonl`**(真实 matchId, 非 session_); 内容为标准的三种记录: `{"type":"meta","matchId":"<matchId>",...}` / `{"type":"player","name":"LogProbe","hero":"vyper",...}` / `{"type":"msg","t":"...","kind":"chat","sender":"LogProbe",...,"text":"chatlog restore probe message"}` —— 与旧格式完全一致。
 - **仍需用户测试**: 打一局后看 `logs/chat/` 是否出现以本局真实 matchId 命名的 jsonl, 且内容随聊天增长。
 - **已知限制**: ①日志只在**桥运行期间**采集(桥没开时的聊天不会补录); ②`steamIdEnrichment` 的昵称回填仍按原节奏(文件写入 3 分钟后)工作, 需保持开启。
+
+## 2026-10-02 第五十三轮:与其他 mod 的干扰面最小化(布局覆盖审计 + 精简)
+
+- **背景**: 用户装上 `v5_top_bar_plus` 后发现两个 mod 冲突。排查确认二者**覆盖同一条路径** `panorama/layout/citadel_hud_top_bar_player.vxml_c` —— VPK 是文件级覆盖**不会合并**, 只能有一个生效, 另一方对该文件的改动全部丢失。用户随后把问题上升为一般性诉求: **能否把 mod 对其他 mod 的干扰降到最低**。
+- **判断标准**: 干扰面 = **覆盖了几个原版文件**。我们自己的 `lingua_chat.vjs_c` / `.vcss_c` 是独有路径, **永不冲突**; 而每一个被覆盖的原版 `.xml` 都是一次冲突机会。推论: 凡能放进 JS 的, 就不要动 XML。
+- **审计结论(逐文件)**
+  - `citadel_hud_top_bar_player.xml` —— ❌ **整个删除**。理由: 昵称/英雄读原版即可。关键证据: JS 的 `TOPBAR_PLAYER_NAME_CLASSES = ["PlayerName", "AlwaysPlayerName", ...]` 是**带回退的数组且 `PlayerName` 排第一**, 删掉自建的 `AlwaysPlayerName` 后自动回落原版同宏标签。SteamID 另有 3 个采集点。
+  - `chat.xml` / `hudchat.xml` —— ❌ **删除其中的设置面板**(两者各背一份**完全相同**的面板, 合计约 300 行)。理由: 游戏移除 HTTP 后面板**保存不了任何设置**, 是纯死重量。保留: 脚本/样式 `include`(JS 的注入途径)、`LCTRowAccount`/`LCTRowHero` 采集标签、`LCTOnChatSubmit` 提交钩子、`LCTBridgePanel`。
+  - `players_list_entry.xml` / `profile_card.xml` / `citadel_db_page_profile.xml` —— ✅ **保留**(各只改 1-3 行, 仅藏一个读宏的 `<Label>`)。这三个都是**冷门文件**(顶栏、聊天框才是 mod 作者最爱改的地方), 冲突面最小。
+- **改动文件**
+  - 删除 `mod/panorama/layout/citadel_hud_top_bar_player.xml`
+  - `chat.xml`(229→80 行)、`hudchat.xml`(195→47 行): 用一次性脚本按标记精确删除设置面板(从面板注释到桥面板注释之间), 其余内容逐字节保留; 脚本用后即删。
+- **安全性验证(动手前先查依赖, 非事后补救)**
+  - 顶栏: 见上述 `TOPBAR_PLAYER_NAME_CLASSES` 回退数组证据。
+  - 设置面板: 查得 JS 中 `SETTINGS_PANEL_ID` 的**全部 4 处用法都做了判空** —— `if (!panel) return` / `if (panel)` / `if (panel && ...)` / `panel ? findChild(panel,id) : null`, 因此面板缺失时这些函数**安静地变成空操作**, 不会每帧报错。**故本轮不需要为安全而剪枝 JS**。
+- **验证方式**: `scripts/build.ps1` 构建通过, 资源数 **8 → 7**, 且 `chat.vxml_c` / `hudchat.vxml_c` 均 `ok` —— 由 `resourcecompiler` 实际解析通过, 证明删除未破坏 XML 结构(注: 用正则数 `<Panel>` 标签会得出"不平衡", 那是 `<PanelXxx>` 被误计入的假象, 应以编译器为准)。
+- **仍需用户测试**: 重启游戏后确认 —— ①昵称/英雄映射仍正常(顶栏改读原版标签); ②ESC 名单的 SteamID 采集仍正常; ③游戏内 `/tr` 设置面板**已消失**(这是预期, 设置改在悬浮窗); ④与 `top_bar_plus` 的冲突消失, 二者可共存(其顶栏改动不再被我们还原)。
+- **已知限制**: ①顶栏那个 SteamID 采集点随之失去, 靠 `players_list_entry`(ESC 名单)+ 两张资料卡兜底; ②**游戏内已无任何设置入口**, 全部设置只能改悬浮窗或 `config.json`。
+
+## 2026-10-02 第五十四轮:修 /tr 被吞、关游戏后悬浮窗不退出、字幕顶部被裁;并修回被编辑剥掉的 BOM
+
+- **背景**: 用户反馈 4 件事 —— ①`/tr` 打不出去了; ②关游戏后悬浮窗/字幕不退出; ③字幕最上面一条显示不全(被裁); ④字幕太宽想调。另有"快捷消息日志格式"疑点需核实。
+- **① `/tr` 被吞(真 bug)**: 第五十三轮删掉设置面板时**漏删了命令拦截**。`LCTOnChatSubmit` 里原本有:
+  `if (trimmed === "/tr" || trimmed.indexOf("/tr ") === 0) { clearInput(); openSettingsPanel(); return; }`
+  面板删掉后 `openSettingsPanel()` 变成空操作, 于是这段的净效果是 **"清空用户输入 + 什么都不做 + 永不发送"**。
+  修法: 整段删除, `/tr` 现在作为普通文本正常发送。
+- **② 关游戏后悬浮窗不退出(真 bug)**: `checkOverlayGame()` 里游戏退出分支原本只写了 `overlayGameSeen = false;` —— **只重置标志, 从不关窗口**。改为 `else if (!running && overlayGameSeen)` 时调用新增的 `closeOverlayWindow()`(native 模式走 `killOverlayNative()`;web 模式桥拿不到浏览器进程句柄, 只记一条日志)。注意判断加了 `overlayGameSeen` 条件, 避免游戏从未运行过时也去执行关闭。
+- **③ 字幕顶部被裁(真 bug)**: `Apply-SubtitleLayout()` 里高度是**估算**的 —— `maxVisible * fontSize * 3.4`。原文换行或译文较长时, 每条的**实际**高度超过该估算, 固定窗口高度装不下便裁切。
+  修法: 改为 `DmWindow.SizeToContent = Height` 让窗口高度**紧跟 StackPanel 实际内容**, 任何条数/字数都不再被裁; 另设 `MaxHeight = min(760, 工作区高*0.9)` 兜住极端情况。定位用的高度改读 `ActualHeight`, 未布局时回退一个保守值。
+- **④ 字幕宽度**: 核实后**已可在设置面板调整** —— `overlay.subtitle.width` 对应"每条宽度(px)"(设置 → 字幕浮层分组), 无需新增。
+- **核实: "快捷消息日志格式有问题" 不是 bug(重要更正)**: 上轮我凭猜测认为 `channel:"hud"` + `sender:"<unknown>"` 的条目是主聊天的**重复副本**, 计划加去重。**实测证伪** —— 对当轮日志做跨 channel 文本比对, **零重复**; 那 3 条(`有超凡冷却`/`马上倒下了`/`有幸免于难`)是**独立的快捷喊话**, 主聊天列表里没有。若按错误判断去重, 会**误删 3 条合法消息**。真实情况只是: 游戏的快捷喊话本身不带发送者, 故 `sender` 落成 `<unknown>`。属显示层措辞问题, 非数据丢失。
+- **⚠️ 附带修复(本轮最重要的发现): 编辑把 UTF-8 BOM 剥掉了**
+  - 起因: 用 `[Parser]::ParseFile` 做语法检查时报出中文乱码(`妗ュ湪绾?`), 说明文件被按 GBK 读。
+  - 实测: `overlay_window.ps1` 及**我改过的另外 5 个文件**的 BOM 全部丢失(文件头变成 `23 20 44`), 而 `git show HEAD:` 里的原版**都有 BOM**。
+  - 影响: PowerShell 5.1 读无 BOM 的 UTF-8 会按 **ANSI/GBK** 解 → 内部所有中文(设置项标题、提示文案)**全部乱码**。这正是 `AGENTS.md` 里反复警告的坑, 而**工具链本身会静默剥掉 BOM**(编辑器改写与 `fs.writeFileSync(...,"utf8")` 都不写 BOM)。
+  - 修法: 逐个用 `ReadAllText(UTF8)` + `WriteAllText(..., UTF8Encoding($true))` 补回, 并复查全部为 `EF BB BF`; 内容完整性抽查通过。
+- **验证方式**: `build.ps1` 构建通过(7 资源全 `ok`); 已部署 `addons\pak22_dir.vpk`; 桥重启后 `GET /api/v1/health` = 200; 悬浮窗手动启动成功(pid 5112)且**错误日志为空**, 证明 BOM 修复与高度改动均正常加载; 6 个文件的 BOM 复查全部为 True。
+- **仍需用户测试**: ①`/tr` 能作为普通聊天发出; ②**关闭游戏后悬浮窗自动消失**; ③字幕不再裁切(条数多、文案长时最上面一条也完整); ④设置里调"每条宽度(px)"看效果; ⑤确认设置面板中文不再乱码(若仍乱码说明 BOM 又被动过)。
+- **已知限制**: ①web 模式下关游戏不会自动关窗(桥无浏览器进程句柄); ②快捷喊话仍显示为 `<unknown>`(游戏不提供发送者); ③工具链存在**静默剥 BOM** 的风险, 每次改完带中文的 `.ps1` 都应复查前三字节是否为 `EF BB BF`。
+
+## 2026-10-02 第五十五轮:悬浮窗设置实时预览 + 胶囊随配置重建 + 松手才贴边 + 设置按钮样式
+
+- **背景**: 用户一次提了 4 个体验问题 —— ①改透明度/字号应**实时看到变化**, 不该保存后才知道; ②改设置**不生效**(胶囊透明度、字号改了没反应); ③窗口**只能贴边**, 希望"靠近边才贴, 不靠近就不贴"; ④点保存后胶囊才变正常, 顺带修一下设置按钮的 UI。
+- **②④ 根因(同一个, 真 bug)**: 字幕胶囊的底色/圆角/字号/间距/显隐是在 `New-SubtitleChip` **创建那一刻**从 `$script:Ov.subtitle` 读值固化的; `Apply-Config` 只重画了窗口/面板本身, **从不回写已存在的胶囊**。所以改配置对已出现的胶囊毫无效果, 只有**新来的**消息才用新值; 而点保存会触发 `Apply-Config` → `Apply-SubtitleLayout` 重算布局, 造成"保存后才变正常"的错觉 —— ④其实就是②的表现。
+  - 前置障碍: `$script:DmItems` 原本只存 `{node,seq,born,life}`, **不留原始消息**, 配置一变就无从重建。
+  - 修法: ①`Add-Subtitle` 在 DmItems 里**多存一份 `msg`**; ②新增 `Rebuild-Subtitles()`, 用存下的消息原地重建全部胶囊(并继承当前淡化进度, 不闪); ③`Apply-Config` 末尾在字幕形态下调用它。
+- **① 实时预览(真缺失)**: 设置控件此前**只在点保存时**才读值写配置, 没有任何预览通路; 且滑块为了修崩溃已把 `Add_ValueChanged` 换成纯数据绑定, 连"拖动时做点什么"的入口都没有。
+  - 修法: 新增 `Preview-Settings()` —— 读当前表单值**合并进内存配置**(不落盘)后重画; 新增 `Register-Preview($ctl,$kind)` 按控件类型挂回调(bool→Click、enum→SelectionChanged、range→ValueChanged、int→LostFocus、color→TextChanged)。处理器内**只调用具名函数、不引用建窗时的局部变量**, 并整段 `try/catch`, 规避上一轮"闭包捕获局部变量 → WPF 异步调度作用域解析失败 → 进程被带走"的老坑。另设 `$script:Building` 标志, 生成控件期间抑制预览, 避免读到半成品表单。
+- **③ 只能贴边 → 靠近才贴(新能力)**: `Snap-ToNearestEdge` 原先是**无条件**吸附到最近边。
+  - 修法: 改为按"窗口四边到对应工作区边的**间隙**"取最近一条, **间隙 ≤ `$script:SnapDist`(48px)才吸附**, 否则置 `edge="float"` 并**记住当前位置** `floatX/floatY`; `Get-EdgeTarget` 对 `float` 直接返回当前位置, 于是展开/收起/唤醒全部原地不动(即浮动时不自动收起)。配置层新增 `overlay.floatX/floatY`(DEFAULTS + `applyMaskedUpdate` 白名单), 并允许 `edge="float"`; 设置面板的"收起贴哪条边"下拉新增"自由(不贴边,不自动收起)"选项。
+- **⑤ 设置按钮样式(真 bug, 根因意外)**: `KeyAct`/`SolidAct` 是**带 key 的样式却没有 `BasedOn`** —— WPF 里设了显式 Style 后**隐式 Button 样式整份失效**, 按钮回退成系统浅色模板。这正是"设置"按钮看起来像从别的程序贴进来的原因。修法: 两个 keyed 样式补 `BasedOn="{StaticResource {x:Type Button}}"`, 并给"设置"按钮加黄铜描边 + 深底 + 半粗(同时修好了"翻译并复制"/"保存"两个按钮)。
+- **改动文件**: `scripts/overlay_window.ps1`(实时预览/重建/吸附/按钮样式); `core/config.js`(新增 `overlay.floatX/floatY` 与 `edge="float"` 支持)。
+- **验证方式**: `Parser::ParseFile` 语法通过; 抽出两个窗口的 XAML 单独 `XamlReader::Parse` **通过**(证明新增 `BasedOn` 写法可解析); `node --check core/config.js` 通过; `overlay_window.ps1` 前三字节复查为 `EF BB BF`(BOM 未丢)。
+- **仍需用户测试**: ①拖"胶囊不透明度"/改"译文字号"**当场**看到已显示胶囊变化(无需保存); ②把面板拖到屏幕中间松手 → **停住不贴边**; 拖到边附近松手 → 吸附; ③关闭再打开悬浮窗, 停在原位置(不再弹回边); ④点"保存"后效果与预览一致; ⑤"设置"按钮为黄铜描边样式, 不再是系统灰按钮。
+- **已知限制**: ①实时预览只改**内存配置**, 不关闭设置页就退出的话本次预览不落盘(下次启动回到磁盘值); ②`overlay.fontSize`(面板字号)仍只影响继承, 聊天列表各行是显式字号, 故该项视觉变化有限(本轮未动); ③`edge="float"` 时贴边自动收起等于关闭(浮动窗口无法收成细条)。

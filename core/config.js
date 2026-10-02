@@ -81,8 +81,12 @@ const DEFAULTS = {
     cornerRadius: 10,
     accent: "#C9A44E",
     fontSize: 12,
-    // 收起时贴哪条屏边(拖动松手后按最近边自动更新)
+    // 收起时贴哪条屏边(拖动松手后, 离最近边小于阈值才吸附);
+    // "float" = 自由悬浮(拖到屏幕中间停住, 不贴边也不自动收起)
     edge: "right",
+    // edge=float 时记住的窗口左上角屏幕绝对坐标(松手时写入)
+    floatX: null,
+    floatY: null,
     autoHide: true,
     awakeMs: 6000,
     // 字幕浮层:角落堆叠的聊天胶囊(昵称 + 原文 + 译文)。
@@ -359,7 +363,9 @@ function applyMaskedUpdate(current, incoming) {
       if (ov.view === "danmaku") cur.view = "subtitle";
       else if (["panel", "subtitle"].indexOf(ov.view) !== -1) cur.view = ov.view;
     }
-    if (typeof ov.edge === "string" && ["left", "right", "top", "bottom"].indexOf(ov.edge) !== -1) cur.edge = ov.edge;
+    if (typeof ov.edge === "string" && ["left", "right", "top", "bottom", "float"].indexOf(ov.edge) !== -1) cur.edge = ov.edge;
+    if (ov.floatX !== undefined && ov.floatX !== null && Number.isFinite(Number(ov.floatX))) cur.floatX = Math.round(Number(ov.floatX));
+    if (ov.floatY !== undefined && ov.floatY !== null && Number.isFinite(Number(ov.floatY))) cur.floatY = Math.round(Number(ov.floatY));
     if (typeof ov.background === "string") cur.background = ov.background;
     if (typeof ov.backgroundImage === "string") cur.backgroundImage = ov.backgroundImage;
     if (typeof ov.accent === "string" && ov.accent) cur.accent = ov.accent;

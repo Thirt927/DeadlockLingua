@@ -149,10 +149,17 @@ $script:Xaml = @"
         </Setter.Value>
       </Setter>
     </Style>
-    <Style x:Key="KeyAct" TargetType="Button">
+    <!-- Keyed styles MUST inherit the implicit Button style, otherwise they
+         replace it wholesale and the button falls back to the stock light
+         Windows chrome (that is why "设置" used to look pasted-in). BasedOn
+         keeps the dark template while letting these only change colour. -->
+    <Style x:Key="KeyAct" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
       <Setter Property="Foreground" Value="$($T.Brass)"/>
+      <Setter Property="Background" Value="#182029"/>
+      <Setter Property="BorderBrush" Value="$($T.BrassDim)"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
     </Style>
-    <Style x:Key="SolidAct" TargetType="Button">
+    <Style x:Key="SolidAct" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
       <Setter Property="Foreground" Value="#161A16"/>
       <Setter Property="Background" Value="$($T.Brass)"/>
       <Setter Property="BorderBrush" Value="$($T.Brass)"/>
@@ -452,12 +459,17 @@ $script:Dragging = $false
 $script:Nodes = @{}
 $script:LastSeq = 0
 $script:LastStatus = ""
+# DmItems 每条:{ node, seq, born, life, msg } - msg 留原始消息, 供配置变更时重建胶囊
 $script:DmItems = @()
 $script:SubNodes = @{}
 $script:SubSeen = @{}
 $script:SubEditMode = $false
 $script:Ctl = @{}
 $script:CfgTouched = @{}
+# 设置页正在生成控件时置 true: 抑制控件初始化触发的预览, 避免读到半成品表单
+$script:Building = $false
+# 松手时窗口离最近屏边小于这个像素距离才吸附, 否则停在原地(自由悬浮)
+$script:SnapDist = 48
 
 $script:AnimTimer = New-Object System.Windows.Threading.DispatcherTimer
 $script:AnimTimer.Interval = [TimeSpan]::FromMilliseconds(12)
@@ -484,6 +496,8 @@ function Get-EdgeTarget([bool]$expanded) {
   $h = $script:Window.Height
   $l = $script:Window.Left
   $t = $script:Window.Top
+  # float: 不贴边 - 展开/收起/唤醒都原地不动, 也就等于关掉了贴边自动收起
+  if ($script:Edge -eq "float") { return @{ L = $l; T = $t } }
   switch ($script:Edge) {
     "left" {
       $l = $wa.Left
@@ -540,41 +554,67 @@ function Wake-Window() {
   $script:AwakeTimer.Start()
 }
 
-# Snap to whichever screen edge the window centre is closest to, then persist it.
+# Drag release: dock ONLY when the window is dropped close to an edge. Dropped
+# out in the open it stays exactly where it is ("float") and stops auto-hiding -
+# which is what you want for a panel you have positioned yourself.
 function Snap-ToNearestEdge() {
   $wa = [System.Windows.SystemParameters]::WorkArea
-  $cx = $script:Window.Left + $script:Window.Width / 2
-  $cy = $script:Window.Top + $script:Window.Height / 2
-  $d = @{
-    left   = $cx - $wa.Left
-    right  = $wa.Right - $cx
-    top    = $cy - $wa.Top
-    bottom = $wa.Bottom - $cy
+  $w = $script:Window.Width
+  $h = $script:Window.Height
+  $l = $script:Window.Left
+  $t = $script:Window.Top
+  # 窗口四边到对应工作区边的"间隙": 0/负数 = 已贴着或探出屏外, 正数 = 离那条边还有多远
+  $gap = @{
+    left   = $l - $wa.Left
+    right  = $wa.Right - ($l + $w)
+    top    = $t - $wa.Top
+    bottom = $wa.Bottom - ($t + $h)
   }
-  $best = "right"; $bestV = [double]::MaxValue
+  $best = "float"; $bestV = [double]::MaxValue
   foreach ($k in @("left", "right", "top", "bottom")) {
-    if ($d[$k] -lt $bestV) { $bestV = $d[$k]; $best = $k }
+    if ($gap[$k] -lt $bestV) { $bestV = $gap[$k]; $best = $k }
   }
-  $script:Edge = $best
-  $p = Get-EdgeTarget $true
-  $script:Window.Left = $p.L
-  $script:Window.Top = $p.T
-  Save-Overlay @{ edge = $best }
+  if ($bestV -le [double]$script:SnapDist) {
+    $script:Edge = $best
+    $p = Get-EdgeTarget $true
+    $script:Window.Left = $p.L
+    $script:Window.Top = $p.T
+    try { $script:Ov.edge = $best } catch {}
+    Save-Overlay @{ edge = $best }
+  } else {
+    # 离哪条边都不近: 自由悬浮, 并记住当前位置(下次启动回到这儿, 不会又贴回边)
+    $script:Edge = "float"
+    $fx = [int][Math]::Round($l); $fy = [int][Math]::Round($t)
+    # 内存也要同步, 否则之后任何一次预览/重画都会按旧坐标把窗口拽回去
+    try { $script:Ov.edge = "float"; $script:Ov.floatX = $fx; $script:Ov.floatY = $fy } catch {}
+    Save-Overlay @{ edge = "float"; floatX = $fx; floatY = $fy }
+  }
 }
 
-$script:AnimTimer.Add_Tick({
+# edge=float: 把窗口放回上次松手的位置(夹在工作区内, 换分辨率也不会跑到屏外)
+function Restore-FloatPosition() {
+  $ov = $script:Ov
+  if ($null -eq $ov -or $null -eq $ov.floatX -or $null -eq $ov.floatY) { return }
+  $wa = [System.Windows.SystemParameters]::WorkArea
+  $x = [double]$ov.floatX
+  $y = [double]$ov.floatY
+  $script:Window.Left = [Math]::Min([Math]::Max($x, $wa.Left), [Math]::Max($wa.Left, $wa.Right - $script:Window.Width))
+  $script:Window.Top = [Math]::Min([Math]::Max($y, $wa.Top), [Math]::Max($wa.Top, $wa.Bottom - $script:Window.Height))
+}
+
+$script:AnimTimer.Add_Tick({ try {
   $script:AnimStep++
   $t = [Math]::Min(1.0, $script:AnimStep / 9.0)
   $e = 1 - [Math]::Pow(1 - $t, 3)
   $script:Window.Left = $script:AnimFromL + ($script:AnimToL - $script:AnimFromL) * $e
   $script:Window.Top = $script:AnimFromT + ($script:AnimToT - $script:AnimFromT) * $e
   if ($t -ge 1) { $script:AnimTimer.Stop(); $script:Animating = $false }
-})
+ } catch { }})
 
-$script:AwakeTimer.Add_Tick({
+$script:AwakeTimer.Add_Tick({ try {
   $script:AwakeTimer.Stop()
   if ($script:AutoHide -and -not $script:MouseIn -and -not $script:InputFocused) { Collapse-Window }
-})
+ } catch { }})
 
 # ============================================================ message list
 # Same chip language as the caption layer (monogram + name + original +
@@ -805,7 +845,8 @@ function Add-Subtitle($m) {
   $node.Parts.trans.Text = $shown
   $script:SubNodes[$key] = $node
   $script:DmList.Children.Add($node) | Out-Null
-  $script:DmItems += ,@{ node = $node; seq = $key; born = [DateTime]::Now; life = [int]$s.lifeMs }
+  # msg 留一份原始消息, 配置变更(颜色/字号/间距/显隐)时据此原地重建
+  $script:DmItems += ,@{ node = $node; seq = $key; born = [DateTime]::Now; life = [int]$s.lifeMs; msg = $m }
 
   while ($script:DmItems.Count -gt [int]$s.maxVisible) {
     $old = $script:DmItems[0]
@@ -815,7 +856,7 @@ function Add-Subtitle($m) {
   }
 }
 
-$script:EaseTimer.Add_Tick({
+$script:EaseTimer.Add_Tick({ try {
   if (-not $script:DmWindow.IsVisible) { return }
   $now = [DateTime]::Now
   $fade = [double]$script:Ov.subtitle.fadeMs
@@ -840,15 +881,53 @@ $script:EaseTimer.Add_Tick({
     $keep += ,$it
   }
   $script:DmItems = $keep
-})
+ } catch { }})
+
+# 已出现的胶囊是在创建那一刻从配置读值固化的(底色/字号/间距), 不会自己跟着设置变。
+# 配置变更后用 DmItems 里留存的原始消息原地重建一遍, 让"改设置立刻看到效果"成立。
+function Rebuild-Subtitles() {
+  if (-not $script:DmWindow.IsVisible) { return }
+  if ($script:DmItems.Count -eq 0) { return }
+  $s = $script:Ov.subtitle
+  $rebuilt = @()
+  $script:SubNodes = @{}
+  $script:DmList.Children.Clear()
+  foreach ($it in $script:DmItems) {
+    $m = $it.msg
+    if (-not $m) { continue }
+    $node = New-SubtitleChip $m
+    $shown = [string]$m.translation
+    if (-not $shown) { $shown = [string]$m.text }
+    $node.Parts.trans.Text = $shown
+    $node.Opacity = $it.node.Opacity   # 继承当前淡化进度, 重建时不闪
+    $script:SubNodes[[string]$it.seq] = $node
+    $script:DmList.Children.Add($node) | Out-Null
+    $rebuilt += ,@{ node = $node; seq = $it.seq; born = $it.born; life = [int]$s.lifeMs; msg = $m }
+  }
+  $script:DmItems = $rebuilt
+}
 
 function Apply-SubtitleLayout() {
   $s = $script:Ov.subtitle
   $wa = [System.Windows.SystemParameters]::WorkArea
   $w = [Math]::Min([Math]::Max(220, [double]$s.width), $wa.Width)
-  $h = [Math]::Min(600, [Math]::Max(100, [int]$s.maxVisible * [double]$s.fontSize * 3.4))
+  # 高度分两种情况, 不能一律 SizeToContent:
+  #   - 有内容时用 SizeToContent=Height, 让窗口紧跟 StackPanel 的实际高度。原来的做法是
+  #     用 maxVisible*fontSize*系数 估算, 原文换行或译文较长时实际高度超过估算值, 超出
+  #     固定窗口的部分就被裁掉(表现为最上面那条显示不全)。
+  #   - 内容为空时必须退回固定高度。SizeToContent 在空列表下会把窗口压成 0 高, 看起来
+  #     就像"窗口被关掉了"(改设置会触发重新布局, 列表短暂为空即触发)。
+  $script:DmWindow.MaxHeight = [Math]::Min(760, $wa.Height * 0.9)
+  if ($script:DmItems.Count -gt 0) {
+    $script:DmWindow.SizeToContent = [System.Windows.SizeToContent]::Height
+  } else {
+    $script:DmWindow.SizeToContent = [System.Windows.SizeToContent]::Manual
+    $script:DmWindow.Height = [Math]::Min(600, [Math]::Max(100, [int]$s.maxVisible * [double]$s.fontSize * 3.4))
+  }
   $script:DmWindow.Width = $w
-  $script:DmWindow.Height = $h
+  # 定位需要一个大致的当前高度: 用 ActualHeight, 尚未布局时回退到 MaxHeight 的一半
+  $h = $script:DmWindow.ActualHeight
+  if ($h -lt 40) { $h = [Math]::Min(300, $script:DmWindow.MaxHeight) }
   # 编辑中不要打断用户正拖着的窗口
   if ($script:SubEditMode) { return }
   $x = $wa.Left + $wa.Width * [double]$s.xRatio
@@ -965,8 +1044,9 @@ $script:FieldSpec = @(
   @{ k = "overlay.fontSize"; t = "面板字号"; c = "int" }
   @{ k = "overlay.autoHide"; t = "贴边自动收起"; c = "bool" }
   @{ k = "overlay.awakeMs"; t = "新消息弹出时长(ms)"; c = "int" }
-  @{ k = "overlay.edge"; t = "收起贴哪条边(拖到边缘可自动改)"; c = "enum"; o = @(
-      @("right", "右"), @("left", "左"), @("top", "上"), @("bottom", "下")) }
+  @{ k = "overlay.edge"; t = "收起贴哪条边(拖到边缘附近才吸附)"; c = "enum"; o = @(
+      @("right", "右"), @("left", "左"), @("top", "上"), @("bottom", "下"),
+      @("float", "自由(不贴边,不自动收起)")) }
 
   @{ h = "字幕浮层" }
   @{ k = "overlay.subtitle.width"; t = "每条宽度(px)"; c = "int" }
@@ -1059,6 +1139,7 @@ function New-RowContainer([string]$label, $control) {
 }
 
 function Build-SettingsUi() {
+  $script:Building = $true
   $script:SettingsList.Children.Clear()
   $script:Ctl = @{}
   foreach ($f in $script:FieldSpec) {
@@ -1071,6 +1152,7 @@ function Build-SettingsUi() {
         $cb.VerticalAlignment = "Center"
         $cb.Foreground = ConvertTo-Brush "#E8ECF3" "#E8ECF3"
         $script:Ctl[$f.k] = $cb
+        Register-Preview $cb "bool"
         New-RowContainer $f.t $cb
       }
       "enum" {
@@ -1083,6 +1165,7 @@ function Build-SettingsUi() {
         for ($i = 0; $i -lt $f.o.Count; $i++) { if ($f.o[$i][0] -eq [string]$val) { $idx = $i } }
         $cb.SelectedIndex = $idx
         $script:Ctl[$f.k] = $cb
+        Register-Preview $cb "enum"
         New-RowContainer $f.t $cb
       }
       "int" {
@@ -1090,6 +1173,7 @@ function Build-SettingsUi() {
         # 外观交给全局 TextBox 模板; 逐行再写一套会盖掉模板, 造成配色不一致
         $tb.Width = 84; $tb.Text = [string]$val
         $script:Ctl[$f.k] = $tb
+        Register-Preview $tb "int"
         New-RowContainer $f.t $tb
       }
       "text" {
@@ -1105,10 +1189,10 @@ function Build-SettingsUi() {
         $tb.Width = 118; $tb.Text = [string]$val
         $clr = New-Object System.Windows.Controls.Button
         $clr.Content = "清除"; $clr.Margin = New-Object System.Windows.Thickness(4, 0, 0, 0)
-        $clr.Add_Click({
+        $clr.Add_Click({ try {
           $script:Ctl["apiKey"].Text = ""
           $script:CfgTouched["clearApiKey"] = $true
-        })
+         } catch { }})
         $panel.Children.Add($tb) | Out-Null
         $panel.Children.Add($clr) | Out-Null
         $script:Ctl[$f.k] = $tb
@@ -1130,6 +1214,7 @@ function Build-SettingsUi() {
         $panel.Children.Add($sw) | Out-Null
         $panel.Children.Add($tb) | Out-Null
         $script:Ctl[$f.k] = $tb
+        Register-Preview $tb "color"
         New-RowContainer $f.t $panel
       }
       "file" {
@@ -1139,11 +1224,11 @@ function Build-SettingsUi() {
         $tb.Width = 104; $tb.Text = [string]$val
         $btn = New-Object System.Windows.Controls.Button
         $btn.Content = "浏览"; $btn.Margin = New-Object System.Windows.Thickness(4, 0, 0, 0)
-        $btn.Add_Click({
+        $btn.Add_Click({ try {
           $dlg = New-Object Microsoft.Win32.OpenFileDialog
           $dlg.Filter = "图片|*.png;*.jpg;*.jpeg;*.bmp;*.gif|所有文件|*.*"
           if ($dlg.ShowDialog() -eq $true) { $script:Ctl["overlay.backgroundImage"].Text = $dlg.FileName }
-        })
+         } catch { }})
         $panel.Children.Add($tb) | Out-Null
         $panel.Children.Add($btn) | Out-Null
         $script:Ctl[$f.k] = $tb
@@ -1166,14 +1251,24 @@ function Build-SettingsUi() {
         $lb.Width = 28; $lb.Margin = New-Object System.Windows.Thickness(6, 0, 0, 0)
         $lb.VerticalAlignment = "Center"
         $lb.Foreground = ConvertTo-Brush "#96A0B3" "#96A0B3"
-        $sl.Add_ValueChanged({ $lb.Text = "{0:0.##}" -f $sl.Value })
+        # 用 WPF 数据绑定同步数值标签, 不要用 Add_ValueChanged({...}) 注册闭包。
+        # 那种写法把事件处理器做成引用外层变量($lb/$sl)的 PowerShell 脚本块, 而 WPF
+        # 调度器是异步调用它的: 作用域解析不可靠, 一旦解析失败就抛未捕获异常, 结果是
+        # 整个进程被终止 —— 表现为"一拖滑块, 窗口连同进程一起消失"。
+        # 绑定由 WPF 自己求值, 没有脚本块、没有作用域问题。
+        $bind = New-Object System.Windows.Data.Binding("Value")
+        $bind.Source = $sl
+        $bind.StringFormat = "{0:0.##}"
+        $lb.SetBinding([System.Windows.Controls.TextBlock]::TextProperty, $bind) | Out-Null
         $panel.Children.Add($sl) | Out-Null
         $panel.Children.Add($lb) | Out-Null
         $script:Ctl[$f.k] = $sl
+        Register-Preview $sl "range"
         New-RowContainer $f.t $panel
       }
     }
   }
+  $script:Building = $false
 }
 
 function Read-SettingsPayload() {
@@ -1216,6 +1311,50 @@ function Read-SettingsPayload() {
   $payload["ui"] = $ui
   $payload["overlay"] = $ov
   return $payload
+}
+
+# 给控件挂"改动即预览"的回调。处理器里只调用具名函数(不引用建窗时的局部变量),
+# 并整段 try/catch —— 之前用闭包捕获局部变量的写法会让 WPF 调度器解析作用域失败
+# 而抛未捕获异常, 直接把进程带走。
+function Register-Preview($ctl, [string]$kind) {
+  try {
+    switch ($kind) {
+      "bool"  { $ctl.Add_Click({ try { Preview-Settings } catch { } }) }
+      "enum"  { $ctl.Add_SelectionChanged({ try { Preview-Settings } catch { } }) }
+      "range" { $ctl.Add_ValueChanged({ try { Preview-Settings } catch { } }) }
+      "int"   { $ctl.Add_LostFocus({ try { Preview-Settings } catch { } }) }
+      "color" { $ctl.Add_TextChanged({ try { Preview-Settings } catch { } }) }
+    }
+  } catch { }
+}
+
+# 实时预览: 把当前控件值合并进"内存里"的配置后重画, 不落盘(点"保存"才写文件)。
+# 这样拖滑块/切下拉/勾选项时能立刻看到效果, 而不是保存之后才变。
+function Preview-Settings() {
+  if ($script:Building) { return }
+  if (-not $script:Cfg -and -not $script:Ov) { return }
+  try {
+    $p = Read-SettingsPayload
+    if ($script:Cfg -and $p.ui) {
+      foreach ($k in $p.ui.Keys) { $script:Cfg.ui.$k = $p.ui[$k] }
+    }
+    if ($script:Ov -and $p.overlay) {
+      foreach ($k in $p.overlay.Keys) {
+        if ($k -eq "subtitle") {
+          if ($p.overlay.subtitle) {
+            foreach ($sk in $p.overlay.subtitle.Keys) { $script:Ov.subtitle.$sk = $p.overlay.subtitle[$sk] }
+          }
+        } else {
+          $script:Ov.$k = $p.overlay[$k]
+        }
+      }
+    }
+    Apply-Config
+    if ($script:SettingsHint) {
+      $script:SettingsHint.Foreground = ConvertTo-Brush "#96A0B3" "#96A0B3"
+      $script:SettingsHint.Text = "预览中(未保存)。点""保存""写入配置。"
+    }
+  } catch { }
 }
 
 function Save-Settings() {
@@ -1290,7 +1429,10 @@ function Apply-Config() {
   }
   $script:Root.CornerRadius = New-Object System.Windows.CornerRadius([double]$ov.cornerRadius)
   $script:Root.BorderBrush = ConvertTo-Brush ([string]$ov.accent) "#E0A34A"
-  $script:Edge = [string]$ov.edge
+  $edgeVal = [string]$ov.edge
+  if ($edgeVal -notin @("left", "right", "top", "bottom", "float")) { $edgeVal = "right" }
+  $script:Edge = $edgeVal
+  if ($edgeVal -eq "float") { Restore-FloatPosition }
   $script:AutoHide = [bool]$ov.autoHide
   $script:AwakeMs = [int]$ov.awakeMs
   $script:AwakeTimer.Interval = [TimeSpan]::FromMilliseconds([Math]::Max(500, $script:AwakeMs))
@@ -1298,6 +1440,8 @@ function Apply-Config() {
   Apply-SubtitleLayout
   $on = ([string]$ov.view -eq "subtitle")
   Show-SubtitleWindow $on
+  # 配置变了, 已出现的胶囊按新值原地重建(否则颜色/字号要等新消息才生效)
+  if ($on) { Rebuild-Subtitles }
 }
 
 # ============================================================ messaging
@@ -1367,7 +1511,7 @@ $script:PollTimer.Add_Tick({
 # Drag by the header; on release snap to the nearest screen edge and remember it.
 # Suppress the auto-collapse animation while dragging, otherwise the window
 # would slide out from under the cursor.
-$script:Header.Add_MouseLeftButtonDown({
+$script:Header.Add_MouseLeftButtonDown({ try {
   $script:Dragging = $true
   $script:AnimTimer.Stop()
   $script:Animating = $false
@@ -1375,26 +1519,26 @@ $script:Header.Add_MouseLeftButtonDown({
   try { $script:Window.DragMove(); $moved = $true } catch {}
   $script:Dragging = $false
   if ($moved -and $script:Ready) { Snap-ToNearestEdge }
-})
+ } catch { }})
 
-$script:Root.Add_MouseEnter({ $script:MouseIn = $true; Expand-Window })
-$script:Root.Add_MouseLeave({
+$script:Root.Add_MouseEnter({ try { $script:MouseIn = $true; Expand-Window  } catch { }})
+$script:Root.Add_MouseLeave({ try {
   $script:MouseIn = $false
   if ($script:Ready -and $script:AutoHide -and -not $script:InputFocused) { Collapse-Window }
-})
-$script:Input.Add_GotFocus({ $script:InputFocused = $true; Expand-Window })
-$script:Input.Add_LostFocus({ $script:InputFocused = $false })
+ } catch { }})
+$script:Input.Add_GotFocus({ try { $script:InputFocused = $true; Expand-Window  } catch { }})
+$script:Input.Add_LostFocus({ try { $script:InputFocused = $false  } catch { }})
 
 # Enter sends, Shift+Enter inserts a newline.
-$script:Input.Add_KeyDown({
+$script:Input.Add_KeyDown({ try {
   param($s, $e)
   if ($e.Key -ne "Return") { return }
   if (($e.KeyboardDevice.Modifiers -band [System.Windows.Input.ModifierKeys]::Shift) -ne 0) { return }
   $e.Handled = $true
   Send-Outgoing
-})
+ } catch { }})
 
-$script:SendBtn.Add_Click({ Send-Outgoing })
+$script:SendBtn.Add_Click({ try { Send-Outgoing  } catch { }})
 $script:CopyBtn.Add_Click({
   try {
     [System.Windows.Clipboard]::SetText([string]$script:OutText.Text)
@@ -1403,17 +1547,17 @@ $script:CopyBtn.Add_Click({
     Show-Hint "复制失败,请手动选中后 Ctrl+C" "warn"
   }
 })
-$script:CollapseBtn.Add_Click({ Collapse-Window })
+$script:CollapseBtn.Add_Click({ try { Collapse-Window  } catch { }})
 $script:CloseBtn.Add_Click({ try { $script:Window.Close() } catch {} })
 
-$script:PinBtn.Add_Click({
+$script:PinBtn.Add_Click({ try {
   $script:AutoHide = -not $script:AutoHide
   Save-Overlay @{ autoHide = $script:AutoHide }
   $script:PinBtn.Content = if ($script:AutoHide) { "固定" } else { "自动收起" }
   if ($script:AutoHide) { Collapse-Window } else { Expand-Window }
-})
+ } catch { }})
 
-$script:SettingsBtn.Add_Click({
+$script:SettingsBtn.Add_Click({ try {
   $showSettings = ($script:SettingsPage.Visibility -ne "Visible")
   if ($showSettings) {
     Build-SettingsUi
@@ -1426,15 +1570,15 @@ $script:SettingsBtn.Add_Click({
     $script:ChatPage.Visibility = "Visible"
   }
   Expand-Window
-})
+ } catch { }})
 
-$script:CloseSettingsBtn.Add_Click({
+$script:CloseSettingsBtn.Add_Click({ try {
   $script:SettingsPage.Visibility = "Collapsed"
   $script:ChatPage.Visibility = "Visible"
-})
+ } catch { }})
 # Drag-to-place lives in the settings page: it flips the layer into edit mode
 # (click-through temporarily off so the drag lands) and toggles back when done.
-$script:AdjustSubBtn.Add_Click({
+$script:AdjustSubBtn.Add_Click({ try {
   if ($script:SubEditMode) {
     Set-SubtitleEditMode $false
     $script:AdjustSubBtn.Content = "调整字幕位置(拖动)"
@@ -1453,58 +1597,58 @@ $script:AdjustSubBtn.Add_Click({
   Apply-SubtitleLayout
   Set-SubtitleEditMode $true
   $script:AdjustSubBtn.Content = "完成放置"
-})
+ } catch { }})
 
-$script:SaveCfgBtn.Add_Click({ Save-Settings })
-$script:ReloadCfgBtn.Add_Click({
+$script:SaveCfgBtn.Add_Click({ try { Save-Settings  } catch { }})
+$script:ReloadCfgBtn.Add_Click({ try {
   $script:CfgTouched = @{}
   Load-Config
   Apply-Config
   Build-SettingsUi
   $script:SettingsHint.Foreground = ConvertTo-Brush "#4AD07A" "#4AD07A"
   $script:SettingsHint.Text = "已从配置重新载入。"
-})
+ } catch { }})
 
-$script:StartTimer.Add_Tick({
+$script:StartTimer.Add_Tick({ try {
   $script:StartTimer.Stop()
   $script:Ready = $true
   if ($script:AutoHide -and -not $script:MouseIn -and -not $script:InputFocused) { Collapse-Window }
-})
+ } catch { }})
 
-$script:Window.Add_Deactivated({
+$script:Window.Add_Deactivated({ try {
   if ($script:Ready -and $script:AutoHide -and -not $script:MouseIn -and -not $script:InputFocused -and
       $script:SettingsPage.Visibility -ne "Visible") {
     Collapse-Window
   }
-})
+ } catch { }})
 
-$script:Window.Add_Closed({
+$script:Window.Add_Closed({ try {
   $script:PollTimer.Stop(); $script:AnimTimer.Stop(); $script:AwakeTimer.Stop()
   $script:EaseTimer.Stop(); $script:StartTimer.Stop()
   try { $script:DmWindow.Close() } catch {}
   try { $script:Mutex.ReleaseMutex() } catch {}
-})
+ } catch { }})
 
-$script:Window.Add_SourceInitialized({
+$script:Window.Add_SourceInitialized({ try {
   $p = Get-EdgeTarget $true
   $script:Window.Left = $p.L
   $script:Window.Top = [System.Windows.SystemParameters]::WorkArea.Top + 90
-})
+ } catch { }})
 
 # The caption layer must never eat game clicks - click-through by default.
-$script:DmWindow.Add_SourceInitialized({
+$script:DmWindow.Add_SourceInitialized({ try {
   Set-SubtitleClickThrough $true
-})
+ } catch { }})
 
 # Drag-to-place: only reachable while edit mode has click-through switched off,
 # otherwise the layer would swallow every click that happens to land on it.
-$script:DmFrame.Add_MouseLeftButtonDown({
+$script:DmFrame.Add_MouseLeftButtonDown({ try {
   if (-not $script:SubEditMode) { return }
   try { $script:DmWindow.DragMove() } catch {}
   Save-SubtitlePosition
-})
+ } catch { }})
 
-$script:Window.Add_ContentRendered({
+$script:Window.Add_ContentRendered({ try {
   Load-Config
   Apply-Config
   $script:EmptyText.Text = "等待游戏内聊天…`n`n需要先启动 Deadlock 并进入对局/大厅。"
@@ -1513,6 +1657,6 @@ $script:Window.Add_ContentRendered({
   $script:Window.Top = $p.T
   $script:PollTimer.Start()
   $script:StartTimer.Start()
-})
+ } catch { }})
 
 [void]$script:Window.ShowDialog()

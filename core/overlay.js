@@ -1,4 +1,4 @@
-// Babel Tower - 游戏外翻译悬浮窗(overlay)
+﻿// Babel Tower - 游戏外翻译悬浮窗(overlay)
 //
 // 背景:2026/10/01 的 Deadlock 更新移除了 Panorama 的全部 HTTP 能力
 // ($.AsyncWebRequest 调用即抛 "AsyncWebRequest has been removed",隐藏 HTML 面板

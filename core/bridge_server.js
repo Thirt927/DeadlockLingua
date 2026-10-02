@@ -1,4 +1,4 @@
-// Babel Tower - 本地翻译桥服务器
+﻿// Babel Tower - 本地翻译桥服务器
 //
 // 职责(只做翻译相关的事,不做通用代理):
 //   1. 为游戏内隐藏 HTML 面板提供桥页面(/bridge)
@@ -221,6 +221,17 @@ function openOverlayWindow(url) {
   openOverlayBrowser(url);
 }
 
+// 关闭悬浮窗(游戏退出时调用)。native 模式有进程句柄可以直接杀;
+// web 模式是外部浏览器窗口, 桥拿不到句柄, 无法可靠关闭, 这里只记录一条日志。
+function closeOverlayWindow() {
+  const ov = (configStore.load().overlay) || {};
+  if (ov.mode === "web") {
+    log("info", "web 模式下悬浮窗是外部浏览器窗口, 需手动关闭");
+    return;
+  }
+  killOverlayNative();
+}
+
 function checkOverlayGame() {
   const cfgO = configStore.load();
   const ov = cfgO.overlay || {};
@@ -238,8 +249,12 @@ function checkOverlayGame() {
           const url = "http://127.0.0.1:" + PORT + "/overlay";
           log("info", "检测到 " + gameExe + ",打开翻译悬浮窗: " + url);
           openOverlayWindow(url);
-        } else if (!running) {
+        } else if (!running && overlayGameSeen) {
+          // 游戏退出 -> 一并关闭悬浮窗。此前这里只把标志置回 false, 窗口会一直留在
+          // 桌面上(面板和字幕层都属同一进程, 一起关掉)。
           overlayGameSeen = false;
+          log("info", "检测到 " + gameExe + " 已退出,关闭翻译悬浮窗");
+          closeOverlayWindow();
         }
       }
       overlayWatchTimer = setTimeout(checkOverlayGame, OVERLAY_WATCH_INTERVAL_MS);
