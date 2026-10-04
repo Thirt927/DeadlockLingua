@@ -149,6 +149,7 @@
 
   var nodes = {};       // seq -> DOM 节点(原地更新,避免整列表重绘)
   var lastSeq = 0;      // 已见过的最大 seq
+  var session = null;   // 桥的会话标识:变了就说明桥重启/进新一局 -> 清屏
   var lastStatus = null;
   var hintTimer = null;
   var FADE_MS = 6000;   // how long the window stays fully opaque after new chat
@@ -251,6 +252,38 @@
     }
   }
 
+  // 清空列表(桥重启/进新一局时):否则上一局的聊天会残留,而且旧 seq 大于桥的新 seq 会让窗口卡住
+  function resetView() {
+    for (var k in nodes) {
+      var n = nodes[k];
+      if (n && n.parentNode) n.parentNode.removeChild(n);
+    }
+    nodes = {};
+    lastSeq = 0;
+    if (!emptyEl) {
+      emptyEl = document.createElement("div");
+      emptyEl.className = "empty";
+      emptyEl.innerHTML = "等待游戏内聊天…<br><br>需要先启动 Deadlock 并进入对局/大厅。";
+    }
+    if (!emptyEl.parentNode) listEl.appendChild(emptyEl);
+  }
+
+  function applyMessages(j) {
+    setStatus(true, j.provider || "");
+    var msgs = j.messages || [];
+    if (!msgs.length && typeof j.latest === "number" && j.latest > lastSeq) lastSeq = j.latest;
+    if (!msgs.length) return;
+    var stick = nearBottom();
+    var fresh = false;
+    for (var i = 0; i < msgs.length; i++) {
+      renderMsg(msgs[i]);
+      if (msgs[i].seq > lastSeq) { lastSeq = msgs[i].seq; fresh = true; }
+    }
+    pruneNodes();
+    if (stick) listEl.scrollTop = listEl.scrollHeight;
+    if (fresh) wake();   // only genuinely new chat should pop the window up
+  }
+
   function poll() {
     // 请求窗口:永远回看最近 40 条,这样后到的译文能原地补上(只取新增会漏掉翻译完成)
     var after = Math.max(0, lastSeq - 40);
@@ -258,19 +291,19 @@
       .then(function (r) { return r.json(); })
       .then(function (j) {
         if (!j || !j.ok) throw new Error("bad_response");
-        setStatus(true, j.provider || "");
-        var msgs = j.messages || [];
-        if (!msgs.length && typeof j.latest === "number" && j.latest > lastSeq) lastSeq = j.latest;
-        if (!msgs.length) return;
-        var stick = nearBottom();
-        var fresh = false;
-        for (var i = 0; i < msgs.length; i++) {
-          renderMsg(msgs[i]);
-          if (msgs[i].seq > lastSeq) { lastSeq = msgs[i].seq; fresh = true; }
+        var s = (j.session === undefined || j.session === null) ? "" : String(j.session);
+        var latest = (typeof j.latest === "number") ? j.latest : 0;
+        if (s !== session || latest < lastSeq) {
+          resetView();
+          session = s;
+          return fetch("/api/v1/overlay/messages?after=0", { cache: "no-store" })
+            .then(function (r) { return r.json(); })
+            .then(function (j2) {
+              if (!j2 || !j2.ok) throw new Error("bad_response");
+              applyMessages(j2);
+            });
         }
-        pruneNodes();
-        if (stick) listEl.scrollTop = listEl.scrollHeight;
-        if (fresh) wake();   // only genuinely new chat should pop the window up
+        applyMessages(j);
       })
       .catch(function () { setStatus(false); });
   }

@@ -127,8 +127,12 @@ const DEFAULTS = {
     force: false,
     timeoutMs: 15000,
   },
-  // 进程监视:Deadlock 退出时桥自动关闭(设为 false 或启动参数 --no-watch 可禁用)
-  watchGame: true,
+  // 进程监视:Deadlock 退出时是否连桥一起关闭。
+  // 默认 false = 桥常驻:桥只在开机自启时拉起一次,游戏关闭时仅关闭悬浮窗。
+  // (若设为 true,游戏一关桥就退出,而自启只在登录时执行一次——之后重开游戏桥不会
+  //  自动回来,这正是"关闭游戏后桥也关了、再开游戏有时不自动启动"的原因。)
+  // 悬浮窗的自动开关不受此项影响,由 overlay.autoOpen 控制。
+  watchGame: false,
   watchGameExe: "deadlock.exe",
   // 可选文件日志(相对项目根目录;留空则不落盘)
   logFile: "logs/bridge.log",

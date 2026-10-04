@@ -1,4 +1,4 @@
-﻿// Babel Tower - 本地翻译桥服务器
+// Babel Tower - 本地翻译桥服务器
 //
 // 职责(只做翻译相关的事,不做通用代理):
 //   1. 为游戏内隐藏 HTML 面板提供桥页面(/bridge)
@@ -24,7 +24,7 @@ const http = require("http");
 const path = require("path");
 const fs = require("fs");
 const os = require("os");
-const { execFile } = require("child_process");
+const { execFile, execFileSync } = require("child_process");
 
 const configStore = require("./config");
 const providerRegistry = require("./providers/registry");
@@ -135,6 +135,25 @@ function startGameWatch() {
   checkGameProcess();
 }
 
+// 同步判断游戏是否在运行。只在 overlay 首次接触 console.log(以及极少数的日志重写)
+// 时调用一次:用来决定"桥是中途重启(需回填本局聊天)还是游戏还没开(不回放旧日志)"。
+// 注意:execFileSync 会阻塞整个 Node 事件循环(悬浮窗轮询也一起卡),所以超时收紧到
+// 1.5s,避免系统繁忙/杀软拦截 tasklist 时桥"假死"数秒。这里仍保留同步实现是有意的:
+// 首轮 tail 必须当场知道结果,否则 prime 回填会漏(改成异步会丢"桥重启前的聊天")。
+function isGameRunningSync() {
+  const gameExe = String((activeConfig && activeConfig.watchGameExe) || "deadlock.exe");
+  try {
+    const out = execFileSync(
+      "tasklist",
+      ["/FI", "IMAGENAME eq " + gameExe, "/FO", "CSV", "/NH"],
+      { windowsHide: true, timeout: 1500, encoding: "utf8" }
+    );
+    return String(out || "").toLowerCase().indexOf(gameExe.toLowerCase()) !== -1;
+  } catch (e) {
+    return false;
+  }
+}
+
 // ---------- 悬浮窗:检测到游戏启动时自动拉起窗口 ----------
 // 与 watchGame 无关(那个开关管的是"游戏退出时关桥"),由 config.overlay.autoOpen 控制。
 const OVERLAY_WATCH_INTERVAL_MS = 5000;
@@ -166,13 +185,26 @@ const POWERSHELL_EXE = process.env.SystemRoot
 // 上一次拉的窗口若还活着,先关掉,避免桥重启后堆出多个悬浮窗。
 // 注意命令里用字符串拼接而不是直接写 "overlay_window.ps1",否则这条 -Command 自己
 // 的 CommandLine 也会命中过滤条件,把自己一起杀掉。
-function killOverlayNative() {
+function killOverlayNative(onDone) {
   const needle = "'*overlay_window" + ".ps1*'";
   const cmd =
     "Get-CimInstance Win32_Process -Filter \"Name='powershell.exe'\" | " +
     "Where-Object { $_.CommandLine -like " + needle + " } | " +
     "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }";
-  execFile(POWERSHELL_EXE, ["-NoProfile", "-Command", cmd], { windowsHide: true }, function () {});
+  execFile(POWERSHELL_EXE, ["-NoProfile", "-Command", cmd], { windowsHide: true }, function () {
+    if (typeof onDone === "function") onDone();
+  });
+}
+
+function launchOverlayNative() {
+  execFile(
+    POWERSHELL_EXE,
+    ["-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", OVERLAY_NATIVE_SCRIPT, "-Silent"],
+    { windowsHide: true },
+    function (err) {
+      if (err) log("warn", "悬浮窗(native)退出: " + ((err && err.message) || String(err)));
+    }
+  );
 }
 
 function openOverlayNative() {
@@ -181,17 +213,11 @@ function openOverlayNative() {
   } catch (e) {
     return false;
   }
-  killOverlayNative();
-  setTimeout(function () {
-    execFile(
-      POWERSHELL_EXE,
-      ["-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", OVERLAY_NATIVE_SCRIPT],
-      { windowsHide: true },
-      function (err) {
-        if (err) log("warn", "悬浮窗(native)退出: " + ((err && err.message) || String(err)));
-      }
-    );
-  }, 600);
+  // 必须等旧窗口真正被关闭(互斥锁释放)后再启动新窗口。此前是"发完 kill 命令等 600ms 就启动",
+  // 旧进程还活着时新进程会因拿不到 Named Mutex 直接退出——表现为"重新打开游戏后悬浮窗有时不出来"。
+  killOverlayNative(function () {
+    setTimeout(launchOverlayNative, 250);
+  });
   return true;
 }
 
@@ -224,6 +250,9 @@ function openOverlayWindow(url) {
 // 关闭悬浮窗(游戏退出时调用)。native 模式有进程句柄可以直接杀;
 // web 模式是外部浏览器窗口, 桥拿不到句柄, 无法可靠关闭, 这里只记录一条日志。
 function closeOverlayWindow() {
+  // 游戏退出 = 本局结束:清空聊天缓冲(即使悬浮窗没能被关掉, 也会因会话标识变化而清屏),
+  // 否则下次打开游戏时会把上一局的聊天当成当前聊天显示出来。
+  overlay.clearMessages();
   const ov = (configStore.load().overlay) || {};
   if (ov.mode === "web") {
     log("info", "web 模式下悬浮窗是外部浏览器窗口, 需手动关闭");
@@ -903,6 +932,8 @@ async function handleApi(req, res, url, bodyObj) {
       ok: true,
       messages: overlay.list(after),
       latest: overlay.latestSeq(),
+      // 会话标识:桥重启/进新一局/游戏退出都会变,悬浮窗据此清屏,避免旧聊天残留
+      session: overlay.sessionId(),
       target: (cfgO.defaults && cfgO.defaults.targetLanguage) || "zh-Hans",
       outgoingTarget: (cfgO.ui && cfgO.ui.outgoingTarget) || "en",
       provider: cfgO.provider,
@@ -1059,6 +1090,8 @@ steamIdEnrich.startSteamIdEnrichment(cfg, log);
 overlay.start({
   log: log,
   getConfig: () => configStore.load(),
+  // 桥是中途启动还是游戏根本没开:决定要不要回填本局已有聊天
+  isGameRunning: isGameRunningSync,
   translate: async (text) => {
     const cfgT = configStore.load();
     const target = (cfgT.defaults && cfgT.defaults.targetLanguage) || "zh-Hans";

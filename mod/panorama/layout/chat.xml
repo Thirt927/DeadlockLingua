@@ -69,9 +69,6 @@
 		<Panel id="ChatControls">
 			<Label id="ChatTargetLabel" text="#citadel_chat_placeholder" />
 			<TextEntry id="ChatInput" oninputsubmit="LCTOnChatSubmit();" onblur="CitadelChatInputBlur();" placeholder="" maxchars="1024" />
-			<Button id="LCTSettingsButton" class="LCTSettingsButton" onactivate="LCTToggleSettings();">
-				<Label text="译" />
-			</Button>
 		</Panel>
 		<!-- Babel Tower 隐藏 HTML 桥面板(必须用 <HTML> 标签在 XML 声明,运行时 CreatePanel 不生效) -->
 		<HTML id="LCTBridgePanel" class="LCTBridgePanel" />

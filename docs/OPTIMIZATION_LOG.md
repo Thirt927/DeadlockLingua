@@ -1146,3 +1146,110 @@
 - **验证方式**: `Parser::ParseFile` 语法通过; 抽出两个窗口的 XAML 单独 `XamlReader::Parse` **通过**(证明新增 `BasedOn` 写法可解析); `node --check core/config.js` 通过; `overlay_window.ps1` 前三字节复查为 `EF BB BF`(BOM 未丢)。
 - **仍需用户测试**: ①拖"胶囊不透明度"/改"译文字号"**当场**看到已显示胶囊变化(无需保存); ②把面板拖到屏幕中间松手 → **停住不贴边**; 拖到边附近松手 → 吸附; ③关闭再打开悬浮窗, 停在原位置(不再弹回边); ④点"保存"后效果与预览一致; ⑤"设置"按钮为黄铜描边样式, 不再是系统灰按钮。
 - **已知限制**: ①实时预览只改**内存配置**, 不关闭设置页就退出的话本次预览不落盘(下次启动回到磁盘值); ②`overlay.fontSize`(面板字号)仍只影响继承, 聊天列表各行是显式字号, 故该项视觉变化有限(本轮未动); ③`edge="float"` 时贴边自动收起等于关闭(浮动窗口无法收成细条)。
+
+## 2026-10-05 第五十六轮:修"残留聊天/桥不自启/重启桥前聊天不译"三处状态 bug;新增最小化到托盘
+
+- **背景**: 用户反馈 4 件事 —— ①关游戏再开, 悬浮窗**残留上一局聊天**; ②关一次游戏后桥也退出了, 再次打开游戏**有时悬浮窗不自动出来**; ③**重启桥之后, 桥开启前的聊天不会被翻译**; ④窗口需要一个**最小化**功能, 给不想贴边的人用(贴边收起即使只有 8px 仍在画面上留痕)。
+- **① 残留聊天(真 bug, 双端)**: 根因有两层 —— (a) 桥端在"console.log 被游戏重写(进新一局)"时只 `clearDedup()`, **不清环形缓冲 `ring`**, 上一局消息仍在; (b) 桥进程重启后 `seq` 归零, 而悬浮窗的轮询 `after` 基于**旧的 `LastSeq`**, 新序号永远追不上旧值 → 窗口**永久卡住不更新**(表现为"残留旧聊天")。
+  - 修法: 引入**会话标识 `session`** —— 桥进程启动、日志重写、游戏退出清空三处都自增; `/api/v1/overlay/messages` 响应新增 `session` 字段; 悬浮窗(native + web 双版)轮询到 **`session` 变化**或 **`latest < LastSeq`** 时执行 `Reset-ChatView`/`resetView()` 清屏, 并以 `after=0` 重新拉取。新增 `beginNewSession()`(清 ring/queue/dedup)与 `clearMessages()`。
+- **② 桥不自启 / 悬浮窗有时不出来(真 bug, 两个根因)**: (a) `DEFAULTS.watchGame=true` 时桥**随游戏退出**, 而开机自启只在登录时执行一次 → 重开游戏时**没人把桥拉回来**。修法: `watchGame` 默认改为 **`false`**(桥常驻, 由悬浮窗监视独立负责开关窗口)。(b) `openOverlayNative()` 原先是"发完 kill 命令等 600ms 就启动新窗口", 旧进程仍持有 `Local\DeadlockLinguaOverlay` 互斥锁 → 新进程 `WaitOne(0)` 失败直接 `exit 0`, 表现为"重开游戏后悬浮窗有时不出来"。修法: `killOverlayNative(onDone)` 增加回调, **等旧窗口真正关闭后**再 `launchOverlayNative()`。
+- **③ 重启桥后先前聊天不译(真 bug)**: 根因: 悬浮窗首次接触 `console.log` 时**一律 seek 到文件末尾**, 于是"桥开启前"已写入本局的聊天全部被跳过。
+  - 修法: 新增 `primeBackfill(file,size)` —— 若**游戏正在运行**(新增 `isGameRunningSync()` 同步探测 `deadlock.exe`), 则从文件尾回读最多 **4MB**、过滤 `[LCT-CHAT]`、**回填最近 60 条**(`ingest(l,{noLog:true})` → 不重复落盘聊天日志); 若游戏**不在运行**(那份日志是上一局遗留的), 才 seek 到末尾, 避免登录自启时翻译整局旧历史。
+- **④ 最小化到托盘(新能力)**: Header 新增 `MinBtn`「最小化」; 新增系统托盘 `System.Windows.Forms.NotifyIcon`(右键菜单「显示面板/最小化到托盘/退出」, 双击恢复)。**给不想贴边留痕的人用** —— `Window.Hide()` 整个藏起来, 不留那 8px 细条。
+  - 附带加固: 托盘创建失败时, 最小化**退回任务栏最小化**(`ShowInTaskbar=true` + `WindowState=Minimized`), 可点任务栏恢复 —— 原注释误以为"重开脚本靠互斥锁会复用窗口", 实际 `WaitOne(0)` 失败即 `exit 0`, **不会**恢复被隐藏的窗口, 已改为真实可恢复的降级路径。
+- **改动文件**: `core/overlay.js`(session/beginNewSession/primeBackfill/clearMessages/sessionId + deps.isGameRunning); `core/bridge_server.js`(`isGameRunningSync`、kill→launch 回调链、`closeOverlayWindow` 里 `clearMessages`、`/messages` 加 `session`); `core/config.js`(`watchGame` 默认 false); `scripts/overlay_window.ps1`(最小化到托盘 + 会话感知轮询清屏 + 托盘降级); `core/overlay_page.html`(web 版同步会话清屏); `scripts/overlay_test.js`(更新断言 + 新增桥重启回填用例)。
+- **验证方式**: `node scripts/overlay_test.js` → **PASS 13 / FAIL 0**(新增阶段 5: `gameRunning=true` + `overlay.reset()` 模拟桥重启 → 断言回填 2 条聊天且进入翻译队列; 阶段 3 断言新一局清空缓冲 + 会话标识变化; 阶段 4 期望由 `length===3` 改为 `===1`, 与新清屏行为一致)。`node --check` 对 4 个 js 文件全部通过。`overlay_window.ps1` 经 `Parser::ParseFile` 语法通过, 且前三字节复查为 `EF BB BF`(BOM 未丢)。
+- **仍需用户测试**: ①关游戏再开 → 悬浮窗**不残留**上一局聊天; ②关游戏后桥**常驻**(任务管理器里 node 仍在), 重开游戏 5 秒内**自动出窗口**; ③先开游戏打两句、再重启桥 → **桥开启前的聊天被翻译出来**; ④点「最小化」→ 窗口进托盘(不留细条), 双击托盘图标或右键「显示面板」恢复, 右键「退出」正常退出。
+- **已知限制**: ①web 回退模式关游戏仍不自动关窗(桥拿不到浏览器进程句柄); ②最小化只隐藏**面板窗口**, 字幕浮层是独立窗口、仍留在屏幕上(如需一起隐藏要另加); ③回填只取最近 **60 条**(避免一次把整局历史灌进翻译队列触发 API 洪峰); ④托盘图标为通用系统图标(未做品牌图标)。
+
+## 2026-10-05 第五十七轮:最小化后加全局热键唤起;排查"弹幕消失"为误报并加防御性保持
+
+- **背景**: 用户反馈 —— ①最小化后**无法快捷地重新唤起窗口**; ②最小化后**弹幕(字幕浮层)也会消失**。
+- **排查(实测, 不靠猜)**: 用"注入式测试副本"(把原脚本复制到 temp 并追加一个 3 秒后自跑的 DispatcherTimer)实跑真实窗口, 结论:
+  - `Minimize-ToTray` 后 `Window.IsVisible=False` 但 **`DmWindow.IsVisible=True`** —— **字幕浮层并未被代码隐藏**, 它是独立顶层窗口, 不随面板 `Hide()` 消失(也确认二者之间**没有** Owner 关系)。
+  - 系统托盘 **创建成功**(`Tray=非空`, `Visible=True`), 说明 ① **不是**"托盘没建出来", 而是"恢复手段不够快捷/图标不显眼"。
+  - 故 ② 的成因**不是代码隐藏字幕**, 而是①的连锁后果(面板唤不回来 → 用户以为弹幕也没了)或胶囊按 `subtitle.lifeMs` 自然过期(无新消息)。
+- **修法**
+  - 新增**全局热键 `Ctrl+Alt+L`**(`RegisterHotKey` + `HwndSource.AddHook` 处理 `WM_HOTKEY`), 在**任意时刻**(面板已最小化 / 游戏在前台)切换面板显示; 关闭窗口时 `UnregisterHotKey`。
+  - 托盘图标**左键单击**也恢复(原来只有双击 + 右键菜单), 降低"唤不回来"的几率。
+  - 最小化后**显式保持字幕浮层可见并置顶**(防御性: 若它在别的路径被隐藏则兜底恢复, 否则仅重申 Topmost), 确保"最小化面板"不会连带丢掉弹幕。
+  - 「最小化」按钮 ToolTip 与托盘气泡提示补上热键说明。
+- **改动文件**: `scripts/overlay_window.ps1`(全局热键 + 托盘左键 + 字幕保持 + 提示)。
+- **验证方式**: `Parser::ParseFile` 语法通过、前三字节 `EF BB BF`; 注入测试实测 **`HotkeyOk=True`**、`HwndSrc` 就绪、`Toggle-PanelWindow` 隐藏/恢复正确且 `Dm.Vis` 始终为 `True`; 启动真实窗口 6 秒**无 `lct-overlay-error.log`**。
+- **仍需用户测试**: ①最小化后按 **Ctrl+Alt+L** 能否立即恢复面板(游戏内也试一次); ②托盘图标**左键单击 / 双击 / 右键菜单**三种恢复方式; ③最小化后**弹幕(字幕)是否仍在**(若不在了, 请描述当时是否刚好一段时间没人说话 —— 那属于 `lifeMs` 自然过期)。
+- **已知限制**: ①`Ctrl+Alt+L` 为**固定**热键, 未做成可配置(若与你的其它软件冲突请告知, 可换键); ②热键依赖 `RegisterHotKey`, 若被其它程序占用则注册失败(`HotkeyOk=False`, 静默降级, 托盘仍可用); ③托盘图标仍是通用系统图标。
+
+## 2026-10-05 第五十八轮:修"热键/托盘一用就把悬浮窗进程带崩"——ShowDialog 主循环 + HwndSource 钩子 ref bool 两个真根因
+
+- **背景**: 用户反馈 —— ①快捷键 `Ctrl+Alt+L` 无效; ②在系统托盘里也**看不到**本程序的图标。(上一轮刚加的热键 + 托盘, 用户实测等于没生效。)
+- **排查(实测, 逐层插桩 + 事件日志, 不靠猜)**: 向 `%TEMP%\lct-overlay-diag.log` 打点、并合成 `keybd_event` 触发 `Ctrl+Alt+L`, 复现到**稳定结论**:
+  - 单独按热键(面板可见 → `Minimize-ToTray`)后, 进程**直接消失**; 进程数从 1 变 0, 既没托盘也没热键 —— 这才是用户看到的"快捷键无效、看不到托盘"的真因(代码根本没跑起来, 不是热键/托盘本身没写对)。
+  - 逐层加诊断后定位到**两个独立的致命 bug**, 都在"用 PowerShell + WPF 搭常驻窗口"的老坑上:
+  - **① `ShowDialog()` 不能当主循环(致命)**: 脚本末尾用 `$script:Window.ShowDialog()` 撑住进程。实测打点显示 `Minimize-ToTray` 里一执行 `$script:Window.Hide()`, 紧接着 `ShowDialog()` **立即返回**, 脚本跑到文件末尾 → PowerShell 进程正常退出(无任何崩溃事件, 所以之前误判成"只是没恢复窗口")。→ 隐藏窗口 = 退出程序。
+  - **② PowerShell 脚本块不能当 `HwndSource` 钩子(致命)**: 原热键用 `$script:HwndSrc.AddHook({ param($hwnd,$msg,$wParam,$lParam,$handled) ... $handled.Value = $true })`。`HwndSourceHook` 第 5 个参数是 `ref bool handled`, PowerShell 把它当**普通参数**绑定, 于是 `$handled` 拿到的是别的语义, 执行 `$handled.Value = $true` 抛 `PSInvalidCastException: 无法将值"True"转换为类型"System.IntPtr"`。该异常发生在**原生回调**里(栈: `HwndSource.PublicHooksFilterMessage` → `CallSite.Target` → `ConvertIConvertible`), 脚本块内的 `try/catch` **拦不住**, 由 `Dispatcher.add_UnhandledException` 才捕获到 → 进程终止。事件日志里历史上还有两条同源崩溃(`.NET Runtime 1026` + `Application Error 1000`, `PSInvalidOperationException` at `ScriptBlock.GetContextFromTLS`)。
+- **修法**:
+  - **主循环**: 把 `[void]$script:Window.ShowDialog()` 改为 `$script:Window.Show()` + `[System.Windows.Threading.Dispatcher]::Run()`; 窗口被隐藏不再结束程序。窗口**真正关闭**时(Closed 处理器)追加 `Dispatcher.CurrentDispatcher.InvokeShutdown()`, 让 `Run()` 返回、进程干净退出并释放互斥锁。
+  - **热键**: 彻底不让 PowerShell 脚本块进原生回调。新增 C# 类型 `LCT.HotkeyBridge`(`Add-Type -TypeDefinition`, 引用 `PresentationCore`/`WindowsBase`): 由 **C# 的 `HwndSourceHook` 委托**接 `WM_HOTKEY`, 只置一个 `static bool Pending` 标志; PowerShell 侧用一个 **150ms `DispatcherTimer`** 轮询 `Pending`, 命中才调用 `Toggle-PanelWindow`。原生回调里不再有任何 PowerShell 代理解析, 从根上避开 `ref bool` 绑定问题。
+  - `Register-ToggleHotkey`/`Unregister-ToggleHotkey` 改为包 `HotkeyBridge.Register/Unregister`, 并管理轮询定时器。
+- **改动文件**: `scripts/overlay_window.ps1`(主循环改 Dispatcher.Run + Closed 里 InvokeShutdown; 热键改 C# 桥 + 轮询; 移除全部临时诊断点)。
+- **验证方式**(全部实测): ① 复现旧行为: 按热键 → 进程死亡(diag 止于 `hide-after`), 事件日志证据见上; ② 修复后连续 **隐藏→显示→隐藏→显示** 四次热键, 进程**始终存活**、`tray=True hotkeyOk=True`、互斥锁持有; ③ 向面板窗发 `WM_CLOSE` → 进程**干净退出**且互斥锁释放; ④ `Parser::ParseFile` 语法通过、`overlay_window.ps1` 前三字节复查 `EF BB BF`(BOM 未丢)。
+- **仍需用户测试**: ①打开悬浮窗后按 `Ctrl+Alt+L` 应能隐藏/显示, 且**托盘图标与热键继续有效**(不再一点就崩); ②托盘图标在 Win11 默认收进 `^` 溢出区, 点任务栏右下角 `^` 找到 `DeadlockLingua`(通用图标)可拖出固定; ③关闭窗口(右上角 ×)能正常退出、托盘图标消失。
+- **附**: 同一轮发现 `ShowOverlay.bat` 存在两个启动期问题并已修 —— (a) **不杀旧实例**: 旧实例持有单实例互斥锁时, 新启动的窗体会 `WaitOne(0)` 失败静默 `exit 0`(表现为"双击没反应"); 现改为启动前用 CIM 匹配命令行(`overlay_window\.ps1`, 排除 `$PID` 自身)先清理旧实例。(b) **行尾是纯 LF**: cmd 批处理遇 LF 会错行解析(实测报 `'nul' 不是内部或外部命令`、`'w.ps1' ...`), 已统一为 **CRLF**(UTF-8 无 BOM), 注释改英文 ASCII 以规避 `rem` 行内特殊字符(跨行中文引号)的解析问题。
+- **已知限制**: ①热键轮询间隔 150ms, 理论上有最多 0.15s 延迟(无感); ②`Ctrl+Alt+L` 仍为固定键, 冲突可改 `HotkeyBridge._id` 与 VK; ③托盘图标仍是通用系统图标。
+
+---
+
+## 2026-10-05 第五十九轮:按优先级修复多角度审查发现的 8 项(多屏错位 / 桥阻塞 / 托盘可发现性 / 单实例静默 / 错误不可见 / 吞消息)
+
+- **背景**: 上一轮修完热键崩溃后, 对悬浮窗、桥、游戏侧脚本做了一轮功能性与多角度审查, 发现若干问题。用户要求"按优先级顺序修复", 本轮处理前 8 项(第 9 项有意保留, 见文末)。
+- **改动(按优先级)**:
+  1. **多显示器错位(真实缺陷)**: 窗口贴边吸附、字幕比例定位、float 复位原先把 `[System.Windows.SystemParameters]::WorkArea` 当工作区, 那**永远是主屏**的工作区 —— 拖到副屏后会跑到主屏或夹在错误边界。新增 `Get-ActiveWorkArea`(WinForms `Screen.FromHandle` 取窗口所在屏 + 用 `PresentationSource.CompositionTarget.TransformToDevice.M11` 把设备像素换算回 WPF 的 DIP 坐标系), 5 处调用点全部替换, 并保留 `SystemParameters.WorkArea` 作降级回退。
+  2. **桥为一次检测阻塞事件循环(收紧)**: `isGameRunningSync` 的 `execFileSync("tasklist")` 超时 **4000ms → 1500ms**。保留同步实现是**有意的** —— 首轮 tail 必须当场知道"游戏是否在运行"才能正确决定 prime 回填, 改成异步会丢掉"桥重启前的聊天"(即上一轮刚修好的功能), 所以只收紧最坏情况的假死时长, 不重构该路径。
+  3. **托盘图标可发现性**: 原来的 `SystemIcons.Application` 是系统通用图标, 在 Win11 任务栏 `^` 溢出区里毫无辨识度(用户原话"看不到托盘")。新增 `New-TrayIcon`: 用 `System.Drawing` 按设计令牌(深底 `#131920` + 氧化黄铜 `#C9A44E`)现画一个 32×32 的 "L" 标, 转成 `Icon`, 不引入额外 .ico 资源; 失败时回退系统图标。
+  4. **热键注册失败可见**: 热键被其他程序占用时原来只写 diag 日志, 用户会一直以为"快捷键无效"。现在启动气泡会明确提示, 并把 `hotkeyOk` 一起写进 diag。
+  5. **单实例冲突不再静默**: 新增 `-Silent` 开关。手动运行(`ShowOverlay.bat` / 直接跑 `.ps1`)遇到已有实例时弹 MessageBox 提示"已在运行, 用托盘或 Ctrl+Alt+L 唤起"; 桥自动拉起窗口时传 `-Silent`, 静默退出, **不在游戏画面上弹窗打断**。
+  6. **启动可发现性气泡(每次进程一次)**: 就绪后弹一次托盘气泡 —— 热键正常时说明"图标在任务栏 ^ 溢出区可拖出固定 + Ctrl+Alt+L 切换"; 热键失败时改用警告文案引导走托盘恢复。这一条同时覆盖第 3、4 项的用户感知。
+  7. **错误不再不可见**: 桥离线时把最后一次轮询异常摘要挂到状态文字的 `ToolTip`(鼠标悬停可见, 含 `%TEMP%\lct-overlay-error.log` 路径), 不再只有"桥离线"四个字。
+  8. **去重窗口过长会吞消息**: `overlay.js` 的 `DEDUP_WINDOW_MS` **10 分钟 → 2 分钟**。跨面板副本(聊天行 + 顶栏气泡)几乎同时出现, 2 分钟足够覆盖; 原来的 10 分钟会把同一人重复说的同一句话(两次 "gg" / "push" / "1")当成副本吞掉第二条。
+- **改动文件**: `scripts/overlay_window.ps1`(Get-ActiveWorkArea + 5 处替换; `-Silent` + 互斥冲突提示; New-TrayIcon; 启动气泡; Set-Status tooltip; 轮询 catch 记录 LastErrorDetail)、`core/overlay.js`(DEDUP_WINDOW_MS)、`core/bridge_server.js`(isGameRunningSync 超时 1500ms; 自动拉起窗口追加 `-Silent`)。
+- **验证方式**(全部实测): ① `Parser::ParseFile` 语法 OK、前三字节复查 `EF BB BF`(BOM 未丢); ② `node --check` 两个 js 均 exit=0; ③ `overlay_test.js` **PASS 13 / FAIL 0**; ④ 重启新实例: `pid=30716 init tray=True hotkeyOk=True` → `ready`(说明 New-TrayIcon 与 Get-ActiveWorkArea 在 SourceInitialized/ContentRendered 均未报错), 合成 `Ctrl+Alt+L` 切换两次后进程**始终存活**, `%TEMP%\lct-overlay-error.log` 无新增。
+- **仍需用户测试**: ① 若有多显示器, 把窗口拖到副屏后贴边/字幕定位是否正确; ② 托盘图标是否已变成黄铜 "L" 标、能否从 `^` 溢出区拖出固定; ③ 启动气泡的文案是否符合预期(每次开窗一次)。
+- **未做(有意保留)**: ⑨ 把桥的 matchId 扫描与 overlay 的聊天 tail 合并成单一 tailer —— 两者共用同一份 `console.log`, 合并能省一半 I/O 且消除两套 offset/fingerprint 状态不一致的风险, 但会动到 matchId/玩家身份这条**已稳定**的管线, 风险明显高于收益, 建议单独一轮谨慎处理; 另外"每次轮询新建 `WebClient`"、"`Remove-OldNodes` 每 tick 排序"等微优化量级可忽略, 暂不动。
+
+## 2026-10-05 第六十轮:清理游戏内设置面板的残留死代码("译"按钮 + 面板样式/脚本)
+
+- **背景**: 用户注意到聊天输入框右侧的"译"设置按钮在游戏里**从未出现过**, 追问它到底在哪。排查发现第五十三轮删除游戏内设置面板时**漏删了按钮本身及其配套的样式/脚本**, 留下一批"点了也没反应"的死代码。
+- **根因(第五十三轮清理不彻底)**:
+  - `chat.xml` / `hudchat.xml` 里的 `LCTSettingsButton`(内嵌 `<Label text="译" />`)未删 —— 面板删了, 但**触发面板的按钮**还在。
+  - `lingua_chat.css` 里 `.LCTSettingsButton` / `.LCTSettingsPanel` / `.LCTSettingsHeader` / `.LCTSettingsRow` / `.LCTInput` / `.LCTBtn` / `.LCTSelect` / `.LCTSelectMenu` / `.LCTStatusBar` / `.LCTBridgeStatus` 等约 280 行面板样式未删。
+  - `lingua_chat.js` 里 `openSettingsPanel` / `closeSettingsPanel` / `LCTToggleSettings` / `collectPanelConfig` / `LCTSave` / `LCTTest` / `syncPanelFromConfig` / `setFieldText` / `setSelectText` / `setToggleText` / `syncProviderRows` / `LCTOnToggle` / `LCTCycle` / `LCTToggleMenu` / `LCTPickLang` / `LCTPickProvider` / `LCTPickOption` / `fieldValue` / `updateKeyStateLabel` / `markUiTouched` 等约 480 行面板函数未删, 以及 `PROVIDER_OPTIONS` / `LANGUAGE_OPTIONS` / `DISPLAY_MODES` / `OUTGOING_MODES` 四个只为面板服务的选项常量与 10 个 `exportGlobal` 导出。
+  - 因 `openSettingsPanel()` 内 `findChild(root,"LCTSettingsPanel")` **对不存在的面板判空返回**, 按钮点击**静默无操作** —— 这正是用户"从没见过按钮、即便见到也没用"的解释(按钮存在与否取决于 VPK 里 `chat.vxml_c` 的版本)。
+- **改动文件**
+  - `mod/panorama/layout/chat.xml`、`hudchat.xml`: 各删 3 行 `LCTSettingsButton` 按钮(保留脚本/样式 include、`LCTRowAccount`/`LCTRowHero` 采集标签、`LCTBridgePanel`、`LCTOnChatSubmit` 提交钩子)。
+  - `mod/panorama/styles/lingua_chat.css`: 删除全部设置面板样式(283 行, 422→129 行), 保留桥面板隐藏样式与译文气泡样式。
+  - `mod/panorama/scripts/lingua_chat.js`: 删除设置面板 UI 函数、4 个选项常量、10 个 `exportGlobal`(5914→5336 行); `targetLanguage()` / `resolveOutgoingTarget()` 去掉对已删 `fieldValue()` 的引用 —— 游戏内面板移除后自定义语言只剩配置来源, `custom` 回退为默认值(`zh-Hans` / `en`)。
+- **原因/效果**: 消除"点了没反应"的死按钮与全部不可达代码; **功能面零变化** —— 保留启动时的桥配置同步(`syncUiFromBridge` / `applyBridgeUiConfig` / `saveUiConfig`)、翻译队列、昵称/英雄/SteamID 采集等所有既有逻辑。
+- **⚠️ 附带修复(本轮踩的坑): 工具链又一次静默剥掉了 BOM / 改了行尾**
+  - 改动后 `git diff --numstat` 显示 4 个文件**首行都改动**(`@@ -1 +1 @@`), 经 `git cat-file -p HEAD:<file>` 对比确认: 原文件(`chat.xml` / `hudchat.xml` / `lingua_chat.js` / `lingua_chat.css`)**都有 UTF-8 BOM**, 而编辑后全部丢失; `lingua_chat.css` 的行尾还从 CRLF 变成了 LF。
+  - 这正是 `AGENTS.md` 第 7 节与第五十四轮反复警告的坑:**项目文件约定 CRLF + BOM, 但编辑器/脚本工具会静默剥掉**。
+  - 修法: 4 个文件统一用 `[System.IO.File]::ReadAllText` + `WriteAllText(..., UTF8Encoding($true))` 重写(先把 `\r\n`→`\n` 再 `\n`→`\r\n` 归一化行尾), 复查全部为 `EF BB BF` 且 CRLF 计数正常; 重写后 `git diff --numstat` 不再出现首行改动。
+- **验证方式**: ① `node --check mod/panorama/scripts/lingua_chat.js` 通过; ② `git diff --numstat -- mod/panorama` 干净: `chat.xml 0/3`、`hudchat.xml 0/3`、`lingua_chat.js 6/479`、`lingua_chat.css 1/283`(删除全部落在设置面板区域, 无意外改动); ③ `scripts/build.ps1` 构建 7 个文件全部 `ok`(resourcecompiler 实际解析通过, 证明 XML/CSS 结构未破坏); ④ 已重命名为 `dist/pak22_dir.vpk` 并部署到 `E:\Steam\...\citadel\addons`(259583 字节, 2026/10/5 02:24)。
+- **仍需用户测试**: 重启 Deadlock → ① 聊天输入框右侧**不再有"译"按钮**(预期); ② 聊天翻译 / 聊天日志 / 昵称·英雄·SteamID 采集等**既有功能无回归**。
+- **已知限制**: 游戏内自此**没有任何设置入口**(与第五十三轮结论一致), 设置只能改悬浮窗或 `config/config.json`; 本轮的 BOM/CRLF 修复已覆盖本次改动的 4 个文件, 但工具链**仍存在静默剥 BOM 的风险**, 后续每次改完带中文的项目文件都应复查前三字节是否为 `EF BB BF`。
+
+## 2026-10-05 第六十一轮:UI 图标审查后的改进(关闭按钮一致性 / 托盘图标高分辨率 / 中文色牌取两字)
+
+- **背景**: 用户要求审查项目 UI 图标并给出提升空间。审查结论:项目在**零 emoji 当图标、设计令牌统一、状态有文字兜底**上做得很好; 可提升点集中在"一致性"(关闭按钮的 Unicode `✕` 与文字按钮割裂)、托盘图标的光栅清晰度、以及中文昵称 monogram 的碰撞率。
+- **关键判断(先查依赖再动手)**: 头部 `PinBtn` 的文字是**动态切换**的(`固定` ⇄ `自动收起`, 见 `Apply-Config` 与 `Add_Click` 两处), 说明头部按钮本质是**文字驱动**; 强行改成图标会丢失"固定/自动收起"的状态语义, 也与窗口"文字承载信息"的设计哲学冲突。**故不引入图标, 只按"文字一致性"处理关闭按钮。**
+- **改动文件**: `scripts/overlay_window.ps1`
+  1. **关闭按钮 `✕`(U+2715)→ 文字"关闭"**: 头部 5 个按钮(设置/固定/收起/最小化)本全是文字, 唯一用 `&#x2715;` 的关闭按钮受字体 fallback 影响、观感与其余按钮割裂。改为"关闭"后整条头部**统一为文字**, 零字体依赖。
+  2. **托盘图标改 64×64 高分辨率渲染**: `New-TrayIcon` 原按 32×32 绘制。托盘会按 DPI 选 16/20/24/32 的小图标尺寸, 在 150%/200% 缩放或大任务栏下直接画 32 会糊。改为按 64×64 绘制(描边 2→4、矩形内缩 2、字号 18→36 等比放大), 交给系统**下采样**(优于上采样)。设计不变(深底 `#131920` + 氧化黄铜描边 + "L")。
+  3. **中文 monogram 取前两字 + 自适应字号**: 新增 `Get-Monogram()` —— 拉丁名取首字母(大写); CJK 等非拉丁名(首字符 ≥ `0x2E80`)取**前两字**并把字号从 12 收到 9 以适配 22px 圆。消息列表 `New-MessageNode` 与字幕胶囊 `New-SubtitleChip` 两处色牌均改用它, **降低"张/章/赵"等同姓玩家的色牌碰撞**。
+- **未做(有意)**: 头部按钮加矢量图标锚点 —— 因 `PinBtn` 文字随状态切换(固定⇄自动收起), 图标无法表达该状态; 且保留**文字头部**更一致。同时, 原审查里"游戏内'译'按钮加 tooltip"一条已在第六十轮随按钮删除而作废。
+- **验证方式**(全部实测, 用 AST 从文件本体提取函数求值/实例化, 非复制粘贴):
+  - `Parser::ParseFile` 语法通过(1961 行, 0 error); 前三字节复查 `EF BB BF`、LF-only=0(CRLF)。
+  - **XAML 实例化**: 提取 `$script:Xaml` 插值后 `XamlReader::Parse` 成功 → `Title='DeadlockLingua'`、`CloseBtn.Content='关闭'`、`FontFamily='Bahnschrift SemiCondensed, Microsoft YaHei UI'`。
+  - **`Get-Monogram` 实测**: `张三→[张三]9`、`张→[张]12`、`Alice→[A]12`、`alice→[A]12`、`''→[?]12`、`木子李→[木子]9`、`José→[J]12`、`Xx_ProGamer→[X]12`。
+  - **`New-TrayIcon` 实测**: 生成 `64×64` 图标、无异常。
+- **仍需用户测试**: 重启悬浮窗(或重开 `ShowOverlay.bat`)→ ① 头部关闭按钮显示为文字"关闭"; ② 托盘图标比之前更清晰(尤其高缩放屏); ③ 中文昵称玩家在消息列表/字幕里的色牌显示**两字**(如"张三"), 拉丁名仍为首字母。
+- **已知限制**: ① 头部仍为纯文字, 未引入图标(理由见"未做"); ② 色牌虽取两字, 极端情况(同姓且名首字相同)仍可能同色; ③ 托盘图标仍是单分辨率源(64), 未做多分辨率 `.ico`; ④ `overlay_window.ps1` 非 VPK 内容, 改动**无需重新构建 VPK**, 但**需重启悬浮窗进程**才生效。

@@ -23,7 +23,9 @@
 param(
   [string]$Bridge = "http://127.0.0.1:8791",
   [int]$PollMs = 1200,
-  [int]$StartupGraceMs = 8000
+  [int]$StartupGraceMs = 8000,
+  # 由桥自动拉起窗口时传 -Silent:已有实例就静默退出,不在游戏画面上弹窗打断。
+  [switch]$Silent
 )
 
 $ErrorActionPreference = "Stop"
@@ -39,7 +41,20 @@ Add-Type -Namespace Win -Name Native -MemberDefinition @'
 
 # Only one overlay at a time; a second launch just exits.
 $script:Mutex = New-Object System.Threading.Mutex($false, "Local\DeadlockLinguaOverlay")
-if (-not $script:Mutex.WaitOne(0)) { exit 0 }
+if (-not $script:Mutex.WaitOne(0)) {
+  try { Add-Content -Path (Join-Path $env:TEMP "lct-overlay-diag.log") -Value ((Get-Date).ToString("MM-dd HH:mm:ss") + " pid=" + $PID + " 已有实例持有互斥锁,本次退出") } catch {}
+  # 静默启动(桥自动拉起窗口时传 -Silent):已有实例就悄悄退出,别在游戏里弹窗打断。
+  # 手动运行(ShowOverlay.bat 或直接跑 .ps1)时给个提示,否则用户会以为"窗口根本没打开"。
+  if (-not $Silent) {
+    try {
+      Add-Type -AssemblyName System.Windows.Forms
+      [System.Windows.Forms.MessageBox]::Show(
+        "翻译悬浮窗已经在运行了。`n`n用任务栏托盘里的 DeadlockLingua 图标,或按 Ctrl+Alt+L 唤起窗口。",
+        "DeadlockLingua", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information) | Out-Null
+    } catch {}
+  }
+  exit 0
+}
 
 # ============================================================ config access
 function Invoke-ApiGet([string]$Url) {
@@ -75,6 +90,21 @@ function New-PanelBrush([string]$hex, [double]$alpha) {
   if ($h.Length -ne 6 -or $h -notmatch "^[0-9a-fA-F]{6}$") { $h = "0D0F14" }
   $a = [int][Math]::Round([Math]::Min(1.0, [Math]::Max(0.0, $alpha)) * 255)
   return ConvertTo-Brush ("#{0:X2}{1}" -f $a, $h) "#D90D0F14"
+}
+
+# 色牌文字(monogram):拉丁名取首字母大写;CJK 等非拉丁名取前两字并把字号收小,
+# 以适配 22px 圆(一个汉字用 12px, 两个汉字用 9px)。这样"张/章/赵"等姓氏不再撞成同一个色牌。
+function Get-Monogram([string]$name) {
+  $n = [string]$name
+  if (-not $n) { return @{ text = "?"; size = 12 } }
+  $c0 = [int][char]$n[0]
+  if ($c0 -ge 0x2E80) {
+    $t = $n.Substring(0, [Math]::Min(2, $n.Length))
+    return @{ text = $t; size = $(if ($t.Length -gt 1) { 9 } else { 12 }) }
+  }
+  $ch = $n.Substring(0, 1)
+  try { $ch = $ch.ToUpper() } catch {}
+  return @{ text = $ch; size = 12 }
 }
 
 # ============================================================ design tokens
@@ -325,6 +355,7 @@ $script:Xaml = @"
           <ColumnDefinition Width="Auto"/>
           <ColumnDefinition Width="Auto"/>
           <ColumnDefinition Width="Auto"/>
+          <ColumnDefinition Width="Auto"/>
         </Grid.ColumnDefinitions>
         <TextBlock Grid.Column="0" Text="Lingua" Foreground="$($T.Brass)"
                    FontWeight="SemiBold" FontSize="12.5" VerticalAlignment="Center"/>
@@ -335,8 +366,9 @@ $script:Xaml = @"
                    TextTrimming="CharacterEllipsis"/>
         <Button x:Name="SettingsBtn" Grid.Column="3" Content="设置" Style="{StaticResource KeyAct}" ToolTip="打开设置"/>
         <Button x:Name="PinBtn" Grid.Column="4" Content="固定" Margin="2,0,0,0" ToolTip="关闭贴边自动收起"/>
-        <Button x:Name="CollapseBtn" Grid.Column="5" Content="收起" Margin="2,0,0,0"/>
-        <Button x:Name="CloseBtn" Grid.Column="6" Content="&#x2715;" Margin="2,0,0,0"/>
+        <Button x:Name="CollapseBtn" Grid.Column="5" Content="收起" Margin="2,0,0,0" ToolTip="贴到屏幕边收成细条"/>
+        <Button x:Name="MinBtn" Grid.Column="6" Content="最小化" Margin="2,0,0,0" ToolTip="隐藏窗口到系统托盘(不贴边);Ctrl+Alt+L 或双击托盘图标恢复"/>
+        <Button x:Name="CloseBtn" Grid.Column="7" Content="关闭" Margin="2,0,0,0" ToolTip="退出悬浮窗"/>
       </Grid>
       <Border Grid.Row="1" Background="$($T.Line)"/>
 
@@ -404,7 +436,7 @@ $script:Xaml = @"
 "@
 
 $script:Window = [System.Windows.Markup.XamlReader]::Parse($script:Xaml)
-foreach ($n in @("Root","Header","Dot","StatusText","SettingsBtn","PinBtn","CollapseBtn","CloseBtn",
+foreach ($n in @("Root","Header","Dot","StatusText","SettingsBtn","PinBtn","CollapseBtn","MinBtn","CloseBtn",
                  "ChatPage","MsgScroll","MsgList","EmptyText","Footer","Input","SendBtn","Hint",
                  "OutBox","OutText","CopyBtn","SettingsPage","SettingsList","SettingsHint",
                  "SaveCfgBtn","ReloadCfgBtn","CloseSettingsBtn","AdjustSubBtn")) {
@@ -459,6 +491,11 @@ $script:Dragging = $false
 $script:Nodes = @{}
 $script:LastSeq = 0
 $script:LastStatus = ""
+# 桥的会话标识:桥重启/进新一局/游戏退出都会变 -> 清屏,避免旧聊天残留、序号错位卡住
+$script:Session = $null
+# 系统托盘(最小化到托盘用),窗口关闭时释放
+$script:Tray = $null
+$script:TrayHintShown = $false
 # DmItems 每条:{ node, seq, born, life, msg } - msg 留原始消息, 供配置变更时重建胶囊
 $script:DmItems = @()
 $script:SubNodes = @{}
@@ -490,8 +527,39 @@ $script:PollTimer.Interval = [TimeSpan]::FromMilliseconds($PollMs)
 # ============================================================ edge docking
 # The window always ends up flush against one of the four work-area edges.
 # "Expanded" = fully on screen, "collapsed" = only a thin tab pokes out.
+#
+# 当前窗口所在显示器的工作区(DIP)。原来到处直接用 SystemParameters.WorkArea,那永远是
+# 主屏的工作区:把窗口拖到副屏后,贴边吸附、字幕比例定位、float 复位全按主屏算,于是
+# 跑到主屏或夹在错误边界上。这里用 WinForms Screen.FromHandle 取窗口所在屏,再按窗口的
+# DIP→设备像素比例换算回 WPF 坐标(与 Window.Left/Top 同一坐标系)。
+function Get-ActiveWorkArea {
+  try {
+    try { Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop } catch {}
+    $hwnd = (New-Object System.Windows.Interop.WindowInteropHelper($script:Window)).Handle
+    $scr = if ($hwnd -ne [IntPtr]::Zero) { [System.Windows.Forms.Screen]::FromHandle($hwnd) } else { $null }
+    if (-not $scr) { $scr = [System.Windows.Forms.Screen]::PrimaryScreen }
+    $scale = 1.0
+    try {
+      $src = [System.Windows.PresentationSource]::FromVisual($script:Window)
+      if ($src -and $src.CompositionTarget) { $scale = [double]$src.CompositionTarget.TransformToDevice.M11 }
+    } catch {}
+    if ($scale -le 0) { $scale = 1.0 }
+    $r = $scr.WorkingArea
+    return @{
+      Left   = $r.Left / $scale
+      Top    = $r.Top / $scale
+      Right  = $r.Right / $scale
+      Bottom = $r.Bottom / $scale
+      Width  = $r.Width / $scale
+      Height = $r.Height / $scale
+    }
+  } catch {
+    $w = [System.Windows.SystemParameters]::WorkArea
+    return @{ Left = $w.Left; Top = $w.Top; Right = $w.Right; Bottom = $w.Bottom; Width = $w.Width; Height = $w.Height }
+  }
+}
 function Get-EdgeTarget([bool]$expanded) {
-  $wa = [System.Windows.SystemParameters]::WorkArea
+  $wa = Get-ActiveWorkArea
   $w = $script:Window.Width
   $h = $script:Window.Height
   $l = $script:Window.Left
@@ -558,7 +626,7 @@ function Wake-Window() {
 # out in the open it stays exactly where it is ("float") and stops auto-hiding -
 # which is what you want for a panel you have positioned yourself.
 function Snap-ToNearestEdge() {
-  $wa = [System.Windows.SystemParameters]::WorkArea
+  $wa = Get-ActiveWorkArea
   $w = $script:Window.Width
   $h = $script:Window.Height
   $l = $script:Window.Left
@@ -595,7 +663,7 @@ function Snap-ToNearestEdge() {
 function Restore-FloatPosition() {
   $ov = $script:Ov
   if ($null -eq $ov -or $null -eq $ov.floatX -or $null -eq $ov.floatY) { return }
-  $wa = [System.Windows.SystemParameters]::WorkArea
+  $wa = Get-ActiveWorkArea
   $x = [double]$ov.floatX
   $y = [double]$ov.floatY
   $script:Window.Left = [Math]::Min([Math]::Max($x, $wa.Left), [Math]::Max($wa.Left, $wa.Right - $script:Window.Width))
@@ -648,8 +716,9 @@ function New-MessageNode($m) {
   $mono.VerticalAlignment = "Top"
   $mono.Margin = New-Object System.Windows.Thickness(0, 1, 9, 0)
   $ml = New-Object System.Windows.Controls.TextBlock
-  $ml.Text = $senderName.Substring(0, 1)
-  $ml.FontSize = 12
+  $mg = Get-Monogram $senderName
+  $ml.Text = $mg.text
+  $ml.FontSize = $mg.size
   $ml.FontWeight = "SemiBold"
   $ml.Foreground = ConvertTo-Brush "#131920" "#131920"
   $ml.HorizontalAlignment = "Center"
@@ -735,6 +804,24 @@ function Remove-OldNodes() {
   }
 }
 
+# 清空聊天视图(消息列表 + 字幕层),回到"等待聊天"占位状态。
+# 桥换会话(桥重启/进新一局/游戏退出)时调用:否则上一局的聊天会继续留在窗口里。
+function Reset-ChatView() {
+  foreach ($k in @($script:Nodes.Keys)) {
+    $n = $script:Nodes[$k]
+    if ($n -and $n.Parent) { $script:MsgList.Children.Remove($n) | Out-Null }
+  }
+  $script:Nodes = @{}
+  $script:LastSeq = 0
+  if ($script:EmptyText -and -not $script:EmptyText.Parent) {
+    $script:MsgList.Children.Add($script:EmptyText) | Out-Null
+  }
+  foreach ($it in $script:DmItems) { $script:DmList.Children.Remove($it.node) | Out-Null }
+  $script:DmItems = @()
+  $script:SubNodes = @{}
+  $script:SubSeen = @{}
+}
+
 # ============================================================ subtitle layer
 # Speaker identity is carried by a monogram medallion rather than an avatar
 # (Panorama never exposed avatars). A name always maps to the same swatch from a
@@ -799,8 +886,9 @@ function New-SubtitleChip($m) {
     $mono.VerticalAlignment = "Top"
     $mono.Margin = New-Object System.Windows.Thickness(0, 1, 8, 0)
     $ml = New-Object System.Windows.Controls.TextBlock
-    $ml.Text = $name.Substring(0, 1)
-    $ml.FontSize = 12
+    $mg = Get-Monogram $name
+    $ml.Text = $mg.text
+    $ml.FontSize = $mg.size
     $ml.FontWeight = "SemiBold"
     $ml.Foreground = ConvertTo-Brush "#12151B" "#12151B"
     $ml.HorizontalAlignment = "Center"
@@ -909,7 +997,7 @@ function Rebuild-Subtitles() {
 
 function Apply-SubtitleLayout() {
   $s = $script:Ov.subtitle
-  $wa = [System.Windows.SystemParameters]::WorkArea
+  $wa = Get-ActiveWorkArea
   $w = [Math]::Min([Math]::Max(220, [double]$s.width), $wa.Width)
   # 高度分两种情况, 不能一律 SizeToContent:
   #   - 有内容时用 SizeToContent=Height, 让窗口紧跟 StackPanel 的实际高度。原来的做法是
@@ -951,7 +1039,7 @@ function Set-SubtitleClickThrough([bool]$on) {
 }
 
 function Save-SubtitlePosition() {
-  $wa = [System.Windows.SystemParameters]::WorkArea
+  $wa = Get-ActiveWorkArea
   $xr = ($script:DmWindow.Left - $wa.Left) / [Math]::Max(1.0, $wa.Width)
   $yr = ($script:DmWindow.Top - $wa.Top) / [Math]::Max(1.0, $wa.Height)
   $xr = [Math]::Round([Math]::Min(1.0, [Math]::Max(0.0, $xr)), 3)
@@ -994,9 +1082,13 @@ function Show-SubtitleWindow([bool]$on) {
 # ============================================================ status / hint
 function Set-Status([bool]$online, [string]$extra) {
   $text = if ($online) { "桥在线" + $(if ($extra) { " · " + $extra } else { "" }) } else { "桥离线" }
+  if ($online) { $script:LastErrorDetail = "" }
   if ($script:LastStatus -eq $text) { return }
   $script:LastStatus = $text
   $script:StatusText.Text = $text
+  # 桥离线时把最后一次错误挂到状态文字上(鼠标悬停可见),否则用户只看到"桥离线"却不知原因。
+  $tip = if ($script:LastErrorDetail) { "最近错误:`n" + $script:LastErrorDetail } else { $null }
+  try { $script:StatusText.ToolTip = $tip } catch {}
   $script:Dot.Fill = ConvertTo-Brush $(if ($online) { $script:T.Ok } else { $script:T.Danger }) $script:T.Ok
 }
 
@@ -1475,10 +1567,21 @@ $script:PollTimer.Add_Tick({
     $after = [Math]::Max(0, $script:LastSeq - 40)
     $j = Invoke-ApiGet "$Bridge/api/v1/overlay/messages?after=$after"
     if (-not $j -or -not $j.ok) { throw "bad_response" }
+    $sess = if ($null -ne $j.session) { [string]$j.session } else { "" }
+    $latest = [int]$j.latest
+    # 会话变化(桥重启 / 进新一局 / 游戏退出)或序号回退:清屏并从 0 重新拉取。
+    # 不清屏的话,桥重启后上一次的序号会大于桥的新序号,窗口会永远卡住不再更新。
+    if ($sess -ne $script:Session -or $latest -lt $script:LastSeq) {
+      Reset-ChatView
+      $script:Session = $sess
+      $j = Invoke-ApiGet "$Bridge/api/v1/overlay/messages?after=0"
+      if (-not $j -or -not $j.ok) { throw "bad_response" }
+      $latest = [int]$j.latest
+    }
     Set-Status $true ([string]$j.provider)
     $msgs = @($j.messages)
     if ($msgs.Count -eq 0) {
-      if ($j.latest -and [int]$j.latest -gt $script:LastSeq) { $script:LastSeq = [int]$j.latest }
+      if ($latest -gt $script:LastSeq) { $script:LastSeq = $latest }
       return
     }
     $fresh = $false
@@ -1502,10 +1605,181 @@ $script:PollTimer.Add_Tick({
       $line = (Get-Date).ToString("HH:mm:ss") + " poll: " + $_.Exception.Message +
               " @line " + $_.InvocationInfo.ScriptLineNumber
       Add-Content -Path (Join-Path $env:TEMP "lct-overlay-error.log") -Value $line
+      $script:LastErrorDetail = (Get-Date).ToString("HH:mm:ss") + "  " + $_.Exception.Message +
+              "`n详细日志: " + (Join-Path $env:TEMP "lct-overlay-error.log")
     } catch {}
     Set-Status $false ""
   }
 })
+
+# ============================================================ tray + minimize
+# "最小化" = 把面板窗口整个藏起来,不留贴边细条;通过系统托盘图标恢复。
+# 给"不想贴边"的人用(贴边收起即使只有 8px,在游戏画面上仍是一道可见的痕迹)。
+function Restore-PanelWindow() {
+  try {
+    if (-not $script:Window.IsVisible) { $script:Window.Show() }
+    $script:Window.Visibility = "Visible"
+    $script:Window.WindowState = "Normal"
+    $script:Window.ShowInTaskbar = $false
+    $script:Window.Activate()
+    Expand-Window
+  } catch {}
+}
+function Toggle-PanelWindow() {
+  if ($script:Window.IsVisible) { Minimize-ToTray } else { Restore-PanelWindow }
+}
+function Minimize-ToTray() {
+  try {
+    if ($script:Tray) {
+      $script:Window.Hide()
+      # 字幕浮层是与面板独立的窗口,不应随面板一起消失:显式保持可见并置顶
+      if ([string]$script:Ov.view -eq "subtitle") {
+        try {
+          if (-not $script:DmWindow.IsVisible) { Show-SubtitleWindow $true } else { $script:DmWindow.Topmost = $true }
+        } catch {}
+      }
+      if (-not $script:TrayHintShown) {
+        $script:TrayHintShown = $true
+        try {
+          $script:Tray.ShowBalloonTip(2500, "DeadlockLingua", "已最小化到托盘。Ctrl+Alt+L 或双击托盘图标可恢复窗口", [System.Windows.Forms.ToolTipIcon]::Info)
+        } catch {}
+      }
+    } else {
+      # 托盘不可用时退回任务栏最小化:窗口仍可见、可点任务栏恢复,避免 Hide 后彻底找不回
+      $script:Window.ShowInTaskbar = $true
+      $script:Window.WindowState = "Minimized"
+    }
+  } catch {}
+}
+
+# 托盘图标:系统通用图标(SystemIcons.Application)在 Win11 任务栏 "^" 溢出区里毫无辨识度,
+# 用户会直接说"看不到托盘"。这里按悬浮窗的设计令牌(氧化黄铜 + 深底)现画一个 32x32 图标,
+# 用 System.Drawing 画完转成 Icon,不额外引入 .ico 资源文件。
+function New-TrayIcon {
+  try {
+    # 托盘会按当前 DPI 选 16/20/24/32 的小图标尺寸。这里按 64×64 绘制再交给系统下采样,
+    # 比直接画 32 在 150%/200% 缩放或大任务栏下更清晰(下采样优于上采样)。设计不变:深底 + 氧化黄铜描边 + "L"。
+    $sz = 64
+    $bmp = New-Object System.Drawing.Bitmap $sz, $sz
+    $g = [System.Drawing.Graphics]::FromImage($bmp)
+    $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+    $g.TextRenderingHint = [System.Drawing.Text.TextRenderingHint]::AntiAlias
+    $bg = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(255, 19, 25, 32))
+    $g.FillRectangle($bg, 0, 0, $sz, $sz)
+    $pen = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(255, 201, 164, 78)), 4
+    $g.DrawRectangle($pen, 2, 2, $sz - 4, $sz - 4)
+    $font = New-Object System.Drawing.Font ("Bahnschrift SemiCondensed", 36, [System.Drawing.FontStyle]::Bold, [System.Drawing.GraphicsUnit]::Pixel)
+    $fg = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(255, 201, 164, 78))
+    $sf = New-Object System.Drawing.StringFormat
+    $sf.Alignment = [System.Drawing.StringAlignment]::Center
+    $sf.LineAlignment = [System.Drawing.StringAlignment]::Center
+    $g.DrawString("L", $font, $fg, (New-Object System.Drawing.RectangleF(0, 0, $sz, $sz)), $sf)
+    $g.Dispose()
+    $icon = [System.Drawing.Icon]::FromHandle($bmp.GetHicon()).Clone()
+    $bmp.Dispose()
+    return $icon
+  } catch {
+    return [System.Drawing.SystemIcons]::Application
+  }
+}
+
+try {
+  Add-Type -AssemblyName System.Windows.Forms
+  Add-Type -AssemblyName System.Drawing
+  $script:Tray = New-Object System.Windows.Forms.NotifyIcon
+  $script:Tray.Icon = New-TrayIcon
+  $script:Tray.Text = "DeadlockLingua 翻译悬浮窗"
+  $script:Tray.Visible = $true
+  $menu = New-Object System.Windows.Forms.ContextMenuStrip
+  $miShow = $menu.Items.Add("显示面板")
+  $miHide = $menu.Items.Add("最小化到托盘")
+  $miExit = $menu.Items.Add("退出")
+  $miShow.add_Click({ Restore-PanelWindow }) | Out-Null
+  $miHide.add_Click({ Minimize-ToTray }) | Out-Null
+  $miExit.add_Click({ try { $script:Window.Close() } catch {} }) | Out-Null
+  $script:Tray.ContextMenuStrip = $menu
+  $script:Tray.add_MouseDoubleClick({ Restore-PanelWindow })
+  # 左键单击也恢复(有些人习惯单击);右键交给上面的菜单
+  $script:Tray.add_MouseClick({ param($s, $e) try { if ($e.Button -eq [System.Windows.Forms.MouseButtons]::Left) { Restore-PanelWindow } } catch {} })
+} catch {
+  # 托盘不可用时降级:最小化按钮改为退回任务栏最小化(见 Minimize-ToTray),窗口仍可恢复
+  $script:Tray = $null
+}
+
+# ============================================================ global hotkey
+# Ctrl+Alt+L 在任意时刻(面板已最小化 / 游戏在前台)切换面板显示。
+# 托盘图标有时不显眼或双击不灵,全局热键是更可靠的"快捷唤起"手段。
+#
+# 注意: 不要让 PowerShell 脚本块直接充当 HwndSource 的钩子。HwndSourceHook 的第 5 个
+# 参数是 `ref bool handled`,PowerShell 把它当普通参数绑定,于是脚本块里的
+# `$handled.Value = $true` 会抛 PSInvalidCastException(Boolean→IntPtr);该异常发生在
+# 原生回调里、try/catch 也拦不住,进程会直接终止(表现为"按了热键窗口/托盘全没了")。
+# 因此改为: C# 钩子只置一个 bool 标志,PowerShell 用 DispatcherTimer 轮询标志再切换。
+$script:HotkeyId = 0x4C54
+$script:HotkeyOk = $false
+$script:HotkeyCheck = $null
+try {
+  Add-Type -TypeDefinition @'
+using System;
+using System.Windows.Interop;
+using System.Runtime.InteropServices;
+namespace LCT {
+  public static class HotkeyBridge {
+    public static bool Pending = false;
+    private static int _id = 0x4C54;
+    private static IntPtr _hwnd = IntPtr.Zero;
+    private static HwndSourceHook _hook;
+    [DllImport("user32.dll")] private static extern bool RegisterHotKey(IntPtr hWnd, int id, uint fsModifiers, uint vk);
+    [DllImport("user32.dll")] private static extern bool UnregisterHotKey(IntPtr hWnd, int id);
+    public static bool Register(IntPtr hwnd) {
+      _hwnd = hwnd;
+      HwndSource src = HwndSource.FromHwnd(hwnd);
+      if (src == null) return false;
+      _hook = new HwndSourceHook(HookProc);
+      src.AddHook(_hook);
+      return RegisterHotKey(hwnd, _id, 0x3, 0x4C);   // MOD_ALT(1)|MOD_CONTROL(2), VK 'L'
+    }
+    public static void Unregister() {
+      if (_hwnd != IntPtr.Zero) {
+        try { HwndSource src = HwndSource.FromHwnd(_hwnd); if (src != null && _hook != null) src.RemoveHook(_hook); } catch {}
+        UnregisterHotKey(_hwnd, _id);
+        _hwnd = IntPtr.Zero;
+      }
+    }
+    private static IntPtr HookProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled) {
+      if (msg == 0x0312 && wParam.ToInt32() == _id) { handled = true; Pending = true; }
+      return IntPtr.Zero;
+    }
+  }
+}
+'@ -ReferencedAssemblies 'PresentationCore','WindowsBase' -ErrorAction Stop
+} catch {}
+
+function Register-ToggleHotkey() {
+  try {
+    $helper = New-Object System.Windows.Interop.WindowInteropHelper($script:Window)
+    $script:HotkeyOk = [LCT.HotkeyBridge]::Register($helper.Handle)
+    if (-not $script:HotkeyCheck) {
+      $script:HotkeyCheck = New-Object System.Windows.Threading.DispatcherTimer
+      $script:HotkeyCheck.Interval = [TimeSpan]::FromMilliseconds(150)
+      $script:HotkeyCheck.Add_Tick({ try {
+        if ([LCT.HotkeyBridge]::Pending) { [LCT.HotkeyBridge]::Pending = $false; Toggle-PanelWindow }
+      } catch {} })
+    }
+    $script:HotkeyCheck.Start()
+  } catch { $script:HotkeyOk = $false }
+}
+function Unregister-ToggleHotkey() {
+  try { if ($script:HotkeyCheck) { $script:HotkeyCheck.Stop() } } catch {}
+  try { [LCT.HotkeyBridge]::Unregister() } catch {}
+  $script:HotkeyOk = $false
+}
+# 启动自检日志(排查"热键无效/托盘看不见"):写入 %TEMP%\lct-overlay-diag.log
+function Write-Diag([string]$msg) {
+  try {
+    Add-Content -Path (Join-Path $env:TEMP "lct-overlay-diag.log") -Value ((Get-Date).ToString("MM-dd HH:mm:ss") + " pid=" + $PID + " " + $msg)
+  } catch {}
+}
 
 # ============================================================ wiring
 # Drag by the header; on release snap to the nearest screen edge and remember it.
@@ -1548,6 +1822,7 @@ $script:CopyBtn.Add_Click({
   }
 })
 $script:CollapseBtn.Add_Click({ try { Collapse-Window  } catch { }})
+$script:MinBtn.Add_Click({ try { Minimize-ToTray } catch {} })
 $script:CloseBtn.Add_Click({ try { $script:Window.Close() } catch {} })
 
 $script:PinBtn.Add_Click({ try {
@@ -1625,14 +1900,32 @@ $script:Window.Add_Deactivated({ try {
 $script:Window.Add_Closed({ try {
   $script:PollTimer.Stop(); $script:AnimTimer.Stop(); $script:AwakeTimer.Stop()
   $script:EaseTimer.Stop(); $script:StartTimer.Stop()
+  if ($script:Tray) { try { $script:Tray.Visible = $false; $script:Tray.Dispose() } catch {} ; $script:Tray = $null }
+  Unregister-ToggleHotkey
   try { $script:DmWindow.Close() } catch {}
   try { $script:Mutex.ReleaseMutex() } catch {}
+  # end the main Dispatcher.Run() loop (bottom of this file) so the process can exit
+  try { [System.Windows.Threading.Dispatcher]::CurrentDispatcher.InvokeShutdown() } catch {}
  } catch { }})
 
 $script:Window.Add_SourceInitialized({ try {
   $p = Get-EdgeTarget $true
   $script:Window.Left = $p.L
   $script:Window.Top = [System.Windows.SystemParameters]::WorkArea.Top + 90
+  Register-ToggleHotkey
+  Write-Diag ("init tray=" + ($null -ne $script:Tray) + " hotkeyOk=" + $script:HotkeyOk)
+  # 可发现性提示(每次进程启动一次):Win11 默认把新托盘图标塞进任务栏 "^" 溢出区,用户常以为
+  # "没有托盘";热键若被别的程序占用也要让用户知道,否则会一直以为"快捷键无效"。
+  if ($script:Tray) {
+    try {
+      $tip = if ($script:HotkeyOk) {
+        "悬浮窗已就绪。托盘图标在任务栏 ^ 溢出区,可拖出来固定;Ctrl+Alt+L 显示/隐藏窗口。"
+      } else {
+        "全局热键 Ctrl+Alt+L 注册失败(可能被其他程序占用),请改用任务栏托盘的 DeadlockLingua 图标唤起窗口。"
+      }
+      $script:Tray.ShowBalloonTip(4000, "DeadlockLingua", $tip, [System.Windows.Forms.ToolTipIcon]::Info)
+    } catch {}
+  }
  } catch { }})
 
 # The caption layer must never eat game clicks - click-through by default.
@@ -1657,6 +1950,12 @@ $script:Window.Add_ContentRendered({ try {
   $script:Window.Top = $p.T
   $script:PollTimer.Start()
   $script:StartTimer.Start()
+  Write-Diag ("ready view=" + [string]$script:Ov.view)
  } catch { }})
 
-[void]$script:Window.ShowDialog()
+# Main loop. Do NOT use ShowDialog() here: hiding the window (minimize-to-tray or
+# Ctrl+Alt+L when visible) makes ShowDialog() return immediately, which would run the
+# script to its end and kill the process. A non-modal Show() + Dispatcher.Run() keeps
+# the app (and the tray icon / hotkey) alive while the panel is hidden.
+$script:Window.Show()
+[System.Windows.Threading.Dispatcher]::Run()

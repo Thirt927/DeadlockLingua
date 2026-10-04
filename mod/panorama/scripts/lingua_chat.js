@@ -177,9 +177,6 @@
   const LOBBY_PREFIX_CLASS = "ChatLinePrefix";
 
   // ---- LinguaChat 自身 ID / class ----
-  const SETTINGS_BUTTON_ID = "LCTSettingsButton";
-  const SETTINGS_PANEL_ID = "LCTSettingsPanel";
-  const SETTINGS_VISIBLE_CLASS = "LCTVisible";
   const STATUS_LABEL_ID = "LCTStatusLabel";
   const TRANS_LABEL_CLASS = "LCTTranslation";
   const TRANS_ERROR_CLASS = "LCTTranslationError";
@@ -3088,35 +3085,6 @@ function resolveSteamId(record) {
     translateOwn: true, // 自己的发言也翻译(默认开)
   };
 
-  // 选项表(驱动选择控件)
-  const PROVIDER_OPTIONS = [
-    { value: "bing", label: "bing(免 Key)" },
-    { value: "microsoft", label: "microsoft(Azure Key)" },
-    { value: "openai", label: "OpenAI 兼容(自定义)" },
-    { value: "deepl", label: "DeepL(需 Key)" },
-    { value: "google", label: "Google Cloud(需 Key)" },
-  ];
-  const LANGUAGE_OPTIONS = [
-    { value: "zh-Hans", label: "简体中文 (zh-Hans)" },
-    { value: "zh-Hant", label: "繁體中文 (zh-Hant)" },
-    { value: "en", label: "English 英语 (en)" },
-    { value: "ja", label: "日本語 日语 (ja)" },
-    { value: "ko", label: "한국어 韩语 (ko)" },
-    { value: "fr", label: "Français 法语 (fr)" },
-    { value: "de", label: "Deutsch 德语 (de)" },
-    { value: "es", label: "Español 西语 (es)" },
-    { value: "custom", label: "自定义(手输语言代码)" },
-  ];
-  const DISPLAY_MODES = [
-    { value: "bilingual", label: "双语(原文+译文)" },
-    { value: "translation_only", label: "仅译文" },
-  ];
-  const OUTGOING_MODES = [
-    { value: "off", label: "关(发原文)" },
-    { value: "translation", label: "仅译文" },
-    { value: "bilingual", label: "双语(原文 | 译文)" },
-  ];
-
   const UI_CONVAR = "lct_ui";
 
   function loadUiConfig() {
@@ -3439,21 +3407,15 @@ function injectTranslation(row, sig, text) {
   // ================= 翻译队列与桥接 =================
 
   function targetLanguage() {
-    // 面板里选的目标语言优先;选了自定义则用自定义输入框的值
-    let lang = State.cfg.targetLanguage || "zh-Hans";
-    if (lang === "custom") {
-      lang = fieldValue("LCTTargetLangCustom") || "zh-Hans";
-    }
-    return lang;
+    // 游戏内设置面板已移除,目标语言只从配置(桥 config.json / 本地存档)读取。
+    const lang = State.cfg.targetLanguage || "zh-Hans";
+    return lang === "custom" ? "zh-Hans" : lang;
   }
 
-  // 发送目标语言(处理自定义)
+  // 发送目标语言
   function resolveOutgoingTarget() {
-    let lang = State.cfg.outgoingTarget || "en";
-    if (lang === "custom") {
-      lang = fieldValue("LCTOutgoingTargetCustom") || "en";
-    }
-    return lang;
+    const lang = State.cfg.outgoingTarget || "en";
+    return lang === "custom" ? "en" : lang;
   }
 
   function enqueue(row, sig, record) {
@@ -5073,11 +5035,6 @@ function injectTranslation(row, sig, text) {
     const arr = State.cfg && State.cfg._userTouched;
     return Array.isArray(arr) && arr.indexOf(field) >= 0;
   }
-  function markUiTouched(field) {
-    if (!State.cfg) return;
-    if (!Array.isArray(State.cfg._userTouched)) State.cfg._userTouched = [];
-    if (State.cfg._userTouched.indexOf(field) < 0) State.cfg._userTouched.push(field);
-  }
 
   function applyBridgeUiConfig(c) {
     if (!c) return false;
@@ -5101,17 +5058,6 @@ function injectTranslation(row, sig, text) {
     return changed;
   }
 
-  // API Key 行状态提示:已配置 / 未配置(仅提示,不回显明文 Key)
-  function updateKeyStateLabel() {
-    const label = findChild(getRoot(), "LCTKeyState");
-    if (!label) return;
-    const prov = State.cfg.provider || "bing";
-    let text = "未配置";
-    if (prov === "bing") text = "免 Key";
-    else if ((State.cfg._providerKeys || {})[prov]) text = "已配置";
-    try { label.text = text; } catch (e) {}
-  }
-
   // 启动时从桥同步 config.json 的 UI 设置(失败重试,避免桥尚未就绪时丢同步)
   function syncUiFromBridge(attempt) {
     bridgePost("config", {}, function (res) {
@@ -5122,375 +5068,6 @@ function injectTranslation(row, sig, text) {
         $.Schedule(5.0, function () { syncUiFromBridge(attempt + 1); });
       }
     });
-  }
-  function openSettingsPanel() {
-    const panel = findChild(getRoot(), SETTINGS_PANEL_ID);
-    if (!panel) return;
-    try {
-      panel.AddClass(SETTINGS_VISIBLE_CLASS);
-    } catch (e) {}
-    try {
-      if (typeof panel.SetHasClass === "function") panel.SetHasClass(SETTINGS_VISIBLE_CLASS, true);
-    } catch (e) {}
-    syncPanelFromConfig();
-    // 立即用上次已知的 Key 状态回填占位符(避免每次打开先闪空;异步拉取后会再确认)
-    if ((State.cfg._providerKeys || {})[State.cfg.provider || "bing"]) setFieldText("LCTApiKey", "********");
-    // 从桥拉取已保存配置:回填 UI 偏好(游戏重启后恢复) + apiKey 占位符
-    bridgePost("config", {}, function (res) {
-      if (res && res.ok && res.config) {
-        const c = res.config;
-        const changed = applyBridgeUiConfig(c);
-        if (changed) {
-          syncPanelFromConfig();
-          saveUiConfig();
-        }
-        // apiKey 占位符必须在 syncPanelFromConfig 之后设置(否则会被其清空)
-        if (c.microsoft && c.microsoft.hasApiKey) setFieldText("LCTApiKey", "********");
-        if (c.openai && c.openai.hasApiKey) setFieldText("LCTApiKey", "********");
-        if (c.deepl && c.deepl.hasApiKey) setFieldText("LCTApiKey", "********");
-        if (c.google && c.google.hasApiKey) setFieldText("LCTApiKey", "********");
-        if (c.openai && c.openai.baseUrl) setFieldText("LCTOpenaiBaseUrl", c.openai.baseUrl);
-        if (c.openai && c.openai.model) setFieldText("LCTOpenaiModel", c.openai.model);
-        if (c.deepl && c.deepl.endpoint) setFieldText("LCTDeeplEndpoint", c.deepl.endpoint);
-        if (Array.isArray(c.fallbackProviders)) {
-          setFieldText("LCTFallback", c.fallbackProviders.join(","));
-        }
-        if (c.chatLog && typeof c.chatLog.enabled === "boolean") {
-          State.cfg.chatLog = c.chatLog.enabled;
-          setToggleText("LCTChatLog", State.cfg.chatLog);
-        }
-
-        updateKeyStateLabel();
-      }
-    });
-    // 聚焦面板本身(与 DLCT 一致:优先控件,失败则面板;面板持焦后 Tab/Enter 可用)
-    // 仅在面板仍可见时聚焦,否则异步回调会在用户已关闭设置后把焦点抢回隐藏面板
-    try {
-      if (hasClass(panel, SETTINGS_VISIBLE_CLASS)) {
-        const first = findChild(panel, "LCTEnabled");
-        if (first && first.SetFocus) first.SetFocus();
-        else if (panel.SetFocus) panel.SetFocus();
-      }
-    } catch (e) {}
-  }
-
-  function closeSettingsPanel() {
-    const panel = findChild(getRoot(), SETTINGS_PANEL_ID);
-    if (panel) {
-      try {
-        panel.RemoveClass(SETTINGS_VISIBLE_CLASS);
-      } catch (e) {}
-    }
-    // 关闭后必须释放输入焦点:面板里的 TextEntry(如"超时/延迟时间")若继续持焦,
-    // WASD 会被当文本读,导致退出界面后人物无法移动。必须在隐藏面板之后调用。
-    dropInputFocus();
-  }
-
-  function LCTToggleSettings() {
-    const panel = findChild(getRoot(), SETTINGS_PANEL_ID);
-    if (panel && hasClass(panel, SETTINGS_VISIBLE_CLASS)) closeSettingsPanel();
-    else openSettingsPanel();
-  }
-
-  function LCTCloseSettings() {
-    log("close clicked");
-    closeSettingsPanel();
-  }
-
-  function fieldValue(id) {
-    const panel = findChild(getRoot(), SETTINGS_PANEL_ID);
-    const field = panel ? findChild(panel, id) : null;
-    return field ? safeText(field) : "";
-  }
-
-  function setFieldText(id, text) {
-    const panel = findChild(getRoot(), SETTINGS_PANEL_ID);
-    const field = panel ? findChild(panel, id) : null;
-    if (field) {
-      try {
-        field.text = text;
-      } catch (e) {}
-    }
-  }
-
-  function syncPanelFromConfig() {
-    setFieldText("LCTApiKey", "");
-    setFieldText("LCTRegion", "");
-    setFieldText("LCTOpenaiBaseUrl", "");
-    setFieldText("LCTOpenaiModel", "");
-    setFieldText("LCTDeeplEndpoint", "");
-    setFieldText("LCTFallback", "");
-    setFieldText("LCTTargetLangCustom", "");
-    setFieldText("LCTOutgoingTargetCustom", "");
-    setFieldText("LCTTimeout", String(State.cfg.timeoutMs || 15000));
-    setSelectText("LCTProviderSelect", labelFor(PROVIDER_OPTIONS, State.cfg.provider || "bing"));
-    syncProviderRows();
-    setSelectText("LCTTargetLangSelect", labelFor(LANGUAGE_OPTIONS, State.cfg.targetLanguage || "zh-Hans"));
-    setSelectText("LCTDisplayModeSelect", labelFor(DISPLAY_MODES, State.cfg.displayMode || "bilingual"));
-    setSelectText("LCTOutgoingSelect", labelFor(OUTGOING_MODES, State.cfg.outgoing || "off"));
-    setSelectText("LCTOutgoingTargetSelect", labelFor(LANGUAGE_OPTIONS, State.cfg.outgoingTarget || "en"));
-    setToggleText("LCTEnabled", !!State.cfg.enabled);
-    setToggleText("LCTForce", !!State.cfg.force);
-    setToggleText("LCTTranslateOwn", State.cfg.translateOwn !== false);
-    setToggleText("LCTChatLog", State.cfg.chatLog !== false);
-    syncCustomInputs();
-    closeSelectMenus();
-    setStatus("");
-  }
-
-  function setSelectText(buttonId, text) {
-    const panel = findChild(getRoot(), SETTINGS_PANEL_ID);
-    const btn = panel ? findChild(panel, buttonId) : null;
-    const label = btn ? findChild(btn, buttonId + "Label") : null;
-    if (label) {
-      try {
-        label.text = text;
-      } catch (e) {}
-    }
-  }
-
-  function labelFor(options, value) {
-    for (let i = 0; i < options.length; i += 1) {
-      if (options[i].value === value) return options[i].label;
-    }
-    return String(value || "");
-  }
-
-  function cycleValue(options, current) {
-    for (let i = 0; i < options.length; i += 1) {
-      if (options[i].value === current) return options[(i + 1) % options.length].value;
-    }
-    return options[0].value;
-  }
-
-  const SELECT_MENU_IDS = [
-    "LCTProviderMenu",
-    "LCTTargetLangMenu",
-    "LCTDisplayModeMenu",
-    "LCTOutgoingMenu",
-    "LCTOutgoingTargetMenu",
-  ];
-
-  function closeSelectMenus() {
-    const root = getRoot();
-    for (let i = 0; i < SELECT_MENU_IDS.length; i += 1) {
-      const m = findChild(root, SELECT_MENU_IDS[i]);
-      if (m) {
-        try {
-          m.RemoveClass(SETTINGS_VISIBLE_CLASS);
-        } catch (e) {}
-      }
-    }
-  }
-
-  // 自定义语言输入框显隐
-  function syncCustomInputs() {
-    const root = getRoot();
-    const t = findChild(root, "LCTTargetLangCustom");
-    const o = findChild(root, "LCTOutgoingTargetCustom");
-    if (t) {
-      try {
-        if (State.cfg.targetLanguage === "custom") t.AddClass(SETTINGS_VISIBLE_CLASS);
-        else t.RemoveClass(SETTINGS_VISIBLE_CLASS);
-      } catch (e) {}
-    }
-    if (o) {
-      try {
-        if (State.cfg.outgoingTarget === "custom") o.AddClass(SETTINGS_VISIBLE_CLASS);
-        else o.RemoveClass(SETTINGS_VISIBLE_CLASS);
-      } catch (e) {}
-    }
-  }
-
-  // API Key / 区域行显隐已按用户意见移除(行显隐机制不稳定,且非必需)
-
-  function setToggleText(id, on) {
-    const panel = findChild(getRoot(), SETTINGS_PANEL_ID);
-    const toggle = panel ? findChild(panel, id) : null;
-    if (!toggle) return;
-    // Button 自身不渲染 text,必须更新内嵌 Label(命名约定:<按钮id>Label)
-    const label = findChild(toggle, id + "Label") || toggle;
-    try {
-      label.text = on ? "是" : "否";
-    } catch (e) {}
-  }
-
-  function LCTOnToggle(which) {
-    markUiTouched(which);
-    if (which === "enabled") {
-      State.cfg.enabled = !State.cfg.enabled;
-      setToggleText("LCTEnabled", State.cfg.enabled);
-    } else if (which === "force") {
-      State.cfg.force = !State.cfg.force;
-      setToggleText("LCTForce", State.cfg.force);
-    } else if (which === "chatLog") {
-      State.cfg.chatLog = State.cfg.chatLog === false;
-      setToggleText("LCTChatLog", State.cfg.chatLog);
-      setStatus("聊天日志" + (State.cfg.chatLog ? "已开启(按比赛 ID 存 logs/chat)" : "已关闭"));
-    } else if (which === "translateOwn") {
-      State.cfg.translateOwn = State.cfg.translateOwn === false;
-      setToggleText("LCTTranslateOwn", State.cfg.translateOwn);
-      setStatus("翻译自己的消息" + (State.cfg.translateOwn ? "已开启" : "已关闭"));
-    }
-    saveUiConfig();
-    log("toggle: " + which);
-  }
-
-  // 循环切换(服务商/显示模式/发送模式)
-  // 根据当前服务商显示/隐藏对应的配置行与标签提示
-  function syncProviderRows() {
-    const p = State.cfg.provider || "bing";
-    const setRow = function (id, show) {
-      const row = findChild(getRoot(), id);
-      if (!row) return;
-      try {
-        row.style.visibility = show ? "visible" : "collapse";
-      } catch (e) {}
-    };
-    setRow("LCTRowApiKey", p === "microsoft" || p === "openai" || p === "deepl" || p === "google");
-    setRow("LCTRowRegion", p === "microsoft");
-    setRow("LCTRowOpenaiBase", p === "openai");
-    setRow("LCTRowOpenaiModel", p === "openai");
-    setRow("LCTRowDeeplEndpoint", p === "deepl");
-    let hint = "";
-    if (p === "bing") hint = "免 Key 公共接口,可能有隐形限流;失败可配置自动回退";
-    else if (p === "microsoft") hint = "Azure Translator Key(可留空则跳过该服务商)";
-    else if (p === "openai") hint = "OpenAI 兼容端点:DeepSeek 填 https://api.deepseek.com + deepseek-chat/deepseek-reasoner;OpenAI/Ollama/LM Studio/OneAPI 亦可";
-    else if (p === "deepl") hint = "DeepL API Key(free/pro 端点可选)";
-    else if (p === "google") hint = "Google Cloud Translation API Key";
-    setStatus(hint);
-  }
-
-  function LCTPickProvider(value) {
-    markUiTouched("provider");
-    State.cfg.provider = value;
-    syncPanelFromConfig();
-    // 该服务商已配置 Key:回填占位符,避免面板显示空白
-    if ((State.cfg._providerKeys || {})[value]) setFieldText("LCTApiKey", "********");
-    updateKeyStateLabel();
-    saveUiConfig();
-    closeSelectMenus();
-    log("pickProvider: " + value);
-  }
-
-  function LCTCycle(which) {
-    closeSelectMenus();
-    markUiTouched(which);
-    if (which === "provider") {
-      State.cfg.provider = cycleValue(PROVIDER_OPTIONS, State.cfg.provider || "bing");
-      setSelectText("LCTProviderSelect", labelFor(PROVIDER_OPTIONS, State.cfg.provider));
-    } else if (which === "displayMode") {
-      State.cfg.displayMode = cycleValue(DISPLAY_MODES, State.cfg.displayMode || "bilingual");
-      setSelectText("LCTDisplayModeSelect", labelFor(DISPLAY_MODES, State.cfg.displayMode));
-    } else if (which === "outgoing") {
-      State.cfg.outgoing = cycleValue(OUTGOING_MODES, State.cfg.outgoing || "off");
-      setSelectText("LCTOutgoingSelect", labelFor(OUTGOING_MODES, State.cfg.outgoing));
-    }
-    saveUiConfig();
-    log("cycle: " + which + " -> " + State.cfg[which]);
-  }
-
-  // 下拉菜单开关(目标语言/发送目标语言)
-  function LCTToggleMenu(field) {
-    const menuId =
-      field === "targetLanguage" ? "LCTTargetLangMenu" :
-      field === "outgoingTarget" ? "LCTOutgoingTargetMenu" :
-      field === "provider" ? "LCTProviderMenu" :
-      field === "displayMode" ? "LCTDisplayModeMenu" :
-      field === "outgoing" ? "LCTOutgoingMenu" : "";
-    if (!menuId) return;
-    const menu = findChild(getRoot(), menuId);
-    if (!menu) return;
-    const isOpen = hasClass(menu, SETTINGS_VISIBLE_CLASS);
-    closeSelectMenus();
-    if (!isOpen) {
-      try {
-        menu.AddClass(SETTINGS_VISIBLE_CLASS);
-      } catch (e) {}
-    }
-    log("menu: " + field + (isOpen ? " close" : " open"));
-  }
-
-  // 菜单选项选择
-  function LCTPickLang(field, value) {
-    closeSelectMenus();
-    markUiTouched(field);
-    if (field === "targetLanguage") {
-      State.cfg.targetLanguage = value;
-      setSelectText("LCTTargetLangSelect", labelFor(LANGUAGE_OPTIONS, value));
-    } else {
-      State.cfg.outgoingTarget = value;
-      setSelectText("LCTOutgoingTargetSelect", labelFor(LANGUAGE_OPTIONS, value));
-    }
-    syncCustomInputs();
-    saveUiConfig();
-    closeSelectMenus();
-    log("pickLang: " + field + " -> " + value);
-    if (value === "custom") {
-      const customId = field === "targetLanguage" ? "LCTTargetLangCustom" : "LCTOutgoingTargetCustom";
-      const custom = findChild(getRoot(), customId);
-      if (custom && custom.SetFocus) {
-        try {
-          custom.SetFocus();
-        } catch (e) {}
-      }
-    }
-  }
-
-  function LCTPickOption(field, value) {
-    markUiTouched(field);
-    if (field === "displayMode") State.cfg.displayMode = value;
-    else if (field === "outgoing") State.cfg.outgoing = value;
-    else return;
-    syncPanelFromConfig();
-    saveUiConfig();
-    closeSelectMenus();
-    log("pickOption: " + field + " -> " + value);
-  }
-
-  function collectPanelConfig() {
-    const customTarget = fieldValue("LCTTargetLangCustom");
-    const targetLang = State.cfg.targetLanguage === "custom"
-      ? (customTarget || "zh-Hans")
-      : (State.cfg.targetLanguage || "zh-Hans");
-    const customOut = fieldValue("LCTOutgoingTargetCustom");
-    const outgoingTarget = State.cfg.outgoingTarget === "custom"
-      ? (customOut || "en")
-      : (State.cfg.outgoingTarget || "en");
-    const prov = State.cfg.provider || "bing";
-    const apiKeyField = fieldValue("LCTApiKey");
-    // 面板字段为空但该服务商已有 Key:发保留标记,避免误清空(修复 /tr 重复打开后 Key 丢失)
-    const apiKeyValue = (!apiKeyField && (State.cfg._providerKeys || {})[prov]) ? "********" : apiKeyField;
-    return {
-      provider: prov,
-      apiKey: apiKeyValue,
-      region: fieldValue("LCTRegion"),
-      openaiBaseUrl: fieldValue("LCTOpenaiBaseUrl"),
-      openaiModel: fieldValue("LCTOpenaiModel"),
-      deeplEndpoint: fieldValue("LCTDeeplEndpoint"),
-      targetLanguage: targetLang,
-      sourceLanguage: "auto",
-      displayMode: State.cfg.displayMode || "bilingual",
-      outgoing: State.cfg.outgoing || "off",
-      outgoingTarget: outgoingTarget,
-      enabled: !!State.cfg.enabled,
-      force: !!State.cfg.force,
-      timeoutMs: Number(fieldValue("LCTTimeout")) || 15000,
-      fallbackProviders: String(fieldValue("LCTFallback") || "")
-        .split(",").map(function (x) { return x.trim(); }).filter(Boolean),
-      chatLog: State.cfg.chatLog !== false,
-      translateOwn: State.cfg.translateOwn !== false,
-      ui: {
-        enabled: !!State.cfg.enabled,
-        provider: State.cfg.provider || "bing",
-        displayMode: State.cfg.displayMode || "bilingual",
-        outgoing: State.cfg.outgoing || "off",
-        outgoingTarget: outgoingTarget,
-        targetLanguage: targetLang,
-        force: !!State.cfg.force,
-        timeoutMs: Number(fieldValue("LCTTimeout")) || 15000,
-      },
-    };
   }
 
   function bridgePost(op, payload, done) {
@@ -5504,46 +5081,6 @@ function injectTranslation(row, sig, text) {
     }
     ensureBridgeEvents();
     enqueueBridge(op, data, done);
-  }
-
-  function LCTSave() {
-    log("save clicked");
-    closeSelectMenus();
-    const p = collectPanelConfig();
-    for (const f of ["provider", "targetLanguage", "displayMode", "outgoing", "outgoingTarget", "enabled", "force", "timeoutMs", "chatLog", "translateOwn"]) markUiTouched(f);
-    bridgePost("config", { config: p }, function (res) {
-      if (res && res.ok) {
-        State.cfg.provider = p.provider || State.cfg.provider;
-        State.cfg.targetLanguage = p.targetLanguage;
-        State.cfg.displayMode = p.displayMode;
-        State.cfg.outgoing = p.outgoing;
-        State.cfg.outgoingTarget = p.outgoingTarget;
-        State.cfg.enabled = p.enabled;
-        State.cfg.force = p.force;
-        State.cfg.timeoutMs = p.timeoutMs;
-        State.cfg.chatLog = p.chatLog !== false;
-        State.cfg.translateOwn = p.translateOwn !== false;
-        // 保存成功:同步 Key 状态(新填 Key / 保留占位符都视为已有 Key)
-        if (State.cfg._providerKeys) {
-          State.cfg._providerKeys[p.provider || "bing"] = !!(p.apiKey && p.apiKey !== "");
-        }
-        syncProviderRows();
-        saveUiConfig();
-        setStatus("已保存(服务商 " + (p.provider || "bing") + ")");
-        log("settings saved");
-      } else {
-        setStatus("保存失败: " + ((res && res.error) || "unknown"));
-      }
-    });
-  }
-
-  function LCTTest() {
-    log("test clicked");
-    setStatus("测试中...最长约 " + Math.round((State.cfg.timeoutMs || 15000) / 1000) + " 秒,请稍候");
-    bridgePost("test", {}, function (res) {
-      if (res && res.ok) setStatus("测试成功: " + (res.translation || ""));
-      else setStatus("测试失败: " + ((res && res.error) || "unknown") + " (检查桥/Key/网络,或配置回退)");
-    });
   }
 
   // ================= 启动 =================
@@ -5774,16 +5311,6 @@ function injectTranslation(row, sig, text) {
   exportGlobal("LCTOnChatSubmit", function () {
     handleChatSubmit(findChild(getRoot(), CHAT_INPUT_ID));
   });
-  exportGlobal("LCTToggleSettings", LCTToggleSettings);
-  exportGlobal("LCTCloseSettings", LCTCloseSettings);
-  exportGlobal("LCTOnToggle", LCTOnToggle);
-  exportGlobal("LCTCycle", LCTCycle);
-  exportGlobal("LCTToggleMenu", LCTToggleMenu);
-  exportGlobal("LCTPickLang", LCTPickLang);
-  exportGlobal("LCTPickProvider", LCTPickProvider);
-  exportGlobal("LCTPickOption", LCTPickOption);
-  exportGlobal("LCTSave", LCTSave);
-  exportGlobal("LCTTest", LCTTest);
   exportGlobal("LCTRowHovered", function (panel) {
     try {
       if (!isValid(panel)) return;

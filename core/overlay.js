@@ -1,4 +1,4 @@
-﻿// Babel Tower - 游戏外翻译悬浮窗(overlay)
+// Babel Tower - 游戏外翻译悬浮窗(overlay)
 //
 // 背景:2026/10/01 的 Deadlock 更新移除了 Panorama 的全部 HTTP 能力
 // ($.AsyncWebRequest 调用即抛 "AsyncWebRequest has been removed",隐藏 HTML 面板
@@ -25,23 +25,32 @@ const POLL_MS = 800;
 
 // 环形缓冲:悬浮窗只需要最近的消息;上限防止长时间运行内存膨胀
 const RING_LIMIT = 300;
-// 同一条消息可能同时来自左下聊天行与顶栏气泡副本(文本相同):去重窗口
-const DEDUP_WINDOW_MS = 10 * 60 * 1000;
+// 同一条消息可能同时来自左下聊天行与顶栏气泡副本(文本相同):去重窗口。
+// 两个副本几乎同时出现,窗口取 2 分钟足够覆盖;原来的 10 分钟太长,会把同一人
+// 重复说的同一句话(如两次 "gg" / "push" / "1")当成副本吞掉,第二条根本不显示。
+const DEDUP_WINDOW_MS = 2 * 60 * 1000;
 const DEDUP_LIMIT = 600;
 // 同时进行的翻译请求数上限(桥端服务商多为单账号限流,串行会太慢,并发太高会触发 429)
 const MAX_TRANSLATING = 4;
 const QUEUE_LIMIT = 80;
+// 桥中途重启时的历史回填:游戏还在运行时,回填本局最近这么多条聊天行,让"桥开启前的
+// 聊天"也能出现在悬浮窗;限定条数避免一次性把整局历史丢进翻译队列(API 洪峰)。
+const PRIME_BACKFILL_MAX = 60;
+const PRIME_BACKFILL_BYTES = 4 * 1024 * 1024;
 
 const CJK_RE = /[\u3400-\u4dbf\u4e00-\u9fff]/;
 
 let ring = [];
 let seq = 0;
+// 会话标识:桥进程启动、日志被游戏重写(新一局)、游戏退出清空时都会换一个新值。
+// 悬浮窗据此判断"桥换过一次 / 进了新一局",把本地已渲染的旧聊天清掉,避免残留。
+let session = 0;
 let fileState = { path: "", offset: 0, tail: "", fingerprint: null, primed: false };
 let dedup = new Map();
 let queue = [];
 let translating = 0;
 let timer = null;
-let deps = { log: function () {}, getConfig: function () { return null; }, translate: null };
+let deps = { log: function () {}, getConfig: function () { return null; }, translate: null, isGameRunning: null };
 let pageCache = "";
 let started = false;
 
@@ -51,6 +60,7 @@ function setDeps(d) {
   if (typeof d.getConfig === "function") deps.getConfig = d.getConfig;
   if (typeof d.translate === "function") deps.translate = d.translate;
   if (typeof d.writeChatLog === "function") deps.writeChatLog = d.writeChatLog;
+  if (typeof d.isGameRunning === "function") deps.isGameRunning = d.isGameRunning;
 }
 
 // ---------- 日志行解析 ----------
@@ -83,7 +93,7 @@ function needsTranslation(text, cfg) {
   return true;
 }
 
-function ingest(line) {
+function ingest(line, opts) {
   const rec = parseLine(line);
   if (!rec) return;
   const sig = (rec.own ? "1" : "0") + "\x00" + rec.sender + "\x00" + rec.text;
@@ -94,7 +104,8 @@ function ingest(line) {
   // 落盘聊天日志。游戏更新后 mod 已经无法把日志 POST 给桥(HTTP 通道被移除),
   // 这里是唯一还活着的通道, 用它把 logs/chat 的写入补回来。
   // 只在新条目(已过去重)时写, 避免日志被重写后重复落盘。
-  if (typeof deps.writeChatLog === "function") {
+  // noLog: 桥中途重启的回填 —— 这些行上一条桥实例多半已经落过盘, 不再重复写。
+  if (typeof deps.writeChatLog === "function" && !(opts && opts.noLog)) {
     try {
       deps.writeChatLog({
         t: now,
@@ -173,6 +184,51 @@ function clearDedup() {
   dedup = new Map();
 }
 
+// 进入新一局(或游戏退出)时调用:清空聊天缓冲与去重表,并换一个会话标识。
+// 悬浮窗轮询到会话标识变了就会把本地渲染的旧聊天清掉,避免上一局残留。
+function beginNewSession() {
+  ring = [];
+  queue = [];
+  dedup = new Map();
+  session += 1;
+}
+
+// 桥中途启动、且游戏仍在运行时,回填本局最近若干条聊天。
+// 这样"桥开启前"的聊天也能被翻译(用户反馈:重启桥后先前的聊天不翻译)。
+// 只回填最近 PRIME_BACKFILL_MAX 条,且不重复落盘(上一条桥实例多半已写过)。
+function primeBackfill(file, size) {
+  const cap = Math.min(size, PRIME_BACKFILL_BYTES);
+  const buf = Buffer.alloc(cap);
+  const fd = fs.openSync(file, "r");
+  try {
+    fs.readSync(fd, buf, 0, cap, size - cap);
+  } finally {
+    fs.closeSync(fd);
+  }
+  const lines = buf.toString("utf8").split("\n");
+  if (size > cap) lines.shift(); // 从字节中间开始,首行是半截,丢掉
+  const chatLines = lines
+    .filter(function (l) { return l.indexOf(CHAT_MARKER) !== -1; })
+    .slice(-PRIME_BACKFILL_MAX);
+  for (const l of chatLines) ingest(l.replace(/\r$/, ""), { noLog: true });
+  fileState.offset = size;
+  // 末尾可能是半截行,留作 tail,等续写补全后再解析
+  fileState.tail = lines.length ? lines[lines.length - 1] : "";
+  const fpLen = Math.min(FINGERPRINT_LEN, size);
+  if (fpLen > 0) {
+    const fp = Buffer.alloc(fpLen);
+    const fd2 = fs.openSync(file, "r");
+    try {
+      fs.readSync(fd2, fp, 0, fpLen, size - fpLen);
+    } finally {
+      fs.closeSync(fd2);
+    }
+    fileState.fingerprint = fp;
+  } else {
+    fileState.fingerprint = null;
+  }
+}
+
 function tailOnce() {
   const cfg = deps.getConfig();
   const file = String((cfg && cfg.deadlockConsoleLog) || DEFAULT_CONSOLE_LOG || "");
@@ -189,11 +245,20 @@ function tailOnce() {
     return; // 游戏尚未启动/日志不存在
   }
   if (!fileState.primed) {
-    // 首次接触:从当前末尾开始,不回放历史聊天(桥重启时不把旧消息全刷出来)。
+    fileState.primed = true;
+    // 首次接触:
+    //  - 游戏正在运行 => 桥是中途(重)启的,回填本局最近聊天,让"桥开启前的聊天"也能翻译;
+    //  - 游戏不在运行 => 这份日志是上一局留下的,seek 到末尾,不回放(否则登录自启时会翻译整局旧历史)。
     fileState.offset = stat.size;
     fileState.tail = "";
     fileState.fingerprint = null;
-    fileState.primed = true;
+    if (stat.size > 0 && typeof deps.isGameRunning === "function" && deps.isGameRunning()) {
+      try {
+        primeBackfill(file, stat.size);
+      } catch (e) {
+        deps.log("warn", "overlay prime backfill failed: " + ((e && e.message) || String(e)));
+      }
+    }
     return;
   }
 
@@ -213,12 +278,13 @@ function tailOnce() {
     if (!probe.equals(fileState.fingerprint)) reset = true;
   }
   if (reset) {
-    // 游戏重启会清空重写 console.log:从头读这一轮新日志,并作废上一局的去重记录
+    // 游戏重启会清空重写 console.log:从头读这一轮新日志,并作废上一局的去重记录。
+    // 同时清空聊天缓冲/换会话标识,避免上一局的聊天残留在悬浮窗里。
     fileState.offset = 0;
     fileState.tail = "";
     fileState.fingerprint = null;
-    clearDedup();
-    deps.log("info", "overlay: game console.log rewritten, re-tailing from start");
+    beginNewSession();
+    deps.log("info", "overlay: game console.log rewritten, new session, re-tailing from start");
   }
 
   const fd = fs.openSync(file, "r");
@@ -274,10 +340,22 @@ function latestSeq() {
   return seq;
 }
 
+function sessionId() {
+  return session;
+}
+
+// 游戏退出时调用:清空缓冲并换会话标识(下次进游戏从干净状态开始)。
+function clearMessages() {
+  beginNewSession();
+}
+
 function start(d) {
   setDeps(d);
   if (started) return;
   started = true;
+  // 每次桥进程启动都拿一个不同的会话标识:悬浮窗若在桥重启后仍然活着,
+  // 轮询到标识变化就会清屏并重新拉取(否则会因序号错位而卡住不更新)。
+  session = Date.now();
   // 先 prime 一次:立刻记下当前文件长度,避免第一轮循环与启动日志交错把历史读进来
   try {
     tailOnce();
@@ -297,6 +375,7 @@ function stop() {
 function reset() {
   ring = [];
   seq = 0;
+  session = 0;
   queue = [];
   translating = 0;
   clearDedup();
@@ -322,6 +401,8 @@ module.exports = {
   reset: reset,
   list: list,
   latestSeq: latestSeq,
+  sessionId: sessionId,
+  clearMessages: clearMessages,
   pageHtml: pageHtml,
   // 仅测试使用:把一行模拟日志喂进解析管线
   ingestLine: ingest,
