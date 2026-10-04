@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="440" viewBox="0 0 1200 440" role="img" aria-labelledby="archTitle archDesc">
+  <title id="archTitle">DeadlockLingua 工作原理 · 单向数据流</title>
+  <desc id="archDesc">游戏内 Panorama Mod 把聊天写成 console.log 里的 [LCT-CHAT] 单行 JSON，本地 Node.js 桥增量读取并调用翻译服务商，再交给游戏外的悬浮窗/字幕浮层显示。回程只有一条虚线：用户把要说的话译成英文、复制到剪贴板后在游戏里手动粘贴。</desc>
+
+  <defs>
+    <marker id="arBrass" markerWidth="7" markerHeight="7" refX="5" refY="3.5" orient="auto" markerUnits="strokeWidth">
+      <path d="M0 0 L5 3.5 L0 7 z" fill="#C9A44E"/>
+    </marker>
+    <marker id="arSteel" markerWidth="7" markerHeight="7" refX="5" refY="3.5" orient="auto" markerUnits="strokeWidth">
+      <path d="M0 0 L5 3.5 L0 7 z" fill="#5A6577"/>
+    </marker>
+    <marker id="arVerdi" markerWidth="7" markerHeight="7" refX="5" refY="3.5" orient="auto-start-reverse" markerUnits="strokeWidth">
+      <path d="M0 0 L5 3.5 L0 7 z" fill="#4E8C7A"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="1200" height="440" rx="24" fill="#0C0E12"/>
+  <rect x="0.75" y="0.75" width="1198.5" height="438.5" rx="23.25" fill="none" stroke="#232A34" stroke-width="1.5"/>
+
+  <text x="48" y="56" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="18" letter-spacing="2" fill="#C9A44E">DATA FLOW · 数据流</text>
+  <text x="1152" y="56" text-anchor="end" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="16" fill="#8A93A3">游戏内不可入站 · no in-game inbound</text>
+
+  <text x="320" y="86" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="17" fill="#C9A44E">唯一可用通道 · only live channel</text>
+
+  <g id="box-game">
+    <rect x="68" y="104" width="224" height="112" rx="12" fill="#161A21" stroke="#232A34" stroke-width="1.5"/>
+    <text x="88" y="152" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif" font-size="22" font-weight="600" fill="#F2F4F8">游戏内 Mod</text>
+    <text x="88" y="184" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="17" fill="#8A93A3">Panorama UI</text>
+  </g>
+
+  <g id="box-log">
+    <rect x="348" y="104" width="224" height="112" rx="12" fill="#161A21" stroke="#232A34" stroke-width="1.5"/>
+    <text x="368" y="152" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="21" font-weight="600" fill="#F2F4F8">console.log</text>
+    <text x="368" y="184" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="17" fill="#8A93A3">[LCT-CHAT] JSON</text>
+  </g>
+
+  <g id="box-bridge">
+    <rect x="628" y="104" width="224" height="112" rx="12" fill="#161A21" stroke="#232A34" stroke-width="1.5"/>
+    <text x="648" y="152" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif" font-size="22" font-weight="600" fill="#F2F4F8">本地桥 / Bridge</text>
+    <text x="648" y="184" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="17" fill="#8A93A3">127.0.0.1:8791</text>
+  </g>
+
+  <g id="box-overlay">
+    <rect x="908" y="104" width="224" height="112" rx="12" fill="#161A21" stroke="#232A34" stroke-width="1.5"/>
+    <text x="928" y="152" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif" font-size="22" font-weight="600" fill="#F2F4F8">悬浮窗 / Overlay</text>
+    <text x="928" y="184" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="17" fill="#8A93A3">panel + subtitle</text>
+  </g>
+
+  <path d="M292 160 H336" stroke="#C9A44E" stroke-width="2.5" marker-end="url(#arBrass)"/>
+  <path d="M572 160 H616" stroke="#5A6577" stroke-width="2" marker-end="url(#arSteel)"/>
+  <path d="M852 160 H896" stroke="#5A6577" stroke-width="2" marker-end="url(#arSteel)"/>
+
+  <g id="box-providers">
+    <rect x="560" y="276" width="360" height="84" rx="12" fill="#161A21" stroke="#232A34" stroke-width="1.5"/>
+    <text x="584" y="312" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif" font-size="19" font-weight="600" fill="#F2F4F8">翻译服务商 / Providers</text>
+    <text x="584" y="338" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="16" fill="#8A93A3">Bing · Microsoft · OpenAI</text>
+    <text x="584" y="358" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="16" fill="#8A93A3">DeepL · Google</text>
+  </g>
+
+  <path d="M740 216 V268" stroke="#4E8C7A" stroke-width="2.5" marker-start="url(#arVerdi)" marker-end="url(#arVerdi)"/>
+  <text x="756" y="250" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="16" fill="#4E8C7A">translate</text>
+
+  <path d="M1020 216 V400 H180 V224" fill="none" stroke="#4E8C7A" stroke-width="2" stroke-dasharray="8 7" marker-end="url(#arVerdi)"/>
+  <text x="600" y="392" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif" font-size="18" fill="#8A93A3">自己要说的话：译成英文 → 复制 → 回游戏 Ctrl+V（手动粘贴）</text>
+</svg>

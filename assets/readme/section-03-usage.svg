@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="80" viewBox="0 0 1200 80" role="img" aria-labelledby="s3ut s3ud">
+  <title id="s3ut">章节 03</title>
+  <desc id="s3ud">带有编号 03 与输入框图标的章节分隔条。</desc>
+
+  <rect x="0" y="0" width="1200" height="80" rx="14" fill="#0C0E12"/>
+  <rect x="0.75" y="0.75" width="1198.5" height="78.5" rx="13.25" fill="none" stroke="#232A34" stroke-width="1.5"/>
+  <rect x="44" y="24" width="6" height="32" rx="3" fill="#C9A44E"/>
+  <text x="66" y="53" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="22" fill="#C9A44E">03</text>
+  <line x1="112" y1="40" x2="1052" y2="40" stroke="#232A34" stroke-width="1.5"/>
+  <g stroke="#C9A44E" stroke-width="2" fill="none" stroke-linecap="round">
+    <rect x="1098" y="24" width="48" height="30" rx="7"/>
+    <path d="M1110 39 H1134"/>
+    <path d="M1110 47 H1124"/>
+  </g>
+</svg>

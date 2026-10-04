@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="304" height="44" viewBox="0 0 304 44" role="img" aria-label="Platform Windows 10 and 11">
+  <title>Platform Windows 10/11</title>
+  <defs>
+    <clipPath id="clipPlatform"><rect x="0" y="0" width="304" height="44" rx="10"/></clipPath>
+  </defs>
+  <g clip-path="url(#clipPlatform)">
+    <rect x="0" y="0" width="122" height="44" fill="#161A21"/>
+    <rect x="122" y="0" width="182" height="44" fill="#3A4453"/>
+  </g>
+  <rect x="0.75" y="0.75" width="302.5" height="42.5" rx="9.25" fill="none" stroke="#232A34" stroke-width="1.5"/>
+  <text x="18" y="29" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="19" letter-spacing="1" fill="#8A93A3">PLATFORM</text>
+  <text x="142" y="29" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="19" font-weight="700" fill="#F2F4F8">Windows 10/11</text>
+</svg>

@@ -1,87 +1,105 @@
-DeadlockLingua - Deadlock 聊天翻译 Mod 安装使用说明
+DeadlockLingua - Deadlock 聊天实时翻译 安装使用说明
 =================================================
 
-本 Mod 由两部分组成:
-  1. 游戏内部分(pak01_dir.vpk)—— 聊天翻译界面
-  2. 本地桥(core + portable-node)—— 负责调用翻译接口(免 Key,免费)
+重要：译文显示在"游戏外的悬浮窗"，不再显示在游戏内。
+Deadlock 在 2026-10-01 的更新中移除了游戏的全部网络能力，游戏内已无法接收数据，
+"游戏内显示译文"在架构上不可行。详见 README.md。
 
-两步都要装,缺一不可。
+本工具由三部分组成:
+  1. 游戏内 Mod(pak01_dir.vpk)              —— 把聊天写到本地 console.log
+  2. 本地桥(core + portable-node)           —— 读取并调用翻译接口(默认免 Key)
+  3. 游戏外悬浮窗(scripts\overlay_window.ps1) —— 显示原文+译文，输入待翻译文本
+
+前三步都要装；悬浮窗会随游戏自动打开，也可用 ShowOverlay.bat 手动打开。
 
 --------------------------------------------------
 一、安装(约 3 分钟)
 --------------------------------------------------
 
-1. 把整个文件夹解压到你喜欢的位置(建议路径不要带空格,如 D:\DeadlockLingua)
+1. 把整个文件夹解压到你喜欢的位置(建议路径不带空格、不带中文，如 D:\DeadlockLingua)
 
-2. 安装游戏内 Mod(二选一):
-   方法 A(推荐):打开 Deadlock Mod Manager,把 pak01_dir.vpk 拖进去导入
-   方法 B(手动):把 pak01_dir.vpk 复制到
-      <你的Steam库>\steamapps\common\Deadlock\game\citadel\addons\
-      如果该目录已有同名文件,改成别的编号,如 pak25_dir.vpk
+2. 安装游戏内 Mod:
+   - 压缩包里的 VPK 叫 pak01_dir.vpk，先把它改成别的名字(不要用 pak01)，
+     推荐 pak22_dir.vpk；只要不与 addons 目录里已有文件重名即可。
+   - 方法 A(推荐): 打开 Deadlock Mod Manager，把改名后的 VPK 拖进去导入
+   - 方法 B(手动): 复制到
+       <你的Steam库>\steamapps\common\Deadlock\game\citadel\addons\
+     ⚠ 千万不要放进 citadel\ 目录(那会覆盖游戏本体资源)
 
 3. 启动本地桥(二选一):
-   方法 A(推荐,一劳永逸):**双击 install-autostart.bat**(安装开机自启)
-     之后开机自动启动桥,游戏退出桥自动关闭,什么都不用管。
-     卸载自启:双击 remove-autostart.bat
-   方法 B(临时,后台运行):双击 StartBridgeSilent.vbs(不显示窗口,每次玩之前双击一次)
-     停止桥:双击 StopBridge.bat
-     如需看窗口/带游戏启动:双击 StartDeadlock.bat 或 StartDeadlock.bat -game
+   方法 A(推荐,一劳永逸): 双击 install-autostart.bat 安装开机自启
+     卸载自启: 双击 remove-autostart.bat
+   方法 B(临时,后台运行): 双击 StartBridgeSilent.vbs
+     停止桥: 双击 StopBridge.bat
+     重启桥: 双击 RestartBridge.bat
+     需要看窗口/带游戏启动: 双击 StartDeadlock.bat
 
-4. 启动游戏,进任意一局(训练场也行):
-   - 按 Enter 打开聊天,输入 /tr 回车,打开设置面板
-   - 点"测试"按钮,应显示"测试成功: 你好"
-   - 点"保存",ESC 关闭面板
-   - 大功告成!队友发外语消息,下方会显示金色中文译文
+4. 完全重启 Deadlock。进入对局后，屏幕边缘会自动出现翻译悬浮窗。
 
 --------------------------------------------------
-二、设置面板说明
+二、怎么用
 --------------------------------------------------
 
-  打开方式:聊天输入 /tr 回车;或聊天框右侧"译"按钮
+看译文:
+  - 悬浮窗默认贴在屏幕右边缘，平时只留一条细竖条，鼠标扫过去自动滑出。
+  - 想让它常驻，点窗口里的"固定"。
+  - 没看到窗口？双击 ShowOverlay.bat 可手动打开(不需要先开游戏)。
 
-  - 启用翻译        总开关(默认开)
-  - 服务商          bing(免Key,默认)/ microsoft(Azure Key,可选)
-  - API Key/区域    仅用 Microsoft 时需要填写
-  - 目标语言        译文语言,下拉选择(默认简体中文)
-  - 显示模式        双语(原文+译文)/ 仅译文
-  - 发送前翻译      关(发原文)/ 仅译文 / 双语(原文 | 译文)
-  - 发送目标语言    发送前翻译成什么语言(默认英语)
-  - 超时/强制翻译   一般不用动
+发消息(把中文发进游戏聊天):
+  - 在悬浮窗底部输入框输入中文 → 点"翻译并复制"(或按回车)
+  - 回到游戏，打开聊天，按 Ctrl+V 粘贴发送
+  - 必须手动粘贴: 游戏侧收不到任何外部数据，无法自动送进游戏输入框
 
-  所有选项点击选择,改完点"保存"生效。
+字幕浮层(全屏游戏不挡视野):
+  - 设置里把"显示形态"改成"字幕浮层"，屏幕角落会出现聊天胶囊
+  - 调整位置: 设置 →"调整字幕位置(拖动)" → 拖到想要的位置 → 点"完成放置"
+
+设置:
+  - 点悬浮窗标题栏的"设置"。可配置服务商、API Key、目标语言、显示模式，
+    以及悬浮窗外观、字幕浮层等。
+  - 配置保存在 config\config.json(含 API Key，不要外传)。
+
+注意: 游戏内的 /tr 命令已随设置面板一并移除 —— 输入 /tr 不会打开任何面板，
+     只会作为普通聊天文本发送。所有设置请用悬浮窗里的"设置"。
 
 --------------------------------------------------
 三、常见问题
 --------------------------------------------------
 
-Q: 译文显示"本地桥未运行"?
-A: 桥没启动。确认第 3 步做了:要么装了自启(重启电脑后生效),要么双击了 StartBridgeSilent.vbs。
+Q: 游戏里怎么不显示译文了？
+A: 2026-10-01 的更新移除了游戏的网络能力，游戏内已无法接收数据。
+   请用游戏外悬浮窗看译文。
 
-Q: 点测试显示失败?
-A: 先确认桥在运行;再确认网络能访问 bing.com(公共接口,偶尔抽风会自动重试)。
-   一直失败可把服务商切到 microsoft 并填自己的 Azure Key。
+Q: 悬浮窗没出现 / 显示"桥离线"？
+A: 桥没启动。确认第 3 步做了: 要么装了自启(重启电脑后生效)，
+   要么双击了 StartBridgeSilent.vbs；也可直接双击 ShowOverlay.bat。
+   还能在任务管理器里看有没有 node.exe。
 
-Q: 游戏里没反应?
-A: 确认 VPK 装到了 addons 目录且游戏完全重启过;确认 /tr 能打开设置面板。
+Q: 点"翻译并复制"没反应 / 复制失败？
+A: 部分系统策略会拦截剪贴板写入。此时英文会被自动选中，按 Ctrl+C 再回游戏粘贴即可。
 
-Q: 想卸载?
-A: 游戏部分:Mod Manager 里禁用/删除,或删掉 addons 里对应的 vpk。
-   自启部分:powershell -ExecutionPolicy Bypass -File scripts\autostart.ps1 -Action Remove
+Q: 翻译偶尔变慢或失败？
+A: 可在设置里调大"翻译超时"，或配置备用服务商做自动回退。
+
+Q: 想卸载？
+A: 游戏部分: Mod Manager 里禁用/删除，或删掉 addons 里对应的 vpk。
+   自启部分: powershell -ExecutionPolicy Bypass -File scripts\autostart.ps1 -Action Remove
 
 --------------------------------------------------
 四、目录结构
 --------------------------------------------------
 
-  pak01_dir.vpk          游戏内 Mod(装进 Deadlock addons)
+  pak01_dir.vpk          游戏内 Mod(改名后装进 Deadlock 的 citadel\addons)
   core\                  本地翻译桥(不要删)
   portable-node\         内置 Node.js 运行时(不要删)
+  scripts\overlay_window.ps1  游戏外悬浮窗(原生 WPF，由桥或 ShowOverlay.bat 拉起)
   install-autostart.bat  双击安装开机自启
   remove-autostart.bat   双击卸载开机自启
-  StartBridgeSilent.vbs  后台手动启动(推荐,无窗口)
-  StartDeadlock.bat      终端/带游戏启动(默认只启动桥,-game 连游戏启动)
+  StartBridgeSilent.vbs  后台手动启动桥(推荐，无窗口)
+  StartDeadlock.bat      终端启动，或带游戏一起启动
   StopBridge.bat         停止后台桥
   RestartBridge.bat      重启桥
-  scripts\autostart.ps1  自启脚本(一般由上面的 bat 调用,无需手动执行)
+  ShowOverlay.bat        手动打开翻译悬浮窗(不必先开游戏)
 
-更多说明见 README.md;源代码、更新说明与构建方法见 GitHub 仓库:
+更多说明见 README.md；源代码、更新说明与构建方法见 GitHub 仓库:
 https://github.com/Thirt927/DeadlockLingua

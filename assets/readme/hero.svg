@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="340" viewBox="0 0 1200 340" role="img" aria-labelledby="heroTitle heroDesc">
+  <title id="heroTitle">DeadlockLingua — Deadlock 聊天实时翻译</title>
+  <desc id="heroDesc">项目名与一句话价值：把 Deadlock 游戏内聊天实时翻译到游戏外的悬浮窗。右侧以真实日志格式 [LCT-CHAT] 指向一条双语字幕胶囊（英文原文 + 中文译文）作为示意。</desc>
+
+  <defs>
+    <marker id="heroArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0 0 L6 3 L0 6 z" fill="#C9A44E"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="1200" height="340" rx="24" fill="#0C0E12"/>
+  <rect x="0.75" y="0.75" width="1198.5" height="338.5" rx="23.25" fill="none" stroke="#232A34" stroke-width="1.5"/>
+
+  <g id="title-block">
+    <text x="56" y="82" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="18" letter-spacing="3" fill="#C9A44E">DEADLOCK · CHAT TRANSLATION</text>
+    <text x="56" y="150" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif" font-size="58" font-weight="700" fill="#F2F4F8">DeadlockLingua</text>
+    <rect x="56" y="168" width="120" height="4" rx="2" fill="#C9A44E"/>
+    <text x="56" y="212" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif" font-size="23" fill="#DDE2EA">把队友和对手的聊天实时译成中文</text>
+    <text x="56" y="242" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="20" fill="#8A93A3">Real-time Deadlock chat translation in an overlay</text>
+    <text x="56" y="298" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="17" letter-spacing="0.5" fill="#8A93A3">v2.0.0 · GPL-3.0 · Windows · Node.js</text>
+  </g>
+
+  <g id="project-proof">
+    <rect x="700" y="64" width="444" height="46" rx="10" fill="#161A21" stroke="#232A34" stroke-width="1.5"/>
+    <text x="720" y="93" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="16" fill="#A9B2C0">[LCT-CHAT] {"n":"Kuro","t":"gg wp"}</text>
+
+    <path d="M716 112 L716 144" stroke="#C9A44E" stroke-width="2.5" marker-end="url(#heroArrow)"/>
+
+    <rect x="700" y="152" width="444" height="150" rx="12" fill="#161A21"/>
+    <rect x="700" y="152" width="6" height="150" rx="3" fill="#C9A44E"/>
+    <rect x="700.75" y="152.75" width="442.5" height="148.5" rx="11.25" fill="none" stroke="#3A4453" stroke-width="1.5"/>
+
+    <rect x="726" y="176" width="30" height="30" rx="7" fill="#C9A44E"/>
+    <text x="741" y="197" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="18" font-weight="700" fill="#0C0E12">K</text>
+    <text x="768" y="197" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif" font-size="20" font-weight="600" fill="#F2F4F8">Kuro</text>
+
+    <text x="726" y="242" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="21" fill="#A9B2C0">gg wp, push mid</text>
+    <text x="726" y="276" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif" font-size="22" font-weight="600" fill="#F2F4F8">打得好，推中路</text>
+  </g>
+</svg>

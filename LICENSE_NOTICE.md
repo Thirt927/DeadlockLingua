@@ -39,7 +39,9 @@ snippet,以及 ChatLinesArea / ChatMessages / ChatControls / ChatInput 等 ID �
 ### 其它
 
 - Deadlock Chat Translator(DLCT):调研对象,其"隐藏 HTML Panel + localhost Bridge"
-  技术路线与本地桥安全原则等思路被借鉴;**未复制其代码、协议、标识、配置结构或 UI**
+  技术路线与本地桥安全原则等思路被借鉴;**未复制其代码、协议、标识、配置结构或 UI**。
+  (该"隐藏面板"路线在 2026-10-01 游戏移除 Panorama HTTP 能力后已弃用;
+   本项目现在的通道见 docs/architecture.md。)
 
 ## 4. 第三方组件
 
