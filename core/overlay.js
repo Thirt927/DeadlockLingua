@@ -83,6 +83,7 @@ function parseLine(line) {
     sender: String(obj.n || "").trim(),
     channel: String(obj.c || "").trim(),
     hero: String(obj.h || "").trim(),
+    kind: String(obj.k || "chat").trim(),
     text: text.slice(0, 400),
   };
 }
@@ -122,6 +123,10 @@ function ingest(line, opts) {
     const first = dedup.keys().next().value;
     if (first !== undefined) dedup.delete(first);
   }
+
+  // 快捷消息(聊天轮盘/Ping/英雄冷却提示 等,HUD kind=quick)由游戏客户端本地化成
+  // 目标语言,没有翻译需求:不进字幕浮层、不翻译(聊天日志上面已正常落盘)。
+  if (rec.kind === "quick") return;
 
   const msg = {
     seq: ++seq,
@@ -164,8 +169,14 @@ function pump() {
         msg.pending = false;
       })
       .catch(function (e) {
-        msg.error = String((e && e.message) || e || "translate_failed").slice(0, 120);
+        const em = String((e && e.message) || e || "translate_failed").slice(0, 120);
+        msg.error = em;
         msg.pending = false;
+        // 入站翻译失败原来不落日志,导致"为什么某条没翻译/超时"查不到。这里补一行,
+        // 便于对照 bridge.log 的 provider 报错(超时/回退)。
+        try {
+          deps.log("warn", "overlay translate failed: " + em + " | " + msg.text.slice(0, 40).replace(/\s+/g, " "));
+        } catch (err) {}
       })
       .then(function () {
         translating -= 1;

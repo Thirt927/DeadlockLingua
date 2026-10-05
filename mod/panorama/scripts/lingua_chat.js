@@ -3055,6 +3055,7 @@ function resolveSteamId(record) {
         n: String(entry.sender || "").slice(0, 64),
         c: String(entry.channel || "").slice(0, 32),
         h: String(entry.hero || "").slice(0, 32),
+        k: String(entry.kind || "chat").slice(0, 16),
         t: String(entry.text || "").slice(0, 400),
       }));
     } catch (e) {}

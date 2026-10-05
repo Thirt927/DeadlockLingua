@@ -1278,3 +1278,19 @@
   - CRLF 复查: 上述文件 LF-only=0。
 - **仍需用户确认**: GitHub 上 SVG 的实际渲染与明暗主题观感; 章节顺序是否符合预期。
 - **已知限制**: 徽章中的版本号 `v2.0.0` 为静态值, 发版需手动同步(VERSION / config.example / 文档多处)。
+
+## 2026-10-05 第六十三轮:快捷消息不再进字幕浮层(桥端按 kind=quick 过滤)+ 修 bing 翻译超时(timeoutMs 1500→15000)与入站失败补日志
+
+- **背景**: 用户反馈两件事 —— ① 快捷消息(聊天轮盘"撤退/谢了/上了"、技能冷却提示等)游戏客户端**已本地化成中文**, 没有翻译需求, 却全被塞进了字幕浮层(弹幕)刷屏; ② 偶发 `bing` 翻译超时, "两个超时之间夹一个成功"。
+- **根因**:
+  1. **快捷消息进弹幕**: mod 侧 `buildLogEntry` 早就算好 `kind`(`quick`/`hud`/`lobby`/`chat`), 但 `emitOverlayChat()` 出向载荷只带 `o/n/c/h/t`, **把 kind 丢了**; 桥端 `overlay.js` 的 `ingest()` 又**无条件先把消息 push 进字幕环形缓冲, 再判断要不要翻译** —— 于是已被客户端本地化的中文快捷消息虽然不翻译, 仍会以"原文"形式铺满字幕浮层。
+  2. **bing 超时**: `config/config.json` 的 `timeoutMs` 被设成了 **1500ms**(默认 15000)。该值同时卡住主服务商(openai 单次 `min(1500,20000)`=1500ms)与**回退链**(回退分支直接复用同一 `baseOpts.timeoutMs`, 没有单独放宽, 见 `bridge_server.js` 的 `runTranslate`); 而 bing 一次翻译要发**两个** HTTP 请求(先 GET 翻译页拿 IG/IID/token, 再 POST `ttranslatev3`), **任意一个**超过 1500ms 就 `provider_timeout`。实测: bing 冷启动 2939ms、命中页面参数缓存后 1005ms、openai 743ms —— 网络快一点成功、慢一点超时, 正好是"超时—成功—超时"。
+  3. **失败不可见**: overlay 入站翻译的 `pump().catch()` **不写任何日志**, 所以 bridge.log 里查不到这些超时(只有"回退成功"才写 `fallback -> ...` 一行)。
+- **改动文件**
+  - `mod/panorama/scripts/lingua_chat.js`: `emitOverlayChat()` 载荷新增 `k`(kind)字段(`String(entry.kind||"chat").slice(0,16)`)。
+  - `core/overlay.js`: `parseLine()` 读出 `k` → `rec.kind`; `ingest()` 在**写完聊天日志 / 去重之后、进字幕缓冲之前**增加 `if (rec.kind === "quick") return;`(快捷消息不翻译、不进弹幕, 但 `logs/chat` 仍完整落盘); `pump()` 的 `catch` 补一行 `overlay translate failed: <err> | <text前40字>` 警告日志。
+  - `config/config.json`: `timeoutMs` **1500 → 15000**。
+- **原因/效果**: 快捷消息不再出现在字幕浮层(去掉大半刷屏); 超时恢复默认后优先用"远快于超时"的 DeepSeek, bing 作为回退也有了充足预算(冷启动 2.9s ≪ 15s); 之后若真发生失败, bridge.log 能直接看到 provider 报错明细, 不需要再靠猜。
+- **验证方式**(全部实测): ① `node --check` 对 `core/overlay.js` 与 `lingua_chat.js` 均通过; ② `scripts/overlay_test.js` **PASS 13 / FAIL 0**; ③ `scripts/build.ps1` 构建 7 个资源全部 `ok`; ④ 已重命名 `dist/pak22_dir.vpk` 并部署到 `E:\Steam\steamapps\common\Deadlock\game\citadel\addons`(259638 字节, 2026/10/5 17:54), 并清掉 addons 里的旧 `pak01_dir.vpk`; ⑤ 重启桥后 `GET /api/v1/health` = ok、`GET /api/v1/config` 读回 `timeoutMs=15000`; ⑥ `git diff --numstat` 干净(`overlay.js 12/1`、`lingua_chat.js 1/0`, 无首行 BOM/CRLF 变动)。
+- **仍需用户测试**: 重启 Deadlock 打一局 → ① 撤退/谢了/上了/冷却提示等快捷消息**不再出现在字幕浮层**; ② 正常英文聊天仍照常翻译显示; ③ 若再遇到翻译失败, `logs/bridge.log` 里应能看到 `overlay translate failed: ...` 明细。
+- **已知限制**: 是否过滤取决于 mod 对快捷消息的 `kind=quick` 判定(HUD 气泡行 + 带 `PingLabel` 的聊天行); 若某条轮盘消息没被标成 quick, 仍会进弹幕。改动含 mod 脚本, **必须重建部署 VPK 并重启游戏**才生效; 桥端改动已随桥重启生效。
