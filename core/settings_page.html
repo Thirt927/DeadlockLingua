@@ -4,45 +4,101 @@
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <style>
   :root {
-    --bg: #0c0e12;
-    --surface: #131920;
-    --line: #232a34;
-    --text: #e6eaf0;
-    --dim: #8a93a3;
-    --accent: #c9a44e;
-    --ok: #4e8c7a;
-    --bad: #c2564b;
+    --bg: #0c0e12; --surface: #131920; --surface2: #0e1319; --line: #232a34;
+    --text: #e6eaf0; --dim: #8a93a3; --accent: #c9a44e; --ok: #4e8c7a; --bad: #c2564b; --warn: #d08a3e;
   }
   * { box-sizing: border-box; }
   body {
-    margin: 0; padding: 28px 20px 80px;
-    background: var(--bg); color: var(--text); font: 14px/1.55 -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+    margin: 0; padding: 0 0 96px;
+    background: var(--bg); color: var(--text);
+    font: 14px/1.55 -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
   }
-  .wrap { max-width: 860px; margin: 0 auto; }
-  header { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
-  h1 { font-size: 22px; margin: 0 0 4px; letter-spacing: .3px; }
-  .sub { color: var(--dim); font-size: 13px; margin-bottom: 22px; }
-  fieldset {
+  .wrap { max-width: 940px; margin: 0 auto; padding: 0 20px; }
+
+  /* ---- 顶栏:标题 + 状态芯片 ---- */
+  header {
+    position: sticky; top: 0; z-index: 10;
+    background: linear-gradient(180deg, rgba(12,14,18,.98), rgba(12,14,18,.92));
+    border-bottom: 1px solid var(--line); padding: 16px 0 14px; margin-bottom: 18px;
+    backdrop-filter: blur(6px);
+  }
+  .head-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
+  h1 { font-size: 20px; margin: 0; letter-spacing: .3px; }
+  .chips { display: flex; gap: 8px; flex-wrap: wrap; }
+  .chip {
+    font-size: 12px; padding: 3px 10px; border-radius: 999px;
+    border: 1px solid var(--line); background: var(--surface2); color: var(--dim);
+  }
+  .chip b { color: var(--text); font-weight: 600; }
+  .chip.on { border-color: rgba(78,140,122,.55); color: var(--ok); }
+  .chip.off { border-color: rgba(194,86,75,.5); color: var(--bad); }
+
+  .note {
+    color: var(--dim); font-size: 12.5px; background: var(--surface2);
+    border: 1px solid var(--line); border-left: 3px solid var(--accent);
+    border-radius: 8px; padding: 9px 12px; margin: 14px 0 18px;
+  }
+  .note b { color: var(--accent); }
+
+  /* ---- 分组:可折叠 ---- */
+  details.group {
     border: 1px solid var(--line); border-radius: 12px; background: var(--surface);
-    padding: 16px 18px 18px; margin: 0 0 16px;
+    margin-bottom: 12px; overflow: hidden;
   }
-  legend { color: var(--accent); font-weight: 600; padding: 0 8px; font-size: 13px; letter-spacing: .5px; }
-  .row { display: grid; grid-template-columns: 240px 1fr; gap: 10px 16px; align-items: center; padding: 7px 0; border-bottom: 1px dashed rgba(255,255,255,.04); }
+  details.group > summary {
+    cursor: pointer; list-style: none; padding: 13px 16px;
+    font-weight: 600; color: var(--accent); letter-spacing: .4px; font-size: 13.5px;
+    display: flex; align-items: center; gap: 9px; user-select: none;
+  }
+  details.group > summary::-webkit-details-marker { display: none; }
+  details.group > summary::before {
+    content: "▸"; color: var(--dim); font-size: 11px; transition: transform .15s;
+  }
+  details.group[open] > summary::before { transform: rotate(90deg); }
+  details.group > summary .tag {
+    margin-left: auto; font-weight: 400; font-size: 11.5px; color: var(--dim);
+  }
+  .gbody { padding: 4px 16px 16px; }
+
+  /* ---- 字段行 ---- */
+  .row {
+    display: grid; grid-template-columns: 250px minmax(0, 1fr);
+    gap: 8px 16px; align-items: center; padding: 8px 0;
+    border-bottom: 1px dashed rgba(255,255,255,.045);
+  }
   .row:last-child { border-bottom: 0; }
-  .row > label { color: var(--text); }
-  .row .hint { grid-column: 2; color: var(--dim); font-size: 12px; margin: -4px 0 2px; }
-  input, select {
+  .row > .lab { color: var(--text); }
+  .row > .lab small { display: block; color: var(--dim); font-size: 11.5px; margin-top: 2px; }
+  .row .hint { grid-column: 2; color: var(--dim); font-size: 11.5px; margin: -3px 0 2px; }
+
+  input, select, textarea {
     width: 100%; padding: 7px 9px; border-radius: 7px; border: 1px solid var(--line);
-    background: #0e1319; color: var(--text); font: inherit;
+    background: var(--surface2); color: var(--text); font: inherit;
   }
-  input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--accent); }
+  input:focus, select:focus { outline: 1px solid var(--accent); border-color: var(--accent); }
+  input[type=checkbox] { width: 17px; height: 17px; accent-color: var(--accent); flex: none; }
   input[type=range] { padding: 0; }
-  .inline { display: flex; align-items: center; gap: 10px; }
-  .inline .val { color: var(--dim); font-variant-numeric: tabular-nums; min-width: 42px; text-align: right; }
-  code { color: var(--accent); font-size: 12.5px; }
+  select { appearance: none; background-image: linear-gradient(45deg, transparent 50%, var(--dim) 50%), linear-gradient(135deg, var(--dim) 50%, transparent 50%); background-position: calc(100% - 16px) 15px, calc(100% - 11px) 15px; background-size: 5px 5px, 5px 5px; background-repeat: no-repeat; padding-right: 28px; }
+
+  .inline { display: flex; align-items: center; gap: 9px; }
+  .inline .val { color: var(--dim); font-variant-numeric: tabular-nums; min-width: 40px; text-align: right; font-size: 12.5px; }
+  .stack { display: grid; gap: 8px; }
+
+  /* 复选框组(回退服务商 / 多选项) */
+  .checks { display: flex; flex-wrap: wrap; gap: 10px 20px; }
+  .checks label { display: flex; align-items: center; gap: 7px; cursor: pointer; color: var(--text); }
+  .checks .keydot {
+    width: 7px; height: 7px; border-radius: 50%; background: var(--line); flex: none;
+  }
+  .checks .keydot.on { background: var(--ok); }
+
+  code { color: var(--accent); font-size: 12.5px; background: rgba(201,164,78,.08); padding: 1px 5px; border-radius: 4px; }
+  .fieldname { color: var(--dim); font-size: 11px; font-family: ui-monospace, Consolas, monospace; }
+
+  /* ---- 底部操作条 ---- */
   .bar {
-    position: fixed; left: 0; right: 0; bottom: 0; padding: 12px 20px;
-    background: rgba(12,14,18,.94); border-top: 1px solid var(--line);
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 20;
+    padding: 12px 20px; background: rgba(12,14,18,.96); border-top: 1px solid var(--line);
     display: flex; align-items: center; gap: 14px; justify-content: center;
   }
   button {
@@ -51,25 +107,23 @@
   }
   button.ghost { background: transparent; color: var(--accent); }
   button:disabled { opacity: .5; cursor: default; }
-  #status { min-width: 220px; color: var(--dim); font-size: 13px; }
+  #status { min-width: 240px; color: var(--dim); font-size: 13px; }
   #status.ok { color: var(--ok); }
   #status.bad { color: var(--bad); }
-  .note { color: var(--dim); font-size: 12.5px; background: #0e1319; border: 1px solid var(--line); border-radius: 9px; padding: 10px 12px; margin-bottom: 16px; }
-  .note b { color: var(--accent); }
-  .off { opacity: .45; }
 </style>
 
 <div class="wrap">
   <header>
-    <div>
+    <div class="head-row">
       <h1>DeadlockLingua 设置</h1>
-      <div class="sub">改完点「保存」即刻生效（下一条消息按新设置执行）</div>
+      <div class="chips" id="chips"></div>
     </div>
   </header>
 
   <div class="note">
-    <b>常用开关也可以在游戏里用 <code>/tr</code> 改</b>。本页用于服务商、API Key 等一次性配置 —— 这些数据太大，走不了游戏内的窄带信道。
-    Key 显示为 <code>********</code> 表示已保存；<b>保持原样再保存不会覆盖它</b>；要清空请把该框清空后勾选「清空」。
+    常用的开关（启用翻译、显示模式、<b>发送前翻译</b>、目标语言）也可以在游戏里用 <code>/tr</code> 改 —— 那个是秒开的。
+    本页负责<b>服务商与 API Key 等完整配置</b>：这些数据有 1.3 KB，超过游戏内窄带信道 128 帧的上限，放不进去。
+    API Key 显示为 <code>********</code> 表示已保存，<b>保持原样再保存不会覆盖它</b>；清空需勾选该行右侧的「清空」。
   </div>
 
   <form id="form" autocomplete="off"></form>
@@ -83,171 +137,266 @@
 
 <script>
 "use strict";
-// 字段规格:分组 → 条目。path 为 config.json 内的点号路径。
-// type: text | secret | int | bool | enum | csv | range | color
+
+const LANGS = [
+  ["zh-Hans", "简体中文"], ["zh-Hant", "繁體中文"], ["en", "English"], ["ja", "日本語"],
+  ["ko", "한국어"], ["ru", "Русский"], ["es", "Español"], ["pt", "Português"],
+  ["de", "Deutsch"], ["fr", "Français"], ["it", "Italiano"], ["tr", "Türkçe"],
+  ["pl", "Polski"], ["th", "ไทย"], ["vi", "Tiếng Việt"], ["id", "Bahasa Indonesia"],
+  ["uk", "Українська"], ["ar", "العربية"], ["hi", "हिन्दी"], ["nl", "Nederlands"],
+];
+const PROVIDERS = ["bing", "microsoft", "openai", "deepl", "google"];
+const PROVIDER_LABEL = {
+  bing: "Bing（免 Key）", microsoft: "Microsoft Translator", openai: "OpenAI 兼容（DeepSeek 等）",
+  deepl: "DeepL", google: "Google Cloud",
+};
+const langLabel = (v) => {
+  const hit = LANGS.find((l) => l[0] === v);
+  return hit ? hit[1] + "（" + hit[0] + "）" : v;
+};
+
+// 字段规格。type: text | secret | int | bool | enum | lang | providers | range | color
+// key: config.json 内的点号路径
 const SPEC = [
-  { group: "翻译服务", fields: [
-    { path: "provider", label: "主服务商", type: "enum", options: ["bing", "microsoft", "openai", "deepl", "google"],
-      hint: "bing 免 Key；openai 兼容接口（DeepSeek 填这里）" },
-    { path: "fallbackProviders", label: "回退服务商", type: "csv",
-      hint: "逗号分隔，按顺序尝试；只尝试已配 Key 的服务商" },
-    { path: "defaults.sourceLanguage", label: "源语言", type: "text", hint: "auto = 自动检测" },
-    { path: "defaults.targetLanguage", label: "目标语言", type: "text", hint: "中文填 zh-Hans" },
-    { path: "timeoutMs", label: "翻译超时 (ms)", type: "int" },
+  { group: "翻译服务", open: true, tag: "服务商 / 语言 / 超时", fields: [
+    { key: "provider", label: "主服务商", type: "enum",
+      options: PROVIDERS.map((p) => [p, PROVIDER_LABEL[p]]),
+      hint: "Bing 免 Key 开箱可用；DeepSeek 等 OpenAI 兼容服务选 openai 并填 Key 与 Base URL" },
+    { key: "fallbackProviders", label: "回退服务商", type: "providers",
+      hint: "主服务商超时或报错时按顺序尝试；未配 Key 的不会真正生效（绿点=已配 Key）" },
+    { key: "defaults.sourceLanguage", label: "源语言", type: "lang", allowAuto: true,
+      hint: "auto = 自动检测" },
+    { key: "defaults.targetLanguage", label: "目标语言（入站）", type: "lang",
+      hint: "别人说话译成什么语言" },
+    { key: "timeoutMs", label: "翻译超时 (ms)", type: "int" },
   ]},
-  { group: "服务商 Key 与端点", note: "留空表示不修改；清空需勾「清空」", fields: [
-    { path: "microsoft.apiKey", label: "Microsoft Key", type: "secret" },
-    { path: "microsoft.region", label: "Microsoft 区域", type: "text" },
-    { path: "openai.apiKey", label: "OpenAI 兼容 Key", type: "secret" },
-    { path: "openai.baseUrl", label: "OpenAI Base URL", type: "text" },
-    { path: "openai.model", label: "OpenAI 模型", type: "text" },
-    { path: "deepl.apiKey", label: "DeepL Key", type: "secret" },
-    { path: "google.apiKey", label: "Google Cloud Key", type: "secret" },
+  { group: "服务商 Key 与端点", tag: "一次性配置", fields: [
+    { key: "microsoft.apiKey", label: "Microsoft Key", type: "secret" },
+    { key: "microsoft.region", label: "Microsoft 区域", type: "text", placeholder: "如 eastasia" },
+    { key: "openai.apiKey", label: "OpenAI 兼容 Key", type: "secret" },
+    { key: "openai.baseUrl", label: "OpenAI Base URL", type: "text",
+      placeholder: "如 https://api.deepseek.com/v1" },
+    { key: "openai.model", label: "OpenAI 模型", type: "text", placeholder: "如 deepseek-chat" },
+    { key: "deepl.apiKey", label: "DeepL Key", type: "secret" },
+    { key: "google.apiKey", label: "Google Cloud Key", type: "secret" },
   ]},
-  { group: "游戏内显示（/tr 也能改）", fields: [
-    { path: "ui.enabled", label: "启用翻译", type: "bool" },
-    { path: "ui.displayMode", label: "显示模式", type: "enum", options: ["bilingual", "translation_only"] },
-    { path: "ui.outgoing", label: "发送前翻译", type: "enum", options: ["off", "translation", "bilingual"],
-      hint: "translation = 译成英文后发出；bilingual = 原文|译文" },
-    { path: "ui.outgoingTarget", label: "出站目标语言", type: "text", hint: "一般填 en" },
-    { path: "ui.targetLanguage", label: "入站目标语言", type: "text" },
-    { path: "ui.force", label: "强制翻译所有消息", type: "bool" },
-    { path: "ui.timeoutMs", label: "出站翻译超时 (ms)", type: "int" },
-    { path: "ui.translateOwn", label: "自己的发言也翻译", type: "bool" },
-    { path: "ui.chatLog", label: "写聊天日志", type: "bool" },
+  { group: "游戏内显示", open: true, tag: "也可在游戏内 /tr 改", fields: [
+    { key: "ui.enabled", label: "启用翻译", type: "bool" },
+    { key: "ui.displayMode", label: "显示模式", type: "enum",
+      options: [["bilingual", "原文 + 译文"], ["translation_only", "只要译文"]] },
+    { key: "ui.outgoing", label: "发送前翻译", type: "enum",
+      options: [["off", "关闭（直接发中文）"], ["translation", "译成目标语言后发出"], ["bilingual", "原文 | 译文 一起发"]],
+      hint: "打开后按回车会先翻译再发送，输入框右侧会显示「翻译中…」" },
+    { key: "ui.outgoingTarget", label: "出站目标语言", type: "lang", hint: "一般填 English" },
+    { key: "ui.targetLanguage", label: "入站目标语言", type: "lang" },
+    { key: "ui.force", label: "强制翻译所有消息", type: "bool",
+      hint: "默认只译「看起来不是目标语言」的消息；开启后全部译" },
+    { key: "ui.timeoutMs", label: "出站翻译超时 (ms)", type: "int" },
+    { key: "ui.translateOwn", label: "自己的发言也翻译", type: "bool" },
+    { key: "ui.chatLog", label: "写聊天日志", type: "bool" },
   ]},
   { group: "聊天日志", fields: [
-    { path: "chatLog.enabled", label: "启用日志落盘", type: "bool" },
-    { path: "chatLog.dir", label: "日志目录", type: "text", hint: "相对项目根，默认 logs/chat" },
-    { path: "deadlockConsoleLog", label: "游戏 console.log 路径", type: "text",
-      hint: "留空 = 自动探测；不存在说明游戏没带 -condebug 启动" },
+    { key: "chatLog.enabled", label: "启用日志落盘", type: "bool",
+      hint: "写 logs/chat/<matchId>.jsonl，赛后复盘用" },
+    { key: "chatLog.dir", label: "日志目录", type: "text" },
+    { key: "deadlockConsoleLog", label: "游戏 console.log 路径", type: "text",
+      hint: "留空 = 自动探测。该文件不存在说明游戏没带 -condebug 启动 —— 那样整个 mod 都不会工作" },
   ]},
-  { group: "悬浮窗（legacy，默认已关）", fields: [
-    { path: "overlay.enabled", label: "启用悬浮窗", type: "bool", hint: "关闭后译文只显示在游戏内，桥也不再为它翻译" },
-    { path: "overlay.autoOpen", label: "检测到游戏时自动打开", type: "bool" },
-    { path: "overlay.mode", label: "窗口实现", type: "enum", options: ["native", "web"] },
-    { path: "overlay.view", label: "显示形态", type: "enum", options: ["panel", "subtitle"] },
-    { path: "overlay.edge", label: "贴边方向", type: "enum", options: ["left", "right", "top", "bottom", "float"] },
-    { path: "overlay.opacity", label: "不透明度", type: "range", min: 0.3, max: 1, step: 0.05 },
-    { path: "overlay.fontSize", label: "字号", type: "int" },
-    { path: "overlay.background", label: "背景色", type: "color" },
-    { path: "overlay.accent", label: "主题色", type: "color" },
+  { group: "悬浮窗（legacy，默认已关）", tag: "v2.0.x 的显示方式", fields: [
+    { key: "overlay.enabled", label: "启用悬浮窗", type: "bool",
+      hint: "译文已显示在游戏内；关闭后桥也跳过为悬浮窗做的翻译，省一半 provider 调用" },
+    { key: "overlay.autoOpen", label: "检测到游戏时自动打开", type: "bool" },
+    { key: "overlay.mode", label: "窗口实现", type: "enum",
+      options: [["native", "原生窗口（推荐）"], ["web", "浏览器小窗（回退）"]] },
+    { key: "overlay.view", label: "显示形态", type: "enum",
+      options: [["panel", "面板窗"], ["subtitle", "字幕浮层（鼠标穿透）"]] },
+    { key: "overlay.edge", label: "贴边方向", type: "enum",
+      options: [["right", "右"], ["left", "左"], ["top", "上"], ["bottom", "下"], ["float", "不贴边"]] },
+    { key: "overlay.opacity", label: "不透明度", type: "range", min: 0.3, max: 1, step: 0.05 },
+    { key: "overlay.fontSize", label: "字号", type: "int" },
+    { key: "overlay.background", label: "背景色", type: "color" },
+    { key: "overlay.accent", label: "主题色", type: "color" },
   ]},
   { group: "其他", fields: [
-    { path: "port", label: "桥端口", type: "int", hint: "改完需要重启桥" },
-    { path: "watchGame", label: "游戏退出时关闭桥", type: "bool" },
-    { path: "steamIdEnrichment.enabled", label: "SteamID 回填", type: "bool" },
+    { key: "port", label: "桥端口", type: "int", hint: "改完需重启桥" },
+    { key: "watchGame", label: "游戏退出时关闭桥", type: "bool" },
+    { key: "steamIdEnrichment.enabled", label: "SteamID 回填", type: "bool",
+      hint: "赛后按公开 API 补全整局玩家 SteamID" },
   ]},
 ];
 
-const SECRET_MASK = "********";
+const MASK = "********";
 let serverCfg = null;
+let keyState = {};
 
-function getIn(obj, path) {
-  return path.split(".").reduce(function (o, k) { return o == null ? undefined : o[k]; }, obj);
-}
-function setIn(obj, path, val) {
-  const ks = path.split(".");
-  let o = obj;
+const getIn = (o, k) => k.split(".").reduce((a, p) => (a == null ? undefined : a[p]), o);
+function setIn(o, k, v) {
+  const ks = k.split(".");
+  let cur = o;
   for (let i = 0; i < ks.length - 1; i++) {
-    if (typeof o[ks[i]] !== "object" || o[ks[i]] === null) o[ks[i]] = {};
-    o = o[ks[i]];
+    if (typeof cur[ks[i]] !== "object" || cur[ks[i]] === null) cur[ks[i]] = {};
+    cur = cur[ks[i]];
   }
-  o[ks[ks.length - 1]] = val;
+  cur[ks[ks.length - 1]] = v;
 }
-
-function el(tag, attrs, kids) {
-  const n = document.createElement(tag);
-  for (const k in (attrs || {})) {
-    if (k === "text") n.textContent = attrs[k];
-    else if (k === "html") n.innerHTML = attrs[k];
-    else n.setAttribute(k, attrs[k]);
+const el = (t, a, kids) => {
+  const n = document.createElement(t);
+  for (const k in (a || {})) {
+    if (k === "text") n.textContent = a[k];
+    else if (k === "html") n.innerHTML = a[k];
+    else n.setAttribute(k, a[k]);
   }
-  (kids || []).forEach(function (c) { n.appendChild(c); });
+  (kids || []).forEach((c) => n.appendChild(c));
   return n;
-}
+};
+const idOf = (k) => "f_" + k.replace(/\./g, "_");
 
+// ---- 单个字段 ----
 function buildField(f) {
-  const wrap = el("div", { class: "row" });
-  const id = "f_" + f.path.replace(/\./g, "_");
-  const lab = el("label", { for: id, text: f.label });
-  wrap.appendChild(lab);
+  const row = el("div", { class: "row" });
+  const id = idOf(f.key);
+  const lab = el("div", { class: "lab" });
+  lab.appendChild(el("span", { text: f.label }));
+  lab.appendChild(el("small", { class: "fieldname", text: f.key }));
+  row.appendChild(lab);
 
-  const cur = getIn(serverCfg, f.path);
-  let input;
+  const cur = getIn(serverCfg, f.key);
+  let cell;
+
   if (f.type === "bool") {
-    input = el("input", { type: "checkbox", id: id });
-    input.checked = !!cur;
+    cell = el("input", { type: "checkbox", id: id });
+    cell.checked = !!cur;
+
   } else if (f.type === "enum") {
-    input = el("select", { id: id });
-    (f.options || []).forEach(function (o) {
-      const op = el("option", { value: o, text: o });
-      if (String(cur) === o) op.selected = true;
-      input.appendChild(op);
+    cell = el("select", { id: id });
+    (f.options || []).forEach(([v, t]) => {
+      const o = el("option", { value: v, text: t });
+      if (String(cur) === v) o.selected = true;
+      cell.appendChild(o);
     });
-  } else if (f.type === "range") {
-    const box = el("div", { class: "inline" });
-    input = el("input", { type: "range", id: id, min: f.min, max: f.max, step: f.step });
-    input.value = cur == null ? f.min : cur;
-    const val = el("span", { class: "val", text: String(input.value) });
-    input.addEventListener("input", function () { val.textContent = input.value; });
-    box.appendChild(input); box.appendChild(val);
-    input = box; // 用容器承载
-    input.__isRangeBox = true;
-  } else if (f.type === "csv") {
-    input = el("input", { type: "text", id: id });
-    input.value = Array.isArray(cur) ? cur.join(",") : "";
+
+  } else if (f.type === "lang") {
+    // 下拉 + 「自定义」:常用语言直接选,冷门语言仍可手填
+    const box = el("div", { class: "stack" });
+    const sel = el("select", { id: id });
+    const known = LANGS.some((l) => l[0] === cur) || (f.allowAuto && cur === "auto") || cur === "en";
+    if (f.allowAuto) sel.appendChild(el("option", { value: "auto", text: "自动检测（auto）" }));
+    LANGS.forEach(([v, t]) => sel.appendChild(el("option", { value: v, text: langLabel(v) })));
+    sel.appendChild(el("option", { value: "__custom", text: "自定义…" }));
+    sel.value = known ? String(cur) : "__custom";
+    const custom = el("input", { type: "text", id: id + "_custom", placeholder: "如 zh-Hans / English" });
+    custom.value = known ? "" : String(cur || "");
+    custom.style.display = known ? "none" : "";
+    sel.addEventListener("change", () => { custom.style.display = sel.value === "__custom" ? "" : "none"; });
+    box.appendChild(sel); box.appendChild(custom);
+    cell = box;
+    cell.__lang = { sel, custom };
+
+  } else if (f.type === "providers") {
+    // 复选框组代替 CSV 手输(原来要自己敲 "microsoft,deepl" 并记得逗号)
+    const curList = Array.isArray(cur) ? cur.slice() : [];
+    const box = el("div", { class: "checks" });
+    PROVIDERS.forEach((p) => {
+      const cb = el("input", { type: "checkbox", id: id + "_" + p });
+      cb.checked = curList.indexOf(p) >= 0;
+      cb.dataset.provider = p;
+      const dot = el("span", { class: "keydot" });
+      const inner = el("label", {}, [cb, dot, el("span", { text: PROVIDER_LABEL[p] })]);
+      box.appendChild(inner);
+    });
+    cell = box;
+    cell.__providers = true;
+
   } else if (f.type === "secret") {
     const box = el("div", { class: "inline" });
-    input = el("input", { type: "text", id: id, placeholder: "（未设置）" });
-    input.value = cur || "";
-    const clear = el("input", { type: "checkbox", id: id + "_clear" });
-    const clabel = el("label", { for: id + "_clear", text: "清空", style: "color:var(--dim);white-space:nowrap" });
-    box.appendChild(input); box.appendChild(clear); box.appendChild(clabel);
-    input = box;
-    input.__isSecretBox = true;
-    input.__inner = box.querySelector("input[type=text]");
-    input.__clear = clear;
+    const inp = el("input", { type: "text", id: id, placeholder: "（未设置）" });
+    inp.value = cur || "";
+    const cb = el("input", { type: "checkbox", id: id + "_clear", title: "清空这个 Key" });
+    const lb = el("label", { for: id + "_clear", text: "清空", style: "color:var(--dim);white-space:nowrap;cursor:pointer" });
+    box.appendChild(inp); box.appendChild(cb); box.appendChild(lb);
+    cell = box;
+    cell.__secret = { inp, cb };
+
+  } else if (f.type === "range") {
+    const box = el("div", { class: "inline" });
+    const inp = el("input", { type: "range", id: id, min: f.min, max: f.max, step: f.step });
+    inp.value = cur == null ? f.min : cur;
+    const val = el("span", { class: "val", text: String(inp.value) });
+    inp.addEventListener("input", () => { val.textContent = inp.value; });
+    box.appendChild(inp); box.appendChild(val);
+    cell = box;
+
   } else {
-    input = el("input", { type: f.type === "color" ? "color" : (f.type === "int" ? "number" : "text"), id: id });
-    input.value = cur == null ? "" : cur;
+    cell = el("input", {
+      type: f.type === "color" ? "color" : (f.type === "int" ? "number" : "text"),
+      id: id, placeholder: f.placeholder || "",
+    });
+    cell.value = cur == null ? "" : cur;
   }
-  wrap.appendChild(input);
-  if (f.hint) wrap.appendChild(el("div", { class: "hint", text: f.hint }));
-  return wrap;
+
+  row.appendChild(cell);
+  if (f.hint) row.appendChild(el("div", { class: "hint", text: f.hint }));
+  return row;
 }
 
-function readField(f, node) {
-  const box = node.querySelector("[" + (f.type === "secret" ? 'type="text"' : (f.type === "range" ? 'type="range"' : "")) + "]") || node;
-  if (f.type === "bool") {
-    const cb = node.querySelector('input[type=checkbox]');
-    return cb ? cb.checked : false;
-  }
+function readField(f, row) {
+  if (f.type === "bool") return row.querySelector('input[type=checkbox]').checked;
   if (f.type === "secret") {
-    const inner = node.querySelector('input[type="text"]');
-    const clear = node.querySelector('input[type="checkbox"]');
-    if (clear && clear.checked) return { __clear: true };
-    return { __value: inner ? inner.value : "" };
+    const inp = row.querySelector('input[type="text"]');
+    const clr = row.querySelector('input[type=checkbox]');
+    if (clr && clr.checked) return { clear: true };
+    return { value: inp ? inp.value : "" };
   }
-  if (f.type === "csv") {
-    const s = node.querySelector('input[type=text]').value.trim();
-    return s ? s.split(",").map(function (x) { return x.trim(); }).filter(Boolean) : [];
+  if (f.type === "lang") {
+    const sel = row.querySelector("select");
+    const custom = row.querySelector('input[type="text"]');
+    if (sel.value === "__custom") return (custom.value || "").trim();
+    return sel.value;
   }
-  if (f.type === "int") return Number(node.querySelector("input").value);
-  if (f.type === "range") return Number(node.querySelector("input[type=range]").value);
-  return node.querySelector("input,select").value;
+  if (f.type === "providers") {
+    return Array.from(row.querySelectorAll("input[type=checkbox]"))
+      .filter((c) => c.checked).map((c) => c.dataset.provider);
+  }
+  if (f.type === "int") return Number(row.querySelector("input").value);
+  if (f.type === "range") return Number(row.querySelector("input[type=range]").value);
+  return row.querySelector("input,select").value;
 }
 
 function render() {
   const form = document.getElementById("form");
   form.textContent = "";
-  SPEC.forEach(function (sec) {
-    const fs = el("fieldset");
-    fs.appendChild(el("legend", { text: sec.group }));
-    if (sec.note) fs.appendChild(el("div", { class: "note", text: sec.note }));
-    sec.fields.forEach(function (f) { fs.appendChild(buildField(f)); });
-    form.appendChild(fs);
+  SPEC.forEach((sec) => {
+    const d = el("details", { class: "group" });
+    if (sec.open) d.setAttribute("open", "");
+    const sum = el("summary", {}, [el("span", { text: sec.group })]);
+    if (sec.tag) sum.appendChild(el("span", { class: "tag", text: sec.tag }));
+    d.appendChild(sum);
+    const body = el("div", { class: "gbody" });
+    sec.fields.forEach((f) => body.appendChild(buildField(f)));
+    d.appendChild(body);
+    form.appendChild(d);
   });
+  paintKeyDots();
+}
+
+// 已配 Key 的服务商在「回退服务商」里显示绿点
+function paintKeyDots() {
+  document.querySelectorAll("#f_fallbackProviders_microsoft, #f_fallbackProviders_openai, #f_fallbackProviders_deepl, #f_fallbackProviders_google")
+    .forEach((cb) => {
+      const dot = cb.parentElement.querySelector(".keydot");
+      if (dot) dot.classList.toggle("on", !!keyState[cb.dataset.provider]);
+    });
+}
+
+function renderChips() {
+  const box = document.getElementById("chips");
+  box.textContent = "";
+  const add = (txt, cls) => box.appendChild(el("span", { class: "chip " + (cls || ""), html: txt }));
+  if (!serverCfg) return;
+  add("服务商 <b>" + (serverCfg.provider || "-") + "</b>");
+  add("入站 <b>" + (getIn(serverCfg, "ui.targetLanguage") || serverCfg.defaults && serverCfg.defaults.targetLanguage || "-") + "</b>");
+  add("发送前翻译 <b>" + (getIn(serverCfg, "ui.outgoing") || "off") + "</b>");
+  add("悬浮窗 <b>" + (getIn(serverCfg, "overlay.enabled") ? "开" : "关") + "</b>", getIn(serverCfg, "overlay.enabled") ? "" : "off");
 }
 
 function setStatus(msg, cls) {
@@ -259,45 +408,57 @@ function setStatus(msg, cls) {
 async function load() {
   setStatus("载入中…");
   try {
+    // 桥的基本状态(版本/名称)顺带展示,让"桥是不是通的"一眼可见
+    fetch("/api/v1/health", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((h) => {
+        if (h && h.ok) {
+          const box = document.getElementById("chips");
+          box.appendChild(el("span", { class: "chip on", html: "桥 <b>" + (h.name || "online") + "</b> v" + (h.version || "?") }));
+        }
+      })
+      .catch(() => {});
+
     const r = await fetch("/api/v1/config", { cache: "no-store" });
     const j = await r.json();
     if (!j || !j.ok || !j.config) throw new Error("bad_response");
     serverCfg = j.config;
+    keyState = {
+      microsoft: !!(serverCfg.microsoft && serverCfg.microsoft.hasApiKey),
+      openai: !!(serverCfg.openai && serverCfg.openai.hasApiKey),
+      deepl: !!(serverCfg.deepl && serverCfg.deepl.hasApiKey),
+      google: !!(serverCfg.google && serverCfg.google.hasApiKey),
+    };
     render();
+    renderChips();
     setStatus("已载入", "ok");
   } catch (e) {
-    setStatus("载入失败：" + (e && e.message), "bad");
+    setStatus("载入失败:" + (e && e.message), "bad");
   }
 }
 
 async function save() {
   const patch = {};
-  SPEC.forEach(function (sec) {
-    sec.fields.forEach(function (f) {
-      const node = document.getElementById("f_" + f.path.replace(/\./g, "_")).closest(".row");
-      const v = readField(f, node);
-      if (v && v.__clear) return; // 清空走 clearApiKey 单独处理
-      if (v && typeof v === "object" && "__value" in v) {
-        if (v.__value && v.__value !== SECRET_MASK) setIn(patch, f.path, v.__value);
+  let clearKey = false;
+  SPEC.forEach((sec) => {
+    sec.fields.forEach((f) => {
+      const row = document.getElementById(idOf(f.key)).closest(".row");
+      const v = readField(f, row);
+      if (v && v.clear) { clearKey = true; return; }
+      if (v && typeof v === "object" && "value" in v) {
+        if (v.value && v.value !== MASK) setIn(patch, f.key, v.value);
         return;
       }
-      setIn(patch, f.path, v);
+      setIn(patch, f.key, v);
     });
   });
-  // 显式清空 Key:按当前选中的 provider 映射(与 applyMaskedUpdate 的扁平式约定一致)
-  const provider = patch.provider || (serverCfg && serverCfg.provider) || "bing";
-  let cleared = false;
-  SPEC.forEach(function (sec) {
-    sec.fields.forEach(function (f) {
-      if (f.type !== "secret") return;
-      const node = document.getElementById("f_" + f.path.replace(/\./g, "_")).closest(".row");
-      const v = readField(f, node);
-      if (v && v.__clear) cleared = true;
-    });
-  });
-  if (cleared) { patch.clearApiKey = true; patch.apiKey = ""; patch.provider = provider; }
+  if (clearKey) {
+    patch.clearApiKey = true;
+    patch.apiKey = "";
+    patch.provider = patch.provider || (serverCfg && serverCfg.provider) || "bing";
+  }
 
-  setStatus("保存中…（游戏内生效约几秒）");
+  setStatus("保存中…");
   document.getElementById("save").disabled = true;
   try {
     const r = await fetch("/api/v1/config", {
@@ -308,10 +469,17 @@ async function save() {
     const j = await r.json();
     if (!j || !j.ok) throw new Error((j && j.error) || "save_failed");
     serverCfg = j.config;
+    keyState = {
+      microsoft: !!(serverCfg.microsoft && serverCfg.microsoft.hasApiKey),
+      openai: !!(serverCfg.openai && serverCfg.openai.hasApiKey),
+      deepl: !!(serverCfg.deepl && serverCfg.deepl.hasApiKey),
+      google: !!(serverCfg.google && serverCfg.google.hasApiKey),
+    };
     render();
-    setStatus("已保存", "ok");
+    renderChips();
+    setStatus("已保存（游戏内下一条消息生效）", "ok");
   } catch (e) {
-    setStatus("保存失败：" + (e && e.message), "bad");
+    setStatus("保存失败:" + (e && e.message), "bad");
   } finally {
     document.getElementById("save").disabled = false;
   }

@@ -77,7 +77,7 @@
 		<!-- Babel Tower 设置面板(默认隐藏,居中弹窗;ESC 关闭) -->
 		<Panel id="LCTSettingsPanel" class="LCTSettingsPanel" oncancel="LCTCloseSettings();">
 			<Panel class="LCTSettingsHeader">
-				<Label class="LCTPanelTitle" text="Babel Tower 设置" />
+				<Label class="LCTPanelTitle" text="DeadlockLingua 设置" />
 			</Panel>
 			<Panel class="LCTSettingsBody">
 				<Panel class="LCTSettingsList">

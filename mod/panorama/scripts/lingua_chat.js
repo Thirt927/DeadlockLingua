@@ -4099,6 +4099,10 @@ function injectTranslation(row, sig, text) {
       t.done = true;
       transfer = null;
       log("BTIPC: DONE w=" + t.win + " bytes=" + utf8Encode(text).length + " total=" + (nowMs() - t.startedAt) + "ms");
+      // 真实流量即健康信号:这次成功了,桥就是在线的
+      State.bridgeUp = true;
+      State.bridgeLastError = "";
+      refreshBridgeStatus();
       try { t.onDone(text); } catch (e) {}
     }
 
@@ -4107,7 +4111,15 @@ function injectTranslation(row, sig, text) {
       if (!t || t.done) return;
       t.done = true;
       transfer = null;
-      log("BTIPC: FAIL w=" + t.win + " kind=" + ((err && err.kind) || "unknown"));
+      const kind = (err && err.kind) || "unknown";
+      log("BTIPC: FAIL w=" + t.win + " kind=" + kind);
+      // 桥状态以真实流量为准。只有"通道层面"的失败才算桥不在:
+      // preempted(被出站抢占)/ cancelled / too_long 都是本地原因,不代表桥离线。
+      if (kind === "bridge_down" || kind === "crc_dead" || kind === "timeout" || kind === "dispatch_threw") {
+        State.bridgeUp = false;
+        State.bridgeLastError = kind;
+        refreshBridgeStatus();
+      }
       try { t.onFail(err || { kind: "unknown", message: "" }); } catch (e) {}
     }
 
@@ -5031,7 +5043,12 @@ function injectTranslation(row, sig, text) {
     // 那些字段 [LCT-CHAT] 带不了,且频率很低。
   }
 
-  // ---- 桥健康探测(定时 ping,断线后状态栏提示 + 恢复后自动清错) ----
+  // ---- 桥健康探测 + 状态渲染 ----
+  // 起因(实测): healthCheck 只在启动时跑过一次,而当时 `op=health` 在桥端**并不存在** ——
+  // 那行 `op=health\n{}` 落进了"裸文本"分支,被当成待翻译文本发出去;回来的是一段译文,
+  // JSON.parse 必然失败,于是「桥状态」开局被写成"不可用(游戏已移除 HTTP)"后再也没更新过。
+  // 现在状态有两个来源:①每次真实 BTIPC 传输的结果(见 BTIPC 的 settleOk/settleFail)
+  // ②打开设置面板时主动探一次。
   // 注意:health 与翻译共用串行队列;队列忙时跳过本次 ping,避免 health 阻塞发消息/测试
   function healthCheck() {
     if (State.queue.length > 0 || State.pending) return;
@@ -5039,23 +5056,50 @@ function injectTranslation(row, sig, text) {
       if (res && res.ok) {
         if (!State.bridgeUp) log("bridge online (health)");
         State.bridgeUp = true;
+        State.bridgeProvider = res.provider || "";
+        State.bridgeVersion = res.version || "";
+        State.bridgeLastError = "";
         State.bridgeOfflineSince = 0;
         State.panelFailStreak = 0;
         State.panelResetLevel = 0;
         State.panelWarned = false;
-        setBridgeStatus("桥在线 · 服务商 " + (res.provider || State.cfg.provider || "bing"));
       } else {
         State.bridgeUp = false;
+        State.bridgeLastError = String((res && res.error) || "offline").slice(0, 60);
         if (!State.bridgeOfflineSince) {
           State.bridgeOfflineSince = nowMs();
-          log("bridge unreachable (health): panorama HTTP removed in this build");
-          setStatus("翻译通道不可用:游戏已移除 HTTP 能力");
+          log("bridge unreachable (health): " + State.bridgeLastError);
+          setStatus("翻译通道不可用:桥未响应(" + State.bridgeLastError + ")");
         }
-        setBridgeStatus("不可用(游戏已移除 HTTP)");
-        // 健康探测是最高频的通道检测点:失败即视为"面板可能已僵死",触发自愈
-        notePanelFailure("health_" + String((res && res.error) || "offline"));
       }
+      refreshBridgeStatus();
     });
+  }
+
+  // 桥状态文案。数据来自真实流量,所以在面板打开前就已经是最新的。
+  function bridgeStatusText() {
+    if (State.bridgeUp) {
+      let s = "在线 · 服务商 " + (State.bridgeProvider || State.cfg.provider || "bing");
+      if (State.bridgeVersion) s += " · 桥 v" + State.bridgeVersion;
+      return s;
+    }
+    const why = State.bridgeLastError ? bridgeErrorText(State.bridgeLastError) : "尚未连上";
+    return "不在线 · " + why;
+  }
+
+  // 把 BTIPC 的错误码翻译成人话(原来的文案写死了"游戏已移除 HTTP",那是早已不成立的旧结论)
+  function bridgeErrorText(kind) {
+    const k = String(kind || "");
+    if (k === "bridge_down") return "桥进程没在跑(或 console.log 未被读到)";
+    if (k === "crc_dead") return "连续校验失败,通道不稳";
+    if (k === "timeout") return "桥响应超时";
+    if (k === "dispatch_threw") return "分发异常";
+    if (k === "offline") return "桥未启动";
+    return k || "未知原因";
+  }
+
+  function refreshBridgeStatus() {
+    setBridgeStatus(bridgeStatusText());
   }
 
   function setBridgeStatus(text) {
@@ -5676,6 +5720,9 @@ function injectTranslation(row, sig, text) {
     }
     setToggleText("LCTChatLog", State.cfg.chatLog !== false);
     updateKeyStateLabel();
+    // 桥状态:先用已知值渲染(可能已是当前值),再主动探一次拿最新
+    refreshBridgeStatus();
+    try { healthCheck(); } catch (e) {}
     // 聚焦面板本身(与 DLCT 一致:优先控件,失败则面板;面板持焦后 Tab/Enter 可用)
     // 仅在面板仍可见时聚焦,否则异步回调会在用户已关闭设置后把焦点抢回隐藏面板
     try {

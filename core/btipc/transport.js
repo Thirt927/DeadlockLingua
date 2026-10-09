@@ -28,7 +28,7 @@ const REQ_RE = /^\[LCT\] BTIPC REQ w=([0-9a-f]{6}) id=([0-9a-f]{4}) len=(\d{1,4}
 const CAN_RE = /^\[LCT\] BTIPC CAN w=([0-9a-f]{6})$/;
 
 // §5.1 上层信封白名单
-const ENV_OP_RE = /^op=(config|test|ui)(;tm=\d{1,7})?$/;
+const ENV_OP_RE = /^op=(config|test|ui|health)(;tm=\d{1,7})?$/;
 const ENV_T_RE = /^t=([A-Za-z0-9-]{1,16})(;tm=\d{1,7})?$/;
 
 // 解析一行日志里的 REQ。返回 null 表示不是(或不是合法的)REQ 行。
@@ -84,7 +84,7 @@ function splitEnvelope(text) {
   const body = s.slice(nl + 1);
   const op = ENV_OP_RE.exec(head);
   if (op) {
-    const kind = op[1] === "config" ? "config" : (op[1] === "ui" ? "ui" : "test");
+    const kind = op[1];
     return { kind: kind, body: body, head: head };
   }
   const t = ENV_T_RE.exec(head);
@@ -106,6 +106,11 @@ function createTransport(deps) {
 
   function resolvePayload(text) {
     const env = splitEnvelope(text);
+    if (env.kind === "health") {
+      // 游戏内设置面板的「桥状态」。体积极小(约 60B = 6 帧)。
+      if (typeof d.health !== "function") return Promise.resolve("{\"ok\":false,\"error\":\"health_unsupported\"}");
+      return Promise.resolve(d.health(env.body));
+    }
     if (env.kind === "ui") {
       // 游戏侧开机同步专用:只回 ui 段 + 各服务商 Key 是否已配。
       // 关键 —— 整份 masked 配置有 1312 字节 = 132 帧,而协议帧数上限是 128 帧(1280 字节),

@@ -83,6 +83,7 @@ const e1b = T.splitEnvelope("t=en;tm=5000\nhi");
 ok("t=<target>;tm 带超时", e1b.kind === "translate" && e1b.target === "en");
 ok("op=config → config", T.splitEnvelope("op=config\n{}").kind === "config");
 ok("op=ui → ui", T.splitEnvelope("op=ui\n{}").kind === "ui");
+ok("op=health → health", T.splitEnvelope("op=health\n{}").kind === "health");
 ok("op=test → test", T.splitEnvelope("op=test\n{}").kind === "test");
 ok("无换行 → 裸文本", T.splitEnvelope("hello").kind === "bare");
 ok("未知 op → 裸文本(整条)", (function () {
@@ -185,6 +186,30 @@ ok("不安全字符集目标语言 → 裸文本", T.splitEnvelope("t=zh Hans\nx
   // 该小包必须放得进 128 帧(1280 字节) —— 这是它存在的理由
   ok("op=ui 应答 < 128 帧上限",
     Buffer.byteLength("{\"ok\":true,\"ui\":{\"outgoing\":\"translation\",\"displayMode\":\"bilingual\"},\"keys\":{\"microsoft\":false,\"openai\":true,\"deepl\":false,\"google\":false}}", "utf8") <= 1280);
+
+  // op=health:游戏内设置面板的「桥状态」。
+  // ⚠️ 曾经**没有**这个 op,`op=health\n{}` 落进"裸文本"分支被当成待翻译文本发出去,
+  // 回来的是一段译文 -> JSON.parse 必失败 -> 桥状态永远显示"不可用"且白烧一次 provider 调用。
+  // 另外它必须极小:每次探测都占住单槽队列,60B 上下是可接受的量级。
+  let healthCalled = 0;
+  const tr6 = T.createTransport({
+    log: () => {},
+    health: () => { healthCalled += 1; return Promise.resolve("{\"ok\":true,\"provider\":\"bing\",\"version\":\"2.1.0\"}"); },
+  });
+  tr6.handleLogLine(buildReqLine("abcdef", 1, "op=health\n{}"));
+  await tick();
+  ok("op=health 路由到 health()(不再落进裸文本翻译)", healthCalled === 1);
+  ok("op=health 应答可闭合",
+    collect(tr6, "abcdef", 1) === "{\"ok\":true,\"provider\":\"bing\",\"version\":\"2.1.0\"}");
+  ok("op=health 应答远小于帧上限",
+    Buffer.byteLength("{\"ok\":true,\"provider\":\"bing\",\"version\":\"2.1.0\"}", "utf8") <= 200);
+
+  // 没有 health 依赖时必须明确报错,而不是悄悄退化成翻译
+  const tr7 = T.createTransport({ log: () => {} });
+  tr7.handleLogLine(buildReqLine("abcdef", 1, "op=health\n{}"));
+  await tick();
+  ok("缺 health 依赖时明确报错",
+    collect(tr7, "abcdef", 1) === "{\"ok\":false,\"error\":\"health_unsupported\"}");
 
   // translate 抛错 → 降级回原文,不卡死
   const tr4 = T.createTransport({

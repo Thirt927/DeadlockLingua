@@ -24,8 +24,10 @@ Deadlock 游戏聊天翻译 mod = **Panorama(Source 2 原生 UI)模组 + 本地 
   - 脚本内有具名互斥锁 `Local\DeadlockLinguaOverlay`,重复启动会直接退出,不会开出第二个窗口
   - 网页版(回退):`http://127.0.0.1:8791/overlay`(把 `config.json` 的 `overlay.mode` 改成 `"web"`)
 - 配置:`F:\agents\deadlockfanyi\BabelTower-fork\config\config.json`(provider 当前 openai→DeepSeek)
-- 设置界面(两个入口):①游戏内输入 `/tr` 或点输入框右侧「译」按钮 → 弹设置面板(管常用开关,直接读内存 `State.cfg`,秒开);②浏览器 `http://127.0.0.1:8791/settings` → 网页设置页(管服务商 / API Key / 端点 / 全部字段)
-- ⚠️ **窄带信道的体积铁律**:位信道**一帧 10 字节载荷,协议硬上限 128 帧 = 1280 字节**。实测 `op=ui` = 254 字节(26 帧,OK);整份 masked 配置 = 1313 字节 = 132 帧(**超限,永远收不到**)。所以 `op=config` 的响应**只回 `{"ok":true}` 极小回执**,读配置必须走 `op=ui` 或 HTTP `/api/v1/config`。
+- 设置界面(两个入口):①游戏内输入 `/tr` 或点输入框右侧「译」按钮 → 弹设置面板(管常用开关,直接读内存 `State.cfg`,秒开);②浏览器 `http://127.0.0.1:8791/settings` → 网页设置页(管服务商 / API Key / 端点 / 全部字段,可折叠分组 + 语言/模式下拉 + 回退服务商复选框)
+- 桥状态(面板里的 `LCTBridgeStatus`):**以真实流量为准** —— BTIPC 的 `settleOk` 标记在线,`settleFail` 仅在通道级失败(`bridge_down`/`crc_dead`/`timeout`/`dispatch_threw`)时标记离线(被抢占/取消/too_long 是本地原因,不算桥离线);另外打开面板时主动探一次 `op=health`。⚠️ `op=health` **必须存在**:曾经没有它,`op=health\n{}` 落进"裸文本"分支被当成待翻译文本,回来的是译文 → `JSON.parse` 必失败 → 桥状态永远显示"不可用"还白烧一次 provider 调用(第六十八轮)。
+- ⚠️ **窄带信道的体积铁律**:位信道**一帧 10 字节载荷,协议硬上限 128 帧 = 1280 字节**。实测 `op=ui` = 254 字节(26 帧,OK)、`op=health` ≈ 60 字节(6 帧,OK);整份 masked 配置 = 1313 字节 = 132 帧(**超限,永远收不到**)。所以 `op=config` 的响应**只回 `{"ok":true}` 极小回执**,读配置必须走 `op=ui` 或 HTTP `/api/v1/config`。新增任何 op 前先算帧数。
+- 信封白名单在 `core/btipc/transport.js` 的 `ENV_OP_RE`:当前 `config|test|ui|health`。**不在白名单里的 `op=xxx` 会静默落进"裸文本"分支被当翻译文本发出去** —— 这是第六十七/六十八两轮踩的同一个坑,新增 op 必须同时改白名单与 `splitEnvelope` 的 kind 映射。
 - BTIPC 协议实现(游戏内译文显示用):桥端 `core\btipc\{crc16,framer,window,transport}.js`(**已落地**);游戏侧 `lingua_chat.js` 的 `BTIPC` 区块(内联 crc16 / UTF-8 / base64 / 位序副本,**已落地**)
 - BTIPC 测试:`node tests\btipc\crc.test.js` / `frame.test.js` / `transport.test.js` / `e2e_tail.test.js` / `route.test.js` / `live_http.test.js`(全部离线可跑,不需要游戏;其中 `live_http` 会起一个真实监听端口的桥,用 8799 避开真桥)
 

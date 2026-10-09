@@ -877,8 +877,8 @@ async function handleApi(req, res, url, bodyObj) {
     const cfgH = configStore.load();
     sendJson(res, 200, {
       ok: true,
-      name: "Babel Tower Bridge",
-      version: "1.0.0",
+      name: "DeadlockLingua Bridge",
+      version: readVersion(),
       provider: cfgH.provider,
       providers: providerRegistry.listProviders(),
       fallbackProviders: Array.isArray(cfgH.fallbackProviders) ? cfgH.fallbackProviders : [],
@@ -1028,6 +1028,19 @@ function handleGameDiagLine(line) {
   return true;
 }
 
+// 版本号唯一来源:仓库根的 VERSION 文件(避免各处再写死一个会过期的字面量 —— 之前这里
+// 硬编码 "1.0.0",而 /api/v1/health 还自称 "Babel Tower Bridge")。
+let versionCache = null;
+function readVersion() {
+  if (versionCache !== null) return versionCache;
+  try {
+    versionCache = fs.readFileSync(path.join(__dirname, "..", "VERSION"), "utf8").trim() || "0.0.0";
+  } catch (e) {
+    versionCache = "0.0.0";
+  }
+  return versionCache;
+}
+
 // 网页设置页(服务商 / API Key 等一次性配置)。读盘一次后缓存。
 let settingsPageCache = null;
 function settingsPageHtml() {
@@ -1084,6 +1097,18 @@ const btipc = btipcTransport.createTransport({
       });
     } catch (e) {
       return JSON.stringify({ ok: false, error: (e && e.message) || "ui_failed" });
+    }
+  },
+  // 游戏内设置面板的「桥状态」用(在 game 侧走 op=health)。
+  // ⚠️ 之前**没有**这个 op,`op=health` 会落进"裸文本"分支被当成待翻译文本发出去 ——
+  // 回来的是一段译文、JSON.parse 必失败,于是桥状态永远显示"不可用",还每次白烧一次
+  // provider 调用。这里刻意只回极小包(约 60 字节 = 6 帧),别把整份 health JSON 塞进来。
+  health: async () => {
+    try {
+      const c = configStore.load();
+      return JSON.stringify({ ok: true, provider: c.provider || "", version: readVersion() });
+    } catch (e) {
+      return JSON.stringify({ ok: false, error: "health_failed" });
     }
   },
   // 读 = {};写 = {"config":{...}}。与 /api/v1/config 同语义。

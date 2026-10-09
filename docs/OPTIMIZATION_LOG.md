@@ -1513,3 +1513,52 @@
   ②确认悬浮窗不再自动弹出;③浏览器打开 `http://127.0.0.1:8791/settings` 应能改服务商/Key。
 - **已知限制**: 网页设置页需手动开浏览器(不自动弹);面板不回填端点类字段(为空=不改),
   想改端点请用网页页;位信道单程 2~4s 是物理上限,出站翻译无法做到"瞬时发出"。
+
+## 2026-10-09 第六十八轮:UI 收尾 —— 修「桥状态」显示 / 面板改名 / 网页设置页重做
+
+- **背景**: 用户反馈三点:①`/tr` 面板里「桥状态」显示不对 ②面板标题还写着"巴别塔"
+  ③网页设置页结构要优化、多加下拉。
+- **P① 根因(实证)**: 桥端**根本没有 `op=health`** —— 信封白名单只有 `config|test|ui`,
+  所以 `op=health\n{}` 落进"裸文本"分支,被当成**待翻译文本**发出去;回来的是一段译文,
+  游戏侧 `JSON.parse` 必然失败 → 判失败 → `setBridgeStatus("不可用(游戏已移除 HTTP)")`。
+  而 `healthCheck()` **只在启动时跑过一次**(并非定时),所以这个错误值开局写死后再没更新过。
+  附带代价:每次探测白烧一次 provider 调用。另外失败文案里写死的"游戏已移除 HTTP"
+  是 2026/10/01 的旧结论,早已不成立。
+- **P② 根因**: 面板标记是从 v2.0.0 整块恢复的,标题带着当时的名字;另外 `/api/v1/health`
+  还自称 `"Babel Tower Bridge"`、版本硬编码 `"1.0.0"`。
+- **改动文件**
+  - `core/btipc/transport.js`: 信封白名单加 `health`;`splitEnvelope` 的 kind 改为**直接取
+    捕获组**(原来是嵌套三元,新增 op 会被错映射成 `test`);补 health 分发 + 缺依赖时明确报错
+    (而不是悄悄退化成翻译)。
+  - `core/bridge_server.js`: 新增 BTIPC `health` 依赖(只回 `{ok,provider,version}` ≈ 60B);
+    新增 `readVersion()`(唯一来源 = 仓库根 `VERSION`,带缓存);`/api/v1/health` 的
+    `name` 改为 `DeadlockLingua Bridge`、`version` 改为读 VERSION。
+  - `core/settings_page.html`: **重做**。顶栏吸顶 + 状态芯片(桥名/版本/服务商/入站语言/
+    发送前翻译/悬浮窗);分组改为可折叠 `<details>`;每行显示 config 路径与逐项说明。
+    新增下拉:源语言 / 目标语言(20 种常用语言 + 「自定义…」)、显示模式 / 发送前翻译 /
+    窗口实现 / 显示形态 / 贴边方向(值 + 人话标签);`回退服务商` 从 CSV 手输改为
+    **复选框组**(并按已配 Key 显示绿点);端点字段带 placeholder 示例。
+  - `mod/panorama/scripts/lingua_chat.js`:
+    - `healthCheck` 重写:记录 `bridgeProvider` / `bridgeVersion` / `bridgeLastError`;
+    - 新增 `bridgeStatusText()` / `bridgeErrorText()` / `refreshBridgeStatus()`;失败原因按
+      BTIPC 错误码翻成人话(桥没在跑 / 校验连续失败 / 响应超时 / 分发异常);
+    - **桥状态以真实流量为准**:BTIPC 的 `settleOk` 标记在线,`settleFail` **仅**在通道级失败
+      (`bridge_down` / `crc_dead` / `timeout` / `dispatch_threw`)时标记离线 ——
+      被抢占 / 取消 / too_long 属本地原因,不代表桥离线。状态因此不再依赖"开机那一次探测";
+    - `openSettingsPanel` 打开时 `refreshBridgeStatus()` + 主动 `healthCheck()` 刷新。
+  - `mod/panorama/layout/chat.xml`: 面板标题 "Babel Tower 设置" → "DeadlockLingua 设置"。
+  - `tests/btipc/transport.test.js`: 补 `op=health` 信封 / 路由 / 可闭合 / 体积 / 缺依赖报错
+    共 5 条断言(钉住"必须路由到 health,而不是落进裸文本翻译")。
+- **原因/效果**: 桥状态不再是开局写死的错误值,而是"打开面板就刷新 + 平时由真实流量推导";
+  面板与网页的命名/结构统一到 DeadlockLingua;网页设置页从"一堆输入框"变成可折叠分组 +
+  能选就别打的下拉,回退服务商不再需要手敲 CSV。
+- **验证方式**(全部实测)
+  - `/api/v1/health` 实测返回 `{"ok":true,"name":"DeadlockLingua Bridge","version":"2.1.0",...}`;
+  - `GET /settings` 200 / 22126 字节;
+  - 12 套测试 + 模拟器全绿(新增 5 条 health 断言);
+  - `node --check` 全通过;`build.ps1` 编译 7 个资源全 `ok`;
+  - 已部署 `addons\pak22_dir.vpk` = **315174 字节**(备份 `pak22_dir.vpk.bak-ui-*`)。
+- **仍需用户测试**: 游戏内 `/tr` 的「桥状态」应显示 `在线 · 服务商 openai · 桥 v2.1.0`、
+  标题为 "DeadlockLingua 设置";浏览器 `/settings` 的折叠分组与各下拉应正常。
+- **已知限制**: `op=health` 一次约 60B(6 帧 ≈ 3.6s),会占一下单槽队列 —— 所以只在
+  "打开设置面板时"主动探一次,其余时候状态由真实流量推导,不额外占带宽。
