@@ -1,180 +1,193 @@
 # DeadlockLingua
 
 <p align="center">
-  <img src="./assets/readme/hero.svg" width="100%" alt="DeadlockLingua: real-time translation of Deadlock in-game chat into an out-of-game overlay; the right side shows a [LCT-CHAT] log line leading to a bilingual subtitle capsule" />
+  <img src="./assets/readme/hero.svg" width="100%" alt="DeadlockLingua: real-time Deadlock chat translation, appended right under the original message; the right side shows the BTIPC bit channel bringing the translation back into the game" />
 </p>
 
-<div align="center"><img alt="License: GPL-3.0" src="./assets/readme/badge-license.svg" height="26" /><img alt="Version 2.0.0" src="./assets/readme/badge-version.svg" height="26" /><img alt="Platform: Windows 10/11" src="./assets/readme/badge-platform.svg" height="26" /><img alt="Runtime: Node.js" src="./assets/readme/badge-runtime.svg" height="26" /><img alt="Providers: 5 services" src="./assets/readme/badge-providers.svg" height="26" /></div>
+<div align="center"><img alt="License: GPL-3.0" src="./assets/readme/badge-license.svg" height="26" /><img alt="Version 2.1.0" src="./assets/readme/badge-version.svg" height="26" /><img alt="Platform: Windows 10/11" src="./assets/readme/badge-platform.svg" height="26" /><img alt="Runtime: Node.js" src="./assets/readme/badge-runtime.svg" height="26" /><img alt="Providers: 5 services" src="./assets/readme/badge-providers.svg" height="26" /></div>
 
 <p align="center">
 🇨🇳 <a href="./README.md">简体中文</a> | 🇺🇸 <a href="./README_EN.md">English</a>
 </p>
 
-> Real-time chat translation for *Deadlock*, based on [BabelTower](https://github.com/c1375rick/BabelTower), maintained by [Thirt927](https://github.com/Thirt927).
+> A real-time chat translator for *Deadlock*, forked from [BabelTower](https://github.com/c1375rick/BabelTower) and maintained by [Thirt927](https://github.com/Thirt927).
 
-Translates your teammates' and opponents' chat into your language in real time and shows it in an **overlay outside the game**. You can also write in your own language, get it translated, and paste it into the game chat.
+It translates your teammates' and opponents' chat into Chinese in real time, **right under the original message** — no alt-tab, no second window.
 
-> [!WARNING]
-> **Since v2.0.0, translations are no longer shown inside the game.**
-> The **2026-10-01 Deadlock update removed all networking from the game** (`$.AsyncWebRequest` now throws `AsyncWebRequest has been removed.`), so the mod can no longer receive any data from inside it. Therefore:
-> - ❌ Chat lines in the game no longer show translations, and the old `/tr` settings panel has been removed — there is no in-game settings entry any more
-> - ✅ Translations are shown in the **overlay window outside the game** — the only approach that still works
->
-> This is an engine-level limitation, not a design choice. If a future game update restores networking, in-game translation becomes possible again (`probeInboundChannels()` will detect it immediately).
+<details>
+<summary>Is the v2.0.x overlay still around?</summary>
+
+Yes. v2.0.0 (after the game removed Panorama's HTTP capability) moved translation to a **desktop overlay** as an interim solution. Since **v2.1.0** the translation is back inside the game; the overlay code is kept in the repo as a fallback (`core/overlay.js`, `scripts/overlay_window.ps1`).
+
+</details>
 
 ---
 
 ## Table of Contents
 
+- [How in-game display works](#how-in-game-display-works)
 - [Features](#features)
 - [Installation](#installation)
 - [Usage](#usage)
 - [API Reference](#api-reference)
 - [Configuration](#configuration)
 - [Glossary](#glossary)
-- [Chat logs and SteamID](#chat-logs-and-steamid)
-- [Building from source](#building-from-source)
+- [Chat Logs & SteamID](#chat-logs--steamid)
+- [Building from Source](#building-from-source)
 - [Tests](#tests)
-- [Packaging a release](#packaging-a-release)
-- [Project layout](#project-layout)
-- [How it works](#how-it-works)
+- [Packaging a Release](#packaging-a-release)
+- [Project Layout](#project-layout)
+- [How It Works](#how-it-works)
 - [FAQ](#faq)
 - [Contributing](#contributing)
 - [License](#license)
 
 ---
 
-<p align="center">
-  <img src="./assets/readme/section-01-features.svg" width="100%" alt="Section 01 · Features" />
-</p>
+## How in-game display works
 
-## Features
+Deadlock's 2026-10-01 update removed Panorama's HTTP capability (`$.AsyncWebRequest` throws on call, and hidden HTML panels no longer get a browser instance). So "the game can't send requests" is true.
 
-**Reading what others say**
+But **inbound is still possible** — the engine still fetches network resources for things *it* has to render, and image loading was not removed:
 
-- The overlay shows chat text plus its translation in real time
-- **Subtitle layer**: a stack of chat capsules in a screen corner (speaker chip + name + original + translation), so it does not block the view during a match
-- The subtitle layer is fully click-through and can be **dragged** anywhere
-- Optional **persistent mode**: messages stay instead of expiring; only the newest N are kept
+| Bridge response | What the game observes | Bit |
+|---|---|---|
+| `200` + PNG | `ImageLoaded` fires | **1** |
+| `404` empty body | event stays silent | **0** |
 
-**Saying what you want to say**
+The mod creates **128 hidden 2×2 Image panels** and asks all 128 bits once per round — that is 16 bytes per frame. With CRC and retries, a translation round-trips in roughly 2–6 seconds. This two-way channel is called **BTIPC**; the spec lives in [`docs/btipc-v1.md`](docs/btipc-v1.md).
 
-- Type in the overlay → it is translated and copied to the clipboard → paste into the game with `Ctrl+V`
-
-**Translation services**
-
-- Multiple providers: Bing (no key required), Microsoft, OpenAI-compatible (e.g. DeepSeek), DeepL, Google Cloud
-- Automatic **fallback** to a secondary provider when the primary times out or fails
-- Built-in **game glossary**: 46 playable heroes, 194 shop items, and common tactical terms, for consistent naming
-
-**Other**
-
-- Chat logs written per match as JSONL, for post-match review
-- SteamID backfill: chat nicknames are resolved to SteamID64
+> [!NOTE]
+> The key insight: image loading is driven by the **engine's render pipeline**, not by Panorama's JS HTTP API — so removing `AsyncWebRequest` doesn't affect it.
 
 ---
 
-<p align="center">
-  <img src="./assets/readme/section-02-install.svg" width="100%" alt="Section 02 · Installation" />
-</p>
+## Features
+
+**Understand others**
+
+- **Translations appear directly under the original chat line** — no second window
+- Works for HUD top-bar bubbles and lobby chat history too
+- Messages already in Chinese are skipped; pure numbers/symbols and `/` commands are skipped
+
+**Say what you mean**
+
+- **Translate-before-send**: type in Chinese, press Enter — it is translated to English first and then sent through the game's own send path (translation-only or original|translation bilingual mode)
+
+**Translation services**
+
+- Multiple providers: Bing (no key), Microsoft, OpenAI-compatible (e.g. DeepSeek), DeepL, Google Cloud
+- Automatic **fallback** to backup providers on timeout or failure
+- Built-in **game glossary**: 46 playable heroes, 194 shop items, common tactics — consistent naming
+- **Adaptive dictionary**: frequent short phrases get pinned and answered instantly
+
+**Other**
+
+- Chat logs written as JSONL per match for post-game review
+- SteamID backfill: chat nicknames resolved to SteamID64
+- The desktop overlay (the v2.0.x display path) is still available and switchable in settings
+
+---
 
 ## Installation
 
 Download the latest release: `https://github.com/Thirt927/DeadlockLingua/releases/latest`
 
 1. Extract `DeadlockLingua-<version>-win64.zip` to a path **without spaces or non-ASCII characters**, e.g. `D:\DeadlockLingua`.
-2. **Install the mod into the game**
-   - The VPK inside the archive is named `pak01_dir.vpk`. **Rename it first** — any name works as long as it does not collide with an existing file in `addons`. `pak22_dir.vpk` is recommended (the number is arbitrary; 22 is simply the slot this project uses).
-   - ⚠️ **Do not use the bare name `pak01_dir.vpk`**: `pak01` belongs to the base game and a duplicate will conflict. Also **never place it in the `citadel\` folder** — that overwrites game resources. It belongs in `citadel\addons\` only.
-   - Importing with **Deadlock Mod Manager** is recommended. Manually, copy it to:
+
+2. **Add the `-condebug` launch option to Deadlock** (**required**, once only)
+
+   Without it the game does not write `game/citadel/console.log`, which is the **only outbound path** for requests and logs. Without it the mod looks like "installed but doing nothing".
+
+   Steam Library → right-click Deadlock → Properties → General → **Launch Options**:
+
+   ```text
+   -condebug
+   ```
+
+3. **Install the mod into the game**
+   - The VPK inside the archive is named `pak01_dir.vpk`; **rename it first** — any name that doesn't collide with existing files in `addons/` works. `pak22_dir.vpk` is recommended (the number is arbitrary; 22 is just the free slot this project uses).
+   - ⚠️ **Do not keep the name `pak01_dir.vpk`**: `pak01` is the game's own pak group and will conflict. Also **never place it in `citadel\`** (that would override game resources) — it must go in `citadel\addons\`.
+   - Deadlock Mod Manager is recommended; or copy manually to:
      `<Steam Library>\steamapps\common\Deadlock\game\citadel\addons\`
-3. **Start the local bridge** (pick one)
-   - Run `install-autostart.bat` to install it as a startup task (recommended)
-   - Or run `StartBridgeSilent.vbs` for a temporary background start
-4. **Restart Deadlock**
+4. **Start the local bridge** (either one)
+   - Double-click `install-autostart.bat` to install as a startup task (recommended)
+   - Or double-click `StartBridgeSilent.vbs` to start it in the background
+5. **Restart Deadlock**
 
 > [!TIP]
-> Overlay not showing up? Run `ShowOverlay.bat` to open it manually — **no need to start the game first**.
+> Launching via `StartDeadlock.bat` adds `-condebug` automatically (`steam://run/.../-condebug`), so step 2 becomes optional.
 
 ---
-
-<p align="center">
-  <img src="./assets/readme/section-03-usage.svg" width="100%" alt="Section 03 · Usage" />
-</p>
 
 ## Usage
 
 ### Reading translations
 
-Once you are in a match the overlay opens automatically (as long as the bridge is running). By default it docks to the **right edge of the screen** and collapses into a thin strip; **just move the mouse over it** and it slides out.
+Just play. When someone types in a foreign language, the translation appears **right under that message** (light blue background, italic).
 
-Click **固定 (Pin)** in the window to keep it open permanently.
+- Each translation takes about **2–6 seconds** (the bit channel carries roughly 16 bytes/second — a hard limit of the current channel)
+- After chat scroll recycling, translations are rebuilt from cache
 
-If the window is missing or ended up somewhere unexpected:
+If nothing shows up in game, check in order:
 
-- Look at the taskbar, or press `Alt+Tab` and look for `DeadlockLingua`
-- Or run `ShowOverlay.bat` again
+1. Is `-condebug` in the launch options? (by far the most common cause)
+2. Is the bridge running? Open `http://127.0.0.1:8791/api/v1/health` — JSON means it's fine
+3. Does `logs/bridge.log` contain lines like `BTIPC TRQ` / `BTIPC: r=.. seq=.. OK`?
 
-### Sending a message
+### Sending messages
 
-1. Type your text in the input box at the bottom of the overlay
-2. Click **翻译并复制 (Translate & Copy)**, or press `Enter`
-3. Back in the game, open chat and paste with `Ctrl+V`
+Type Chinese in the chat box and press Enter — it is translated to English before being sent. To disable or switch to bilingual, see [Settings](#settings).
+
+### Settings
+
+Settings live in the **overlay's "Settings" page** (the in-game `/tr` panel was removed in v2.0.0 together with the old channels).
+
+Double-click `ShowOverlay.bat` to open the overlay (**no need to start the game**), then click "Settings" in the title bar. Configurable:
+
+- **Translation**: provider, API key, target language, display mode, send mode (translate-before-send), timeout
+- **Overlay**: view mode, opacity, background colour, corner radius, accent colour, snap edge
+- **Subtitle layer**: keep-alive, lifetime, fade duration, font size, text colours, max on-screen entries
+
+Configuration is stored in `config/config.json`, generated on first run. It contains your API key, is listed in `.gitignore`, and **must never be committed**.
 
 > [!IMPORTANT]
-> Pasting is manual by necessity — the game cannot receive any external data, so nothing can push text into its chat box.
-
-### Subtitle layer
-
-In settings, set **Display mode** to **字幕浮层 (Subtitle layer)** and the chat capsules appear in a screen corner.
-
-- **Reposition**: Settings → **调整字幕位置(拖动) (Adjust subtitle position)** → drag it where you want → click **完成放置 (Done)**
-- The position is remembered and stays correct across resolutions
+> In-game translation and the overlay share the same configuration. After clicking "Save", the **next message** uses the new settings; send-mode changes apply immediately.
 
 ### Starting / stopping the bridge
 
 | Action | How |
 |---|---|
-| Background start | `StartBridgeSilent.vbs` |
-| Start from a terminal (shows logs) | `StartDeadlock.bat` |
+| Start in background | `StartBridgeSilent.vbs` |
+| Start in a terminal (see logs) | `StartDeadlock.bat` |
 | Stop | `StopBridge.bat` |
 | Restart | `RestartBridge.bat` |
 | Install / remove autostart | `install-autostart.bat` / `remove-autostart.bat` |
-
-### Settings
-
-Click **设置 (Settings)** in the overlay title bar. Available options:
-
-- **Translation**: provider, API key, target language, display mode, outgoing mode, timeout
-- **Overlay**: display mode, opacity, background colour, corner radius, accent colour, docked edge
-- **Subtitle layer**: persistent mode, lifetime, fade duration, font sizes, text colours, max on screen, capsule width
-
-Settings are stored in `config/config.json`, generated on first run. That file contains your API key, is ignored by `.gitignore`, and **must not be committed to Git**.
-
-> [!NOTE]
-> The old in-game `/tr` settings panel was removed along with the game's networking: `/tr` no longer opens a panel and is sent as ordinary chat text. Change all settings in the overlay's **Settings**.
 
 ---
 
 ## API Reference
 
-The bridge listens only on `127.0.0.1:8791`, is not exposed externally, and offers no arbitrary URL proxying. The request body limit is 64 KB; a single text is capped at 4000 characters.
+The bridge listens on `127.0.0.1:8791` only. It is not exposed externally and provides no arbitrary URL proxy. Request bodies are capped at 64 KB, single texts at 4000 characters.
 
 | Method | Endpoint | Description |
 |---|---|---|
-| `POST` / `GET` | `/api/v1/translate` | Translate a piece of text; returns `{ ok, translation, detectedLanguage }` |
-| `POST` / `GET` | `/api/v1/test` | Test provider connectivity with the current configuration |
-| `GET` | `/api/v1/health` | Health check; returns version, current provider and fallback chain |
-| `GET` / `POST` | `/api/v1/config` | Read config (API keys masked) / save config |
-| `POST` / `GET` | `/api/v1/log` | Append one chat log entry (legacy in-game channel, now superseded by console.log) |
-| `POST` / `GET` | `/api/v1/diag` | Write in-game diagnostic info to the bridge log |
-| `GET` | `/api/v1/overlay/messages` | Overlay polling: recent chat, session id and target language |
-| `POST` / `GET` | `/api/v1/overlay/translate` | Overlay outgoing: translate your text to English for copying |
-| `GET` | `/bridge` | Bridge page (legacy in-game panel; deprecated) |
+| `GET` | `/btipc/dl` | **In-game bit channel, downlink.** Fetch a frame by `w` (window) + `r` (round): bit=1 returns `200` + PNG, bit=0 returns `404`. Each of the game's 128 Image panels reads its own bit |
+| `POST` / `GET` | `/api/v1/translate` | Translate text, returns `{ ok, translation, detectedLanguage }` |
+| `POST` / `GET` | `/api/v1/test` | Test provider connectivity with the current config |
+| `GET` | `/api/v1/health` | Health check: version, current provider, fallback chain |
+| `GET` / `POST` | `/api/v1/config` | Read (keys masked) / save configuration |
+| `GET` | `/api/v1/quickchat` | Quick-chat template corpus |
+| `GET` | `/api/v1/gamenames` | Hero/item name-protection list |
+| `POST` / `GET` | `/api/v1/log` | Write a chat log entry (now driven by the `console.log` channel — see [How It Works](#how-it-works)) |
+| `POST` / `GET` | `/api/v1/diag` | Write in-game diagnostics into the bridge log |
+| `GET` | `/api/v1/overlay/messages` | Overlay polling: recent chat, session id, target language |
+| `POST` / `GET` | `/api/v1/overlay/translate` | Overlay send: translate Chinese to English for copying |
+| `GET` | `/bridge` | Legacy in-game panel page (deprecated, diagnostics only) |
 | `GET` | `/overlay` | Web overlay page (fallback when `overlay.mode = "web"`) |
 
 <details>
-<summary>Show request examples</summary>
+<summary>Example calls</summary>
 
 ```bash
 # Health check
@@ -184,6 +197,9 @@ curl.exe http://127.0.0.1:8791/api/v1/health
 curl.exe -X POST http://127.0.0.1:8791/api/v1/translate ^
   -H "Content-Type: application/json" ^
   -d "{\"text\":\"gg wp\",\"targetLanguage\":\"zh-Hans\"}"
+
+# Bit channel: an unknown window must be 404 (this distinguishes the route from the generic 404)
+curl.exe -i "http://127.0.0.1:8791/btipc/dl?w=abcdef&r=1&p=0&t=x"
 ```
 
 ```json
@@ -196,27 +212,28 @@ curl.exe -X POST http://127.0.0.1:8791/api/v1/translate ^
 
 ## Configuration
 
-The config file is `config/config.json` (generated on first run from `config/config.example.json`). Key fields:
+The config file is `config/config.json` (generated from `config/config.example.json` on first run). Main fields:
 
 | Field | Default | Description |
 |---|---|---|
-| `port` | `8791` | Bridge listening port |
+| `port` | `8791` | Bridge port |
 | `provider` | `"bing"` | Primary provider: `bing` / `microsoft` / `openai` / `deepl` / `google` |
-| `fallbackProviders` | `[]` | Fallback order when the primary fails (only providers with a key are tried) |
+| `fallbackProviders` | `[]` | Fallback order on failure (only providers with a configured key are tried) |
 | `defaults.sourceLanguage` | `"auto"` | Source language |
 | `defaults.targetLanguage` | `"zh-Hans"` | Target language |
-| `timeoutMs` | `15000` | Total outgoing translation budget |
+| `timeoutMs` | `15000` | Translation timeout budget |
 | `chatLog.enabled` | `true` | Whether to write chat logs |
 | `chatLog.dir` | `"logs/chat"` | Chat log directory |
-| `steamIdEnrichment.enabled` | `false` | Whether to enable SteamID backfill |
-| `overlay.enabled` | `true` | Whether to enable the overlay |
-| `overlay.autoOpen` | `true` | Open the overlay automatically when the game starts |
-| `overlay.mode` | `"native"` | `native` = native WPF window; `web` = browser window fallback |
+| `deadlockConsoleLog` | auto-detected | Path to the game's `console.log` (only exists with `-condebug`) |
+| `steamIdEnrichment.enabled` | `false` | Enable SteamID backfill |
+| `overlay.enabled` | `true` | Enable the overlay |
+| `overlay.autoOpen` | `true` | Open the overlay when the game starts |
+| `overlay.mode` | `"native"` | `native` = native WPF window; `web` = browser fallback |
 | `overlay.view` | `"panel"` | `panel` = panel window; `subtitle` = subtitle layer |
-| `overlay.edge` | `"right"` | Edge to dock to when collapsed: `left` / `right` / `top` / `bottom` / `float` |
+| `overlay.edge` | `"right"` | Collapse to which screen edge: `left` / `right` / `top` / `bottom` / `float` |
 
 > [!CAUTION]
-> `config/config.json` holds provider API keys. Logs **never** include the apiKey, and the file is ignored by `.gitignore` — **never commit it under any circumstances**.
+> `config/config.json` contains your provider API keys. Logs **never** include the apiKey, and the file is listed in `.gitignore` — **never commit it**.
 
 ---
 
@@ -226,57 +243,72 @@ The config file is `config/config.json` (generated on first run from `config/con
 
 - `heroNames` — official English names of the 46 playable heroes
 - `heroCnToEn` — Chinese nicknames → English hero names
-- `itemEnToCn` — 194 official EN↔CN shop item names
-- `termsCnToEn` — tactical terms (creep wave, push, teleport back, …)
+- `itemEnToCn` — 194 official EN/CN pairs for shop items
+- `termsCnToEn` — tactical terms (lane, push, recall, …)
 
-The authoritative data sources are `https://api.deadlock-api.com/v1/assets/heroes` and `/v1/assets/items`, both supporting `?language=english|schinese`.
+The authoritative sources are `https://api.deadlock-api.com/v1/assets/heroes` and `/v1/assets/items`, both supporting `?language=english|schinese`.
 
 ---
 
-## Chat logs and SteamID
+## Chat Logs & SteamID
 
-Chat logs are written to `logs/chat/<matchId>.jsonl`; the identity cache goes to `logs/chat/identity_cache.json`.
+Chat logs are written to `logs/chat/<matchId>.jsonl`; the identity cache to `logs/chat/identity_cache.json`.
+
+> [!NOTE]
+> The **bridge** is what writes these logs: the game emits one `[LCT-CHAT]{json}` line per deduplicated, sender-resolved chat message into `console.log`, and the bridge tails that file and persists it. This is why `-condebug` is mandatory.
 
 The cache holds two kinds of keys:
 
-- **Nickname keys** — used to backfill SteamIDs on chat messages
-- **`account:<account_id>` keys** — authoritative per-player records for a match, avoiding name collisions or renames
+- **Nickname keys**: used to backfill SteamID for chat messages
+- **`account:<account_id>` keys**: authoritative per-match player records, avoiding name collisions and renames
 
-Behaviour:
+Policy:
 
-- Named players in chat messages are resolved by nickname 3 minutes after the file is written
-- The 12-player roster for a match is first requested from the public API 6 hours after the match file is written
-- Failed roster requests are retried hourly
-- The same account seen across matches increments `matchCount` instead of creating duplicate records
+- Named players in chat messages are backfilled by nickname 3 minutes after the file is written
+- The full 12-player roster triggers a public API request 6 hours after the match file is written
+- Failed requests retry hourly
+- Encountering the same account across matches increments `matchCount` instead of duplicating records
 
 Logs and caches are ignored by `.gitignore`.
 
 ---
 
-## Building from source
+## Building from Source
 
-Requires Reduced CSDK 12:
+Requires Reduced CSDK 12 and [VPKEdit CLI](https://github.com/craftablescience/VPKEdit/releases) (place it in `tools/`):
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts/build.ps1 -Csdk12Root "<CSDK_DIR>"
 ```
 
-The output is `dist/pak01_dir.vpk`. **Rename it to something that does not collide with existing files in `addons`** (`pak22_dir.vpk` recommended) before copying it to `game/citadel/addons/`.
+The output is `dist/pak01_dir.vpk`. **Rename it before deploying** (recommended: `pak22_dir.vpk`) so it doesn't collide with existing files in `addons/`, then copy it into Deadlock's `game/citadel/addons/`.
 
 > [!WARNING]
-> Avoid the bare `pak01_dir.vpk`: `pak01` is the base game's pak set name and a duplicate conflicts.
+> Don't use the bare name `pak01_dir.vpk`: `pak01` is the game's own pak group and will conflict.
 
 ---
 
 ## Tests
 
+**BTIPC protocol (offline, no game needed)**
+
 ```powershell
-node scripts/lingua_chat_simtest.js
-node scripts/overlay_test.js
-node scripts/test_sender_backfill.js
-node scripts/test_steamid_roster.js
-node scripts/test_bridge_dedup.js
-node scripts/test_bridge_fallback.js
+node tests\btipc\crc.test.js        # CRC-16/CCITT-FALSE test vectors
+node tests\btipc\frame.test.js      # frame round-trip / bit order / BUSY frame / CRC tampering
+node tests\btipc\transport.test.js  # REQ validation / round semantics / GC invariant
+node tests\btipc\e2e_tail.test.js   # console.log -> tail -> window -> frames
+node tests\btipc\route.test.js      # /btipc/dl status codes and headers
+```
+
+**Simulator (requires the bridge to be running)**
+
+```powershell
+node scripts\lingua_chat_simtest.js   # panel tree + BTIPC bit channel end-to-end (encoded with the real bridge framer)
+node scripts\overlay_test.js
+node scripts\test_sender_backfill.js
+node scripts\test_steamid_roster.js
+node scripts\test_bridge_dedup.js
+node scripts\test_bridge_fallback.js
 ```
 
 Bridge health check:
@@ -287,90 +319,111 @@ curl.exe http://127.0.0.1:8791/api/v1/health
 
 ---
 
-## Packaging a release
+## Packaging a Release
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts/package_release.ps1 -Version 2.0.0
+powershell -ExecutionPolicy Bypass -File scripts\package_release.ps1 -Version 2.1.0
 ```
 
-Produces `dist/DeadlockLingua-2.0.0-win64.zip`, containing the bridge, a bundled Node runtime, start/stop scripts, and documentation.
+Produces `dist/DeadlockLingua-2.1.0-win64.zip`, containing the VPK, the bridge, a portable Node runtime, start/stop scripts and docs.
 
 ---
 
-## Project layout
+## Project Layout
 
 ```text
 DeadlockLingua/
 ├── mod/                          Panorama UI source
 │   └── panorama/
 │       ├── layout/               Layout overrides
-│       ├── scripts/              Chat scanning and bridge glue (lingua_chat.js)
-│       └── styles/               Chat translation / test-overlay styles
+│       ├── scripts/              Chat scanning / BTIPC client / bridging (lingua_chat.js)
+│       └── styles/               Translation styling
 ├── core/                         Local Node.js bridge
-│   ├── bridge_server.js          HTTP server and config API
+│   ├── bridge_server.js          HTTP server, /btipc/dl route, config API
+│   ├── btipc/                    BTIPC channel (crc16 / framer / window / transport)
 │   ├── config.js                 Local config management
-│   ├── glossary.js               Game glossary (heroes/items/terms)
+│   ├── glossary.js               Game glossary (heroes / items / tactics)
 │   ├── hero_names.js             Hero names and abbreviations
-│   ├── dictionary.js             Self-learning dictionary
-│   ├── overlay.js                Overlay data source (tails console.log)
-│   ├── overlay_page.html         Web overlay page
+│   ├── dictionary.js             Adaptive learning dictionary
+│   ├── overlay.js                Overlay data source (tails console.log, legacy)
+│   ├── overlay_page.html         Web overlay page (legacy)
 │   ├── steamid_enrich.js         SteamID backfill and roster
 │   └── providers/                Translation providers (bing/microsoft/openai/deepl/google)
+├── tests/btipc/                  BTIPC protocol tests (offline)
 ├── scripts/
-│   ├── overlay_window.ps1        Native WPF overlay window
+│   ├── overlay_window.ps1        Desktop overlay (native WPF, legacy)
 │   ├── build.ps1                 Build
 │   ├── package_release.ps1       Release packaging
-│   └── *_test.js / *simtest.js   Tests
+│   └── *_test.js / *simtest.js   Simulation tests
 ├── config/                       Config and dictionaries
-├── docs/                         Architecture notes and optimisation log
-├── assets/readme/                README visuals (hero / section bars / architecture / badges)
-├── ShowOverlay.bat               Open the overlay manually (no game needed)
-├── StartBridgeSilent.vbs         Windowless background start
-├── StartDeadlock.bat             Terminal / with-game start
-├── StopBridge.bat                Stop the bridge
-├── RestartBridge.bat             Restart the bridge
+├── docs/                         Architecture, BTIPC spec, optimization log
+├── assets/readme/                README visual assets
+├── ShowOverlay.bat               Open the overlay manually (game not required)
+├── StartDeadlock.bat             Launch the game with -condebug
+├── StartBridgeSilent.vbs         Start the bridge silently
+├── StopBridge.bat / RestartBridge.bat
 └── LICENSE / LICENSE_NOTICE.md
 ```
 
-These runtime folders are not committed:
+These runtime directories are not tracked by Git:
 
-- `config/config.json` — local keys
+- `config/config.json` — local secrets
 - `logs/` — bridge and chat logs
 - `dist/` — build output
-- `portable-node/` — bundled Node runtime
+- `portable-node/` — local Node runtime
 - `tools/` — local packaging tools
 
 ---
 
-## How it works
+## How It Works
 
-The project has three parts: the in-game Panorama mod, the local Node.js bridge, and the out-of-game overlay. Data flows **one way** — the game writes chat to `console.log`, the bridge reads and translates it, and the overlay displays the result.
+Three parts: a Panorama mod inside the game, a local Node.js bridge, and (optionally) a desktop overlay. Data flows **both ways**:
 
 <p align="center">
-  <img src="./assets/readme/architecture.svg" width="100%" alt="Data flow: the in-game mod writes [LCT-CHAT] lines to console.log, the local bridge tails and translates them, and the out-of-game overlay displays the result; the return path is a single dashed manual-paste loop" />
+  <img src="./assets/readme/architecture.svg" width="100%" alt="Data flow: the game scans chat rows; the uplink sends a structured single line through console.log to the local bridge; the bridge translates and encodes the result into 16-byte frames; 128 hidden Image panels in the game read them back round by round; the mod appends the translation under the original chat row" />
 </p>
 
+**Uplink (game → bridge)**: a structured single line in `console.log`
+
+```text
+[LCT] BTIPC REQ w=<window> id=<request> len=<bytes> crc=<checksum> b64=<text>
+```
+
+The bridge incrementally tails this file every 0.8 s. This is why `-condebug` is mandatory.
+
+**Downlink (bridge → game)**: the **status code** of `GET /btipc/dl?w=&r=&p=&t=`
+
+128 hidden Image panels ask once per round; `200` = bit 1, `404` = bit 0, and 16 bits form one byte. Each frame carries `seq` / `VALID` / `LEN` plus a CRC-16; advancing the round number `r` is the implicit acknowledgement, and a failed check re-shoots the same round while the bridge idempotently re-serves the same frame.
+
+**Rendering**: the mod appends the translation as a `Label` under the chat row — rendering was never removed; only the data source was missing.
+
 > [!NOTE]
-> The **2026-10-01 game update removed all of Panorama's HTTP capability**. Probing confirmed there is no usable inbound channel inside the game, so "showing translations inside the game" is architecturally impossible. In-game networking is gone; the only surviving channel is the one-way `game → console.log`.
+> The overlay (the v2.0.x display path) uses a separate **one-way** channel: the bridge tails `[LCT-CHAT]` and the WPF window polls it. Both paths share the same `console.log` tail and the same translation pipeline.
 
 ---
 
 ## FAQ
 
-**Q: Why are translations no longer shown inside the game?**
-A: The game update removed networking, so nothing can be received inside the game. Use the overlay.
+**Q: No translation ever appears in game?**
+A: First check that `-condebug` is in the launch options — that's the most common cause. Then confirm the bridge is running (`http://127.0.0.1:8791/api/v1/health` returns JSON), and finally check `logs/bridge.log` for `BTIPC TRQ` / `BTIPC: r=.. seq=.. OK`.
 
-**Q: The overlay is missing, or shows "桥离线" (bridge offline).**
-A: The bridge is not running. Run `StartBridgeSilent.vbs`, or check whether `node.exe` is present in Task Manager.
+**Q: Translations take several seconds?**
+A: That's expected. The bit channel carries about 16 bytes/second, so a 60-byte translation takes roughly 4 seconds. That is the current channel's physical limit, not a hang.
 
-**Q: Can I still change settings in-game? `/tr` does nothing.**
-A: The old `/tr` settings panel has been removed; `/tr` is now sent as ordinary chat text and there is no in-game settings entry. Change settings in the overlay instead.
+**Q: What happens when translation fails?**
+A: A provider failure falls back to the original text (no hang); when the bridge itself is absent it gives up in about 3 seconds and skips, without injecting red error labels into the chat.
 
-**Q: Automatic copy failed.**
-A: Some system policies block clipboard writes. The translation is then selected for you — press `Ctrl+C`, then paste in the game.
+**Q: The bridge isn't running / shows "bridge offline"?**
+A: Double-click `StartBridgeSilent.vbs`, or check Task Manager for `node.exe`.
 
-**Q: Translation is sometimes slow or fails.**
-A: Increase the timeout in settings, or configure `fallbackProviders` so a secondary provider takes over.
+**Q: Can I still change settings in game? Typing `/tr` does nothing.**
+A: The in-game `/tr` panel was removed with the old channels; `/tr` is now sent as ordinary chat text. Use the overlay's "Settings" page (double-click `ShowOverlay.bat`).
+
+**Q: I'd rather use the overlay to read translations.**
+A: Still possible — the code is there. Switch the view mode in settings; `overlay.mode="web"` falls back to a browser window.
+
+**Q: Translations occasionally slow down or fail?**
+A: Raise the translation timeout in settings, or configure backup providers (`fallbackProviders`) for automatic fallback.
 
 ---
 
@@ -378,22 +431,25 @@ A: Increase the timeout in settings, or configure `fallbackProviders` so a secon
 
 Issues and pull requests are welcome.
 
-- Before committing, check for leaked `apiKey` / `sk-` keys / SteamID / `matchId` / raw chat text / local absolute paths
-- `config/config.json`, `logs/`, `dist/`, `*.vpk`, and `portable-node/` are all ignored — do not force-add them
-- When editing `.js` files, keep CRLF line endings and UTF-8 encoding
+- Before committing, self-check: no `apiKey` / `sk-` keys / SteamIDs / `matchId` / raw chat text / absolute local paths
+- `config/config.json`, `logs/`, `dist/`, `*.vpk` and `portable-node/` are ignored — don't force-add them
+- Keep `.js` files CRLF-terminated and UTF-8 encoded
+- If you change the BTIPC protocol on either side, **update the other side too** (the game side inlines copies of crc16 / bit order / UTF-8 / base64), and run `tests/btipc/*` plus `scripts/lingua_chat_simtest.js`
 
 Roadmap:
 
-- [x] Out-of-game overlay (native WPF)
+- [x] **In-game translation display** (BTIPC two-way channel + Image bit encoding)
+- [x] Translate-before-send (rewrite the input box, then use the vanilla send path)
+- [x] Desktop overlay (native WPF, kept as a fallback)
 - [x] Subtitle layer (click-through + draggable)
-- [x] Glossary expansion (46 heroes / 194 items)
+- [x] Full glossary (46 heroes / 194 items)
 - [x] Passive SteamID backfill
-- [ ] In-game translations (blocked by the engine; pending restored networking)
+- [ ] Faster bit channel (spec v1.1: precise closure + compact frames, targeting ≤2.5 s for 60 B)
 
 ---
 
 ## License
 
-- This project: GNU GPL v3, see [`LICENSE`](LICENSE)
+- Project code: GNU GPL v3, see [`LICENSE`](LICENSE)
 - Third-party notices: see [`LICENSE_NOTICE.md`](LICENSE_NOTICE.md)
-- Valve layout assets used inside the game are for compatibility only; copyright belongs to Valve
+- In-game Valve layout assets are used for compatibility only; copyright belongs to Valve
