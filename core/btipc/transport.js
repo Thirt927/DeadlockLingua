@@ -28,7 +28,7 @@ const REQ_RE = /^\[LCT\] BTIPC REQ w=([0-9a-f]{6}) id=([0-9a-f]{4}) len=(\d{1,4}
 const CAN_RE = /^\[LCT\] BTIPC CAN w=([0-9a-f]{6})$/;
 
 // §5.1 上层信封白名单
-const ENV_OP_RE = /^op=(config|test)(;tm=\d{1,7})?$/;
+const ENV_OP_RE = /^op=(config|test|ui)(;tm=\d{1,7})?$/;
 const ENV_T_RE = /^t=([A-Za-z0-9-]{1,16})(;tm=\d{1,7})?$/;
 
 // 解析一行日志里的 REQ。返回 null 表示不是(或不是合法的)REQ 行。
@@ -83,7 +83,10 @@ function splitEnvelope(text) {
   const head = s.slice(0, nl);
   const body = s.slice(nl + 1);
   const op = ENV_OP_RE.exec(head);
-  if (op) return { kind: op[1] === "config" ? "config" : "test", body: body, head: head };
+  if (op) {
+    const kind = op[1] === "config" ? "config" : (op[1] === "ui" ? "ui" : "test");
+    return { kind: kind, body: body, head: head };
+  }
   const t = ENV_T_RE.exec(head);
   if (t) return { kind: "translate", target: t[1], body: body, head: head };
   // 未知 op / 未知键 / 不安全字符集 → 整条按裸文本(向后兼容老客户端与冒烟命令)
@@ -103,6 +106,14 @@ function createTransport(deps) {
 
   function resolvePayload(text) {
     const env = splitEnvelope(text);
+    if (env.kind === "ui") {
+      // 游戏侧开机同步专用:只回 ui 段 + 各服务商 Key 是否已配。
+      // 关键 —— 整份 masked 配置有 1312 字节 = 132 帧,而协议帧数上限是 128 帧(1280 字节),
+      // 所以 op=config 在游戏侧**永远不可能**成功(实测踩过:outgoing 一直读不回来)。
+      // 这个小包约 230 字节 = 23 帧。
+      if (typeof d.ui !== "function") return Promise.resolve("{\"ok\":false,\"error\":\"ui_unsupported\"}");
+      return Promise.resolve(d.ui(env.body));
+    }
     if (env.kind === "config") {
       if (typeof d.config !== "function") return Promise.resolve("{\"ok\":false,\"error\":\"config_unsupported\"}");
       return Promise.resolve(d.config(env.body));

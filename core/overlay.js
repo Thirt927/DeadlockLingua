@@ -146,6 +146,12 @@ function ingest(line, opts) {
   ring.push(msg);
   while (ring.length > RING_LIMIT) ring.shift();
 
+  // 悬浮窗关闭后不再为它翻译:否则每条聊天要付两遍 provider 费用
+  // (入站 BTIPC 一遍 + 悬浮窗一遍),而悬浮窗并不显示。
+  // 注意:ring.push 在上面已经做了 —— 聊天日志落盘走的是 ingest 的调用方,不受影响。
+  const ovCfg = (deps.getConfig() || {}).overlay || {};
+  if (ovCfg.enabled === false) return;
+
   if (!needsTranslation(msg.text, deps.getConfig())) return;
   if (!deps.translate) return;
   if (queue.length >= QUEUE_LIMIT) {

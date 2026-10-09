@@ -67,7 +67,11 @@ const DEFAULTS = {
   // autoOpen=false 只关闭"检测到游戏启动自动开窗"(可手动打开 http://127.0.0.1:<port>/overlay)。
   // mode: native = 原生 WPF 窗口(真透明 + 贴边收起,默认);web = Edge/Chrome 小窗(不透明,仅回退)。
   overlay: {
-    enabled: true,
+    // v2.1.0 起译文直接显示在游戏内聊天行下方(BTIPC),悬浮窗不再需要 → 默认关闭。
+    // 代码完整保留:改回 true 即可恢复自动弹出;或直接双击 ShowOverlay.bat
+    // (那个走 PowerShell 脚本,不受本开关约束)。
+    // 关闭后桥也不再为悬浮窗翻译,省掉一半 provider 调用。
+    enabled: false,
     autoOpen: true,
     mode: "native",
     // view: panel = 常规面板窗;subtitle = 字幕浮层(角落堆叠的聊天胶囊,鼠标穿透)

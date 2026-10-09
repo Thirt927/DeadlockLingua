@@ -64,7 +64,7 @@
     "timeoutMs": 15000
   },
   "overlay": {
-    "enabled": true,
+    "enabled": false,
     "autoOpen": true,
     "mode": "native",
     "view": "panel",

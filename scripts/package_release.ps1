@@ -43,6 +43,7 @@ Copy-Item (Join-Path $Root "core\hero_names.js") (Join-Path $Stage "core\")
 Copy-Item (Join-Path $Root "core\steamid_enrich.js") (Join-Path $Stage "core\")
 Copy-Item (Join-Path $Root "core\overlay.js") (Join-Path $Stage "core\")
 Copy-Item (Join-Path $Root "core\overlay_page.html") (Join-Path $Stage "core\")
+Copy-Item (Join-Path $Root "core\settings_page.html") (Join-Path $Stage "core\")
 
 Write-Host "==> 复制 BTIPC 信道层..."
 # bridge_server.js 启动时 require("./btipc/transport"),缺了整个桥起不来

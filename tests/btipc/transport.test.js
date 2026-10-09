@@ -82,6 +82,7 @@ ok("t=<target> → translate", e1.kind === "translate" && e1.target === "zh-Hans
 const e1b = T.splitEnvelope("t=en;tm=5000\nhi");
 ok("t=<target>;tm 带超时", e1b.kind === "translate" && e1b.target === "en");
 ok("op=config → config", T.splitEnvelope("op=config\n{}").kind === "config");
+ok("op=ui → ui", T.splitEnvelope("op=ui\n{}").kind === "ui");
 ok("op=test → test", T.splitEnvelope("op=test\n{}").kind === "test");
 ok("无换行 → 裸文本", T.splitEnvelope("hello").kind === "bare");
 ok("未知 op → 裸文本(整条)", (function () {
@@ -168,6 +169,22 @@ ok("不安全字符集目标语言 → 裸文本", T.splitEnvelope("t=zh Hans\nx
   await tick();
   ok("op=config 路由到 config()", cfgBody === "{}");
   ok("config 应答已入帧队列", collect(tr3, "abcdef", 1) === "{\"ok\":true}");
+
+  // op=ui:游戏侧开机同步专用小包。
+  // 整份 masked 配置 1313 字节 = 132 帧,超过协议 128 帧上限 → op=config 在游戏侧
+  // 永远收不到(实测:config.json 写着 outgoing=translation,游戏却一直用默认 off)。
+  let uiBody = null;
+  const tr5 = T.createTransport({
+    log: () => {},
+    ui: (body) => { uiBody = body; return Promise.resolve("{\"ok\":true,\"ui\":{\"outgoing\":\"translation\"}}"); },
+  });
+  tr5.handleLogLine(buildReqLine("abcdef", 1, "op=ui\n{}"));
+  await tick();
+  ok("op=ui 路由到 ui()", uiBody === "{}");
+  ok("op=ui 应答可闭合", collect(tr5, "abcdef", 1) === "{\"ok\":true,\"ui\":{\"outgoing\":\"translation\"}}");
+  // 该小包必须放得进 128 帧(1280 字节) —— 这是它存在的理由
+  ok("op=ui 应答 < 128 帧上限",
+    Buffer.byteLength("{\"ok\":true,\"ui\":{\"outgoing\":\"translation\",\"displayMode\":\"bilingual\"},\"keys\":{\"microsoft\":false,\"openai\":true,\"deepl\":false,\"google\":false}}", "utf8") <= 1280);
 
   // translate 抛错 → 降级回原文,不卡死
   const tr4 = T.createTransport({

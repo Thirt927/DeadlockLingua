@@ -3698,7 +3698,9 @@ function injectTranslation(row, sig, text) {
   // 否则一次断线会把面板在途请求卡住十几秒(健康探测每 5s 一轮,全被 pending 挡掉),
   // 自愈检测要等好几个周期才发现面板已僵死。
   const BRIDGE_FAST_OPS = { health: 8000, diag: 8000, log: 8000, config: 8000 };
-  const OUTGOING_TIMEOUT_MIN_MS = 3000; // 用户可配出站超时的下限,防止填 0/1 把正常翻译掐死
+  const OUTGOING_TIMEOUT_MIN_MS = 8000; // 用户可配出站超时的下限。
+  // 为什么从 3000 提到 8000:位信道单程 2~4s(60B 约 4s),3s 下限会让正常翻译被掐断后
+  // 按原文发送,用户看到的就是"发送前翻译没效果"。
   const OUTGOING_TIMEOUT_MAX_MS = 120000;
 
   // 出站翻译超时:优先用设置面板的"超时(ms)",未配置才回退 OUTGOING_TIMEOUT_MS。
@@ -4146,6 +4148,7 @@ function injectTranslation(row, sig, text) {
         stormFails: 0,
         stormLeft: 0,
         done: false,
+        tag: o.tag || "",
         onDone: onDone,
         onFail: onFail,
       };
@@ -4176,6 +4179,22 @@ function injectTranslation(row, sig, text) {
       return !!(transfer && !transfer.done);
     }
 
+    // 抢占在途传输。用途:出站翻译有用户交互(按了回车在等),入站翻译是尽力而为 ——
+    // 位信道单程 2~4s 且是单飞,不抢占的话出站会排在入站后面,很容易撞上超时后按原文发。
+    // 只抢占**不同 tag** 的传输;被抢占方会拿到 {kind:"preempted"},由上层决定重排。
+    function preempt(tag) {
+      const t = transfer;
+      if (!t || t.done) return false;
+      if (t.tag === tag) return false;
+      settleFail({ kind: "preempted", message: "被 " + tag + " 抢占" });
+      return true;
+    }
+
+    // 当前在途传输的 tag(诊断用)
+    function currentTag() {
+      return transfer && !transfer.done ? transfer.tag : "";
+    }
+
     // 测试/诊断用
     function _state() {
       return { panels: panels.length, busy: busy(), round: transfer ? transfer.round : 0 };
@@ -4189,6 +4208,8 @@ function injectTranslation(row, sig, text) {
       request: request,
       cancel: cancel,
       busy: busy,
+      preempt: preempt,
+      currentTag: currentTag,
       _state: _state,
       _reset: _reset,
       crc16: crc16,
@@ -4227,17 +4248,21 @@ function injectTranslation(row, sig, text) {
     // 悬住一个后续消息就全部停摆(实测踩过:dispatchJob 抛异常被扫描循环吞掉)。
     function settleFailure(kind, message) {
       log("btipc fail (" + kind + "): " + String(message || ""));
+      // "preempted" 不能带 btipc_ 前缀:failJob 对 btipc_* 视为"桥那一侧不在"而**不重试**,
+      // 但被抢占的入站翻译必须重排(那条消息还没译到)。其余 btipc_* 保持原语义。
+      const err = kind === "preempted" ? "preempted" : ("btipc_" + kind);
       if (job.kind === "outgoing") {
+        setOutgoingHint("");
         // 与超时回调同一约定:done 只允许触发一次
         if (job._timedOut) return;
         if (job._timeout) { try { clearTimeout(job._timeout); } catch (e) {} job._timeout = null; }
         job.done(null, null);
         finishJob();
       } else if (job.kind === "bridge") {
-        job.done({ ok: false, error: "btipc_" + kind });
+        job.done({ ok: false, error: err });
         finishJob();
       } else {
-        failJob(job, "btipc_" + kind);
+        failJob(job, err);
       }
     }
 
@@ -4247,9 +4272,17 @@ function injectTranslation(row, sig, text) {
       const timeoutMs = isOutgoing
         ? outgoingTimeoutMs()
         : (State.cfg.timeoutMs || 15000) + BTIPC_REQ_TIMEOUT_MS;
+      if (isOutgoing) {
+        // 用户在等:抢占在途的入站翻译(被抢的那条会自动重排),并给出可见反馈 ——
+        // 位信道单程 2~4s,没有提示的话用户会以为"没反应"而重复按回车。
+        try { BTIPC.preempt("outgoing"); } catch (e) {}
+        setOutgoingHint("翻译中…约 2~4 秒");
+      }
       BTIPC.request(text, {
+        tag: isOutgoing ? "outgoing" : "inbound",
         timeoutMs: timeoutMs,
         onDone: function (reply) {
+          if (job.kind === "outgoing") setOutgoingHint("");
           if (job.kind === "bridge") {
             let payload = null;
             try { payload = JSON.parse(reply); } catch (e) { payload = null; }
@@ -5405,9 +5438,13 @@ function injectTranslation(row, sig, text) {
     const trimmed = String(raw).trim();
     if (!trimmed) return;
 
-    // 注: 原 /tr 命令(打开游戏内设置面板)已随面板一并移除 —— 面板在游戏
-    // 移除 HTTP 后已无法保存任何设置, 保留只会把用户的输入吞掉(/tr 既不开面板
-    // 也不发送)。现在 /tr 会作为普通文本正常发送。
+    // /tr:打开游戏内设置面板(不发送)。面板标记在 chat.xml,逻辑见「设置面板」一节。
+    // BTIPC 打通后这条命令恢复可用(此前面板的死通道存不了任何设置,故被摘掉)。
+    if (trimmed === "/tr") {
+      LCTToggleSettings();
+      clearInput();
+      return;
+    }
 
     // !lcttest 测试命令:向 HUD 顶栏聊天注入一条英文消息(不真实发送)
     // 用途:无队友/无 bot 时验证 HUD 扫描+翻译通路;进训练场即可测
@@ -5512,6 +5549,17 @@ function injectTranslation(row, sig, text) {
 
   // ================= 设置面板 =================
 
+  // 出站翻译的可见进度提示。位信道单程 2~4 秒,没有反馈用户会以为"按了没反应"而重复回车。
+  // 标签在 chat.xml 的 ChatControls 里(输入框右侧);空文本时折叠,不占位。
+  function setOutgoingHint(text) {
+    const el = findChild(getRoot(), "LCTOutgoingHint");
+    if (!el) return;
+    try {
+      el.text = text || "";
+      el.style.visibility = text ? "visible" : "collapse";
+    } catch (e) {}
+  }
+
   function setStatus(text) {
     const label = findChild(getRoot(), STATUS_LABEL_ID);
     if (label) {
@@ -5543,20 +5591,25 @@ function injectTranslation(row, sig, text) {
       if (!uiTouched("provider") && typeof c.ui.provider === "string") { State.cfg.provider = c.ui.provider; changed = true; }
       if (!uiTouched("timeoutMs") && typeof c.ui.timeoutMs === "number") { State.cfg.timeoutMs = c.ui.timeoutMs; changed = true; }
     }
+    // op=ui 直接回 keys;保留旧形状(hasApiKey)的兼容分支,便于与 /api/v1/config 复用
+    const k = c.keys || {};
     State.cfg._providerKeys = {
-      microsoft: !!(c.microsoft && c.microsoft.hasApiKey),
-      openai: !!(c.openai && c.openai.hasApiKey),
-      deepl: !!(c.deepl && c.deepl.hasApiKey),
-      google: !!(c.google && c.google.hasApiKey),
+      microsoft: !!(k.microsoft || (c.microsoft && c.microsoft.hasApiKey)),
+      openai: !!(k.openai || (c.openai && c.openai.hasApiKey)),
+      deepl: !!(k.deepl || (c.deepl && c.deepl.hasApiKey)),
+      google: !!(k.google || (c.google && c.google.hasApiKey)),
     };
     return changed;
   }
 
-  // 启动时从桥同步 config.json 的 UI 设置(失败重试,避免桥尚未就绪时丢同步)
+  // 启动时从桥同步 UI 设置(失败重试,避免桥尚未就绪时丢同步)。
+  // ⚠️ 必须用 `op=ui`(小包,约 230B)**不能**用 `op=config`:整份 masked 配置 1312 字节
+  // = 132 帧,超过协议 128 帧(1280B)上限,游戏侧永远收不到 —— 实测踩过这个坑,
+  // 表现为 config.json 里明明写着 outgoing=translation,游戏却一直用默认的 off。
   function syncUiFromBridge(attempt) {
-    bridgePost("config", {}, function (res) {
-      if (res && res.ok && res.config) {
-        const changed = applyBridgeUiConfig(res.config);
+    bridgePost("ui", {}, function (res) {
+      if (res && res.ok && res.ui) {
+        const changed = applyBridgeUiConfig(res);
         if (changed) saveUiConfig();
       } else if (attempt < 3) {
         $.Schedule(5.0, function () { syncUiFromBridge(attempt + 1); });
@@ -5566,15 +5619,442 @@ function injectTranslation(row, sig, text) {
 
   function bridgePost(op, payload, done) {
     const data = encodeURIComponent(JSON.stringify(payload || {}));
-    // 直连通道可用时不要求 HTML 面板存在(hudchat 未加载时测试/保存也能用)
-    const canHttp = detectAsyncWebRequest();
-    const panel = canHttp ? null : ensurePanel();
-    if (!canHttp && !panel) {
-      done({ ok: false, error: "bridge_panel_unavailable" });
-      return;
-    }
-    ensureBridgeEvents();
+    // 只走 BTIPC。原来这里还有一道"直连不可用就必须要 HTML 面板"的闸门,那是
+    // 2026/10/01 之前两条老通道的残留 —— 面板通道已死,留着只会让桥任务被误拒。
     enqueueBridge(op, data, done);
+  }
+
+  // ================= 设置面板(从 v2.0.0 恢复,适配 BTIPC) =================
+  // 面板的 XML 标记在 chat.xml(LCTSettingsPanel / LCTSettingsButton),这里只管逻辑。
+  // 与 v2.0.0 的差别:
+  //   1) 打开面板**不再**向桥读整份配置 —— `op=config` 的应答 1313 字节 = 132 帧,
+  //      超过协议 128 帧上限收不到。UI 偏好在开机时已由 `op=ui`(254B)同步进 State.cfg,
+  //      面板直接从内存回填,秒开。
+  //   2) 保存走 `op=config` 的**写**路径,桥端只回 {"ok":true}(极小),所以能收到回执。
+  //   3) 端点类字段(region/baseUrl/model/deeplEndpoint)为空时**不下发** ——
+  //      下发空串会把已配好的端点清掉(applyMaskedUpdate 对空串是按需清空的语义)。
+  // 常用开关用 `/tr` 或输入框右侧的「译」按钮打开。
+  const SETTINGS_BUTTON_ID = "LCTSettingsButton";
+  const SETTINGS_PANEL_ID = "LCTSettingsPanel";
+  const SETTINGS_VISIBLE_CLASS = "LCTVisible";
+
+  function markUiTouched(field) {
+    if (!State.cfg) return;
+    if (!Array.isArray(State.cfg._userTouched)) State.cfg._userTouched = [];
+    if (State.cfg._userTouched.indexOf(field) < 0) State.cfg._userTouched.push(field);
+  }
+
+  function updateKeyStateLabel() {
+    const label = findChild(getRoot(), "LCTKeyState");
+    if (!label) return;
+    const prov = State.cfg.provider || "bing";
+    let text = "未配置";
+    if (prov === "bing") text = "免 Key";
+    else if ((State.cfg._providerKeys || {})[prov]) text = "已配置";
+    try { label.text = text; } catch (e) {}
+  }
+
+  // 启动时从桥同步 config.json 的 UI 设置(失败重试,避免桥尚未就绪时丢同步)
+
+  function openSettingsPanel() {
+    const panel = findChild(getRoot(), SETTINGS_PANEL_ID);
+    if (!panel) return;
+    try {
+      panel.AddClass(SETTINGS_VISIBLE_CLASS);
+    } catch (e) {}
+    try {
+      if (typeof panel.SetHasClass === "function") panel.SetHasClass(SETTINGS_VISIBLE_CLASS, true);
+    } catch (e) {}
+    syncPanelFromConfig();
+    // 面板直接吃内存里的 State.cfg —— **不**在打开时向桥读配置:
+    // `op=config` 的应答 1313 字节 = 132 帧,超过协议 128 帧(1280B)上限,走位信道收不到。
+    // UI 偏好在开机时已由 `op=ui`(254B)同步进来,这里无需再问桥,所以面板是秒开的。
+    // 端点类字段(region / baseUrl / model / deeplEndpoint)刻意留空:空值保存时不下发,
+    // 就不会把 config.json 里已配好的端点清掉(见 collectPanelConfig)。
+    if ((State.cfg._providerKeys || {})[State.cfg.provider || "bing"]) {
+      setFieldText("LCTApiKey", "********");
+    }
+    setToggleText("LCTChatLog", State.cfg.chatLog !== false);
+    updateKeyStateLabel();
+    // 聚焦面板本身(与 DLCT 一致:优先控件,失败则面板;面板持焦后 Tab/Enter 可用)
+    // 仅在面板仍可见时聚焦,否则异步回调会在用户已关闭设置后把焦点抢回隐藏面板
+    try {
+      if (hasClass(panel, SETTINGS_VISIBLE_CLASS)) {
+        const first = findChild(panel, "LCTEnabled");
+        if (first && first.SetFocus) first.SetFocus();
+        else if (panel.SetFocus) panel.SetFocus();
+      }
+    } catch (e) {}
+  }
+
+  function closeSettingsPanel() {
+    const panel = findChild(getRoot(), SETTINGS_PANEL_ID);
+    if (panel) {
+      try {
+        panel.RemoveClass(SETTINGS_VISIBLE_CLASS);
+      } catch (e) {}
+    }
+    // 关闭后必须释放输入焦点:面板里的 TextEntry(如"超时/延迟时间")若继续持焦,
+    // WASD 会被当文本读,导致退出界面后人物无法移动。必须在隐藏面板之后调用。
+    dropInputFocus();
+  }
+
+  function LCTToggleSettings() {
+    const panel = findChild(getRoot(), SETTINGS_PANEL_ID);
+    if (panel && hasClass(panel, SETTINGS_VISIBLE_CLASS)) closeSettingsPanel();
+    else openSettingsPanel();
+  }
+
+  function LCTCloseSettings() {
+    log("close clicked");
+    closeSettingsPanel();
+  }
+
+  function fieldValue(id) {
+    const panel = findChild(getRoot(), SETTINGS_PANEL_ID);
+    const field = panel ? findChild(panel, id) : null;
+    return field ? safeText(field) : "";
+  }
+
+  function setFieldText(id, text) {
+    const panel = findChild(getRoot(), SETTINGS_PANEL_ID);
+    const field = panel ? findChild(panel, id) : null;
+    if (field) {
+      try {
+        field.text = text;
+      } catch (e) {}
+    }
+  }
+
+  function syncPanelFromConfig() {
+    setFieldText("LCTApiKey", "");
+    setFieldText("LCTRegion", "");
+    setFieldText("LCTOpenaiBaseUrl", "");
+    setFieldText("LCTOpenaiModel", "");
+    setFieldText("LCTDeeplEndpoint", "");
+    setFieldText("LCTFallback", "");
+    setFieldText("LCTTargetLangCustom", "");
+    setFieldText("LCTOutgoingTargetCustom", "");
+    setFieldText("LCTTimeout", String(State.cfg.timeoutMs || 15000));
+    setSelectText("LCTProviderSelect", labelFor(PROVIDER_OPTIONS, State.cfg.provider || "bing"));
+    syncProviderRows();
+    setSelectText("LCTTargetLangSelect", labelFor(LANGUAGE_OPTIONS, State.cfg.targetLanguage || "zh-Hans"));
+    setSelectText("LCTDisplayModeSelect", labelFor(DISPLAY_MODES, State.cfg.displayMode || "bilingual"));
+    setSelectText("LCTOutgoingSelect", labelFor(OUTGOING_MODES, State.cfg.outgoing || "off"));
+    setSelectText("LCTOutgoingTargetSelect", labelFor(LANGUAGE_OPTIONS, State.cfg.outgoingTarget || "en"));
+    setToggleText("LCTEnabled", !!State.cfg.enabled);
+    setToggleText("LCTForce", !!State.cfg.force);
+    setToggleText("LCTTranslateOwn", State.cfg.translateOwn !== false);
+    setToggleText("LCTChatLog", State.cfg.chatLog !== false);
+    syncCustomInputs();
+    closeSelectMenus();
+    setStatus("");
+  }
+
+  function setSelectText(buttonId, text) {
+    const panel = findChild(getRoot(), SETTINGS_PANEL_ID);
+    const btn = panel ? findChild(panel, buttonId) : null;
+    const label = btn ? findChild(btn, buttonId + "Label") : null;
+    if (label) {
+      try {
+        label.text = text;
+      } catch (e) {}
+    }
+  }
+
+  function labelFor(options, value) {
+    for (let i = 0; i < options.length; i += 1) {
+      if (options[i].value === value) return options[i].label;
+    }
+    return String(value || "");
+  }
+
+  function cycleValue(options, current) {
+    for (let i = 0; i < options.length; i += 1) {
+      if (options[i].value === current) return options[(i + 1) % options.length].value;
+    }
+    return options[0].value;
+  }
+
+  const SELECT_MENU_IDS = [
+    "LCTProviderMenu",
+    "LCTTargetLangMenu",
+    "LCTDisplayModeMenu",
+    "LCTOutgoingMenu",
+    "LCTOutgoingTargetMenu",
+  ];
+
+  function closeSelectMenus() {
+    const root = getRoot();
+    for (let i = 0; i < SELECT_MENU_IDS.length; i += 1) {
+      const m = findChild(root, SELECT_MENU_IDS[i]);
+      if (m) {
+        try {
+          m.RemoveClass(SETTINGS_VISIBLE_CLASS);
+        } catch (e) {}
+      }
+    }
+  }
+
+  // 自定义语言输入框显隐
+
+  function syncCustomInputs() {
+    const root = getRoot();
+    const t = findChild(root, "LCTTargetLangCustom");
+    const o = findChild(root, "LCTOutgoingTargetCustom");
+    if (t) {
+      try {
+        if (State.cfg.targetLanguage === "custom") t.AddClass(SETTINGS_VISIBLE_CLASS);
+        else t.RemoveClass(SETTINGS_VISIBLE_CLASS);
+      } catch (e) {}
+    }
+    if (o) {
+      try {
+        if (State.cfg.outgoingTarget === "custom") o.AddClass(SETTINGS_VISIBLE_CLASS);
+        else o.RemoveClass(SETTINGS_VISIBLE_CLASS);
+      } catch (e) {}
+    }
+  }
+
+  // API Key / 区域行显隐已按用户意见移除(行显隐机制不稳定,且非必需)
+
+  function setToggleText(id, on) {
+    const panel = findChild(getRoot(), SETTINGS_PANEL_ID);
+    const toggle = panel ? findChild(panel, id) : null;
+    if (!toggle) return;
+    // Button 自身不渲染 text,必须更新内嵌 Label(命名约定:<按钮id>Label)
+    const label = findChild(toggle, id + "Label") || toggle;
+    try {
+      label.text = on ? "是" : "否";
+    } catch (e) {}
+  }
+
+  function LCTOnToggle(which) {
+    markUiTouched(which);
+    if (which === "enabled") {
+      State.cfg.enabled = !State.cfg.enabled;
+      setToggleText("LCTEnabled", State.cfg.enabled);
+    } else if (which === "force") {
+      State.cfg.force = !State.cfg.force;
+      setToggleText("LCTForce", State.cfg.force);
+    } else if (which === "chatLog") {
+      State.cfg.chatLog = State.cfg.chatLog === false;
+      setToggleText("LCTChatLog", State.cfg.chatLog);
+      setStatus("聊天日志" + (State.cfg.chatLog ? "已开启(按比赛 ID 存 logs/chat)" : "已关闭"));
+    } else if (which === "translateOwn") {
+      State.cfg.translateOwn = State.cfg.translateOwn === false;
+      setToggleText("LCTTranslateOwn", State.cfg.translateOwn);
+      setStatus("翻译自己的消息" + (State.cfg.translateOwn ? "已开启" : "已关闭"));
+    }
+    saveUiConfig();
+    log("toggle: " + which);
+  }
+
+  // 循环切换(服务商/显示模式/发送模式)
+  // 根据当前服务商显示/隐藏对应的配置行与标签提示
+
+  function syncProviderRows() {
+    const p = State.cfg.provider || "bing";
+    const setRow = function (id, show) {
+      const row = findChild(getRoot(), id);
+      if (!row) return;
+      try {
+        row.style.visibility = show ? "visible" : "collapse";
+      } catch (e) {}
+    };
+    setRow("LCTRowApiKey", p === "microsoft" || p === "openai" || p === "deepl" || p === "google");
+    setRow("LCTRowRegion", p === "microsoft");
+    setRow("LCTRowOpenaiBase", p === "openai");
+    setRow("LCTRowOpenaiModel", p === "openai");
+    setRow("LCTRowDeeplEndpoint", p === "deepl");
+    let hint = "";
+    if (p === "bing") hint = "免 Key 公共接口,可能有隐形限流;失败可配置自动回退";
+    else if (p === "microsoft") hint = "Azure Translator Key(可留空则跳过该服务商)";
+    else if (p === "openai") hint = "OpenAI 兼容端点:DeepSeek 填 https://api.deepseek.com + deepseek-chat/deepseek-reasoner;OpenAI/Ollama/LM Studio/OneAPI 亦可";
+    else if (p === "deepl") hint = "DeepL API Key(free/pro 端点可选)";
+    else if (p === "google") hint = "Google Cloud Translation API Key";
+    setStatus(hint);
+  }
+
+  function LCTPickProvider(value) {
+    markUiTouched("provider");
+    State.cfg.provider = value;
+    syncPanelFromConfig();
+    // 该服务商已配置 Key:回填占位符,避免面板显示空白
+    if ((State.cfg._providerKeys || {})[value]) setFieldText("LCTApiKey", "********");
+    updateKeyStateLabel();
+    saveUiConfig();
+    closeSelectMenus();
+    log("pickProvider: " + value);
+  }
+
+  function LCTCycle(which) {
+    closeSelectMenus();
+    markUiTouched(which);
+    if (which === "provider") {
+      State.cfg.provider = cycleValue(PROVIDER_OPTIONS, State.cfg.provider || "bing");
+      setSelectText("LCTProviderSelect", labelFor(PROVIDER_OPTIONS, State.cfg.provider));
+    } else if (which === "displayMode") {
+      State.cfg.displayMode = cycleValue(DISPLAY_MODES, State.cfg.displayMode || "bilingual");
+      setSelectText("LCTDisplayModeSelect", labelFor(DISPLAY_MODES, State.cfg.displayMode));
+    } else if (which === "outgoing") {
+      State.cfg.outgoing = cycleValue(OUTGOING_MODES, State.cfg.outgoing || "off");
+      setSelectText("LCTOutgoingSelect", labelFor(OUTGOING_MODES, State.cfg.outgoing));
+    }
+    saveUiConfig();
+    log("cycle: " + which + " -> " + State.cfg[which]);
+  }
+
+  // 下拉菜单开关(目标语言/发送目标语言)
+
+  function LCTToggleMenu(field) {
+    const menuId =
+      field === "targetLanguage" ? "LCTTargetLangMenu" :
+      field === "outgoingTarget" ? "LCTOutgoingTargetMenu" :
+      field === "provider" ? "LCTProviderMenu" :
+      field === "displayMode" ? "LCTDisplayModeMenu" :
+      field === "outgoing" ? "LCTOutgoingMenu" : "";
+    if (!menuId) return;
+    const menu = findChild(getRoot(), menuId);
+    if (!menu) return;
+    const isOpen = hasClass(menu, SETTINGS_VISIBLE_CLASS);
+    closeSelectMenus();
+    if (!isOpen) {
+      try {
+        menu.AddClass(SETTINGS_VISIBLE_CLASS);
+      } catch (e) {}
+    }
+    log("menu: " + field + (isOpen ? " close" : " open"));
+  }
+
+  // 菜单选项选择
+
+  function LCTPickLang(field, value) {
+    closeSelectMenus();
+    markUiTouched(field);
+    if (field === "targetLanguage") {
+      State.cfg.targetLanguage = value;
+      setSelectText("LCTTargetLangSelect", labelFor(LANGUAGE_OPTIONS, value));
+    } else {
+      State.cfg.outgoingTarget = value;
+      setSelectText("LCTOutgoingTargetSelect", labelFor(LANGUAGE_OPTIONS, value));
+    }
+    syncCustomInputs();
+    saveUiConfig();
+    closeSelectMenus();
+    log("pickLang: " + field + " -> " + value);
+    if (value === "custom") {
+      const customId = field === "targetLanguage" ? "LCTTargetLangCustom" : "LCTOutgoingTargetCustom";
+      const custom = findChild(getRoot(), customId);
+      if (custom && custom.SetFocus) {
+        try {
+          custom.SetFocus();
+        } catch (e) {}
+      }
+    }
+  }
+
+  function LCTPickOption(field, value) {
+    markUiTouched(field);
+    if (field === "displayMode") State.cfg.displayMode = value;
+    else if (field === "outgoing") State.cfg.outgoing = value;
+    else return;
+    syncPanelFromConfig();
+    saveUiConfig();
+    closeSelectMenus();
+    log("pickOption: " + field + " -> " + value);
+  }
+
+  function collectPanelConfig() {
+    const customTarget = fieldValue("LCTTargetLangCustom");
+    const targetLang = State.cfg.targetLanguage === "custom"
+      ? (customTarget || "zh-Hans")
+      : (State.cfg.targetLanguage || "zh-Hans");
+    const customOut = fieldValue("LCTOutgoingTargetCustom");
+    const outgoingTarget = State.cfg.outgoingTarget === "custom"
+      ? (customOut || "en")
+      : (State.cfg.outgoingTarget || "en");
+    const prov = State.cfg.provider || "bing";
+    const apiKeyField = fieldValue("LCTApiKey");
+    // 面板字段为空但该服务商已有 Key:发保留标记,避免误清空(修复 /tr 重复打开后 Key 丢失)
+    const apiKeyValue = (!apiKeyField && (State.cfg._providerKeys || {})[prov]) ? "********" : apiKeyField;
+    const patch = {
+      provider: prov,
+      apiKey: apiKeyValue,
+      region: fieldValue("LCTRegion"),
+      openaiBaseUrl: fieldValue("LCTOpenaiBaseUrl"),
+      openaiModel: fieldValue("LCTOpenaiModel"),
+      deeplEndpoint: fieldValue("LCTDeeplEndpoint"),
+      targetLanguage: targetLang,
+      sourceLanguage: "auto",
+      displayMode: State.cfg.displayMode || "bilingual",
+      outgoing: State.cfg.outgoing || "off",
+      outgoingTarget: outgoingTarget,
+      enabled: !!State.cfg.enabled,
+      force: !!State.cfg.force,
+      timeoutMs: Number(fieldValue("LCTTimeout")) || 15000,
+      fallbackProviders: String(fieldValue("LCTFallback") || "")
+        .split(",").map(function (x) { return x.trim(); }).filter(Boolean),
+      chatLog: State.cfg.chatLog !== false,
+      translateOwn: State.cfg.translateOwn !== false,
+      ui: {
+        enabled: !!State.cfg.enabled,
+        provider: State.cfg.provider || "bing",
+        displayMode: State.cfg.displayMode || "bilingual",
+        outgoing: State.cfg.outgoing || "off",
+        outgoingTarget: outgoingTarget,
+        targetLanguage: targetLang,
+        force: !!State.cfg.force,
+        timeoutMs: Number(fieldValue("LCTTimeout")) || 15000,
+      },
+    };
+    // 端点类字段为空 -> 不下发。applyMaskedUpdate 对空串是按需清空的语义,发空串会把
+    // config.json 里已配好的端点清掉;而面板出于"秒开"的考虑并不回填这些字段。
+    const endpointKeys = ["region", "openaiBaseUrl", "openaiModel", "deeplEndpoint"];
+    for (let i = 0; i < endpointKeys.length; i += 1) {
+      if (!patch[endpointKeys[i]]) delete patch[endpointKeys[i]];
+    }
+    return patch;
+  }
+
+  function LCTSave() {
+    log("save clicked");
+    closeSelectMenus();
+    const p = collectPanelConfig();
+    for (const f of ["provider", "targetLanguage", "displayMode", "outgoing", "outgoingTarget", "enabled", "force", "timeoutMs", "chatLog", "translateOwn"]) markUiTouched(f);
+    bridgePost("config", { config: p }, function (res) {
+      if (res && res.ok) {
+        State.cfg.provider = p.provider || State.cfg.provider;
+        State.cfg.targetLanguage = p.targetLanguage;
+        State.cfg.displayMode = p.displayMode;
+        State.cfg.outgoing = p.outgoing;
+        State.cfg.outgoingTarget = p.outgoingTarget;
+        State.cfg.enabled = p.enabled;
+        State.cfg.force = p.force;
+        State.cfg.timeoutMs = p.timeoutMs;
+        State.cfg.chatLog = p.chatLog !== false;
+        State.cfg.translateOwn = p.translateOwn !== false;
+        // 保存成功:同步 Key 状态(新填 Key / 保留占位符都视为已有 Key)
+        if (State.cfg._providerKeys) {
+          State.cfg._providerKeys[p.provider || "bing"] = !!(p.apiKey && p.apiKey !== "");
+        }
+        syncProviderRows();
+        saveUiConfig();
+        setStatus("已保存(服务商 " + (p.provider || "bing") + ")");
+        log("settings saved");
+      } else {
+        setStatus("保存失败: " + ((res && res.error) || "unknown"));
+      }
+    });
+  }
+
+  function LCTTest() {
+    log("test clicked");
+    setStatus("测试中...最长约 " + Math.round((State.cfg.timeoutMs || 15000) / 1000) + " 秒,请稍候");
+    bridgePost("test", {}, function (res) {
+      if (res && res.ok) setStatus("测试成功: " + (res.translation || ""));
+      else setStatus("测试失败: " + ((res && res.error) || "unknown") + " (检查桥/Key/网络,或配置回退)");
+    });
   }
 
   // ================= 启动 =================
@@ -5733,6 +6213,19 @@ function injectTranslation(row, sig, text) {
   exportGlobal("LCTOnChatSubmit", function () {
     handleChatSubmit(findChild(getRoot(), CHAT_INPUT_ID));
   });
+  // 设置面板的控件回调:chat.xml 里用 onactivate="LCTxxx()" 直接调,必须暴露成全局。
+  // (与 v2.0.0 导出清单一致 —— 面板恢复后这些一个都不能少,否则按钮点了没反应)
+  exportGlobal("LCTToggleSettings", LCTToggleSettings);
+  exportGlobal("LCTCloseSettings", LCTCloseSettings);
+  exportGlobal("LCTOnToggle", LCTOnToggle);
+  exportGlobal("LCTCycle", LCTCycle);
+  exportGlobal("LCTToggleMenu", LCTToggleMenu);
+  exportGlobal("LCTPickLang", LCTPickLang);
+  exportGlobal("LCTPickProvider", LCTPickProvider);
+  exportGlobal("LCTPickOption", LCTPickOption);
+  exportGlobal("LCTSave", LCTSave);
+  exportGlobal("LCTTest", LCTTest);
+
   exportGlobal("LCTRowHovered", function (panel) {
     try {
       if (!isValid(panel)) return;

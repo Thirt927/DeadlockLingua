@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<meta charset="utf-8" />
+<title>DeadlockLingua 设置</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<style>
+  :root {
+    --bg: #0c0e12;
+    --surface: #131920;
+    --line: #232a34;
+    --text: #e6eaf0;
+    --dim: #8a93a3;
+    --accent: #c9a44e;
+    --ok: #4e8c7a;
+    --bad: #c2564b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 28px 20px 80px;
+    background: var(--bg); color: var(--text); font: 14px/1.55 -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; }
+  header { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+  h1 { font-size: 22px; margin: 0 0 4px; letter-spacing: .3px; }
+  .sub { color: var(--dim); font-size: 13px; margin-bottom: 22px; }
+  fieldset {
+    border: 1px solid var(--line); border-radius: 12px; background: var(--surface);
+    padding: 16px 18px 18px; margin: 0 0 16px;
+  }
+  legend { color: var(--accent); font-weight: 600; padding: 0 8px; font-size: 13px; letter-spacing: .5px; }
+  .row { display: grid; grid-template-columns: 240px 1fr; gap: 10px 16px; align-items: center; padding: 7px 0; border-bottom: 1px dashed rgba(255,255,255,.04); }
+  .row:last-child { border-bottom: 0; }
+  .row > label { color: var(--text); }
+  .row .hint { grid-column: 2; color: var(--dim); font-size: 12px; margin: -4px 0 2px; }
+  input, select {
+    width: 100%; padding: 7px 9px; border-radius: 7px; border: 1px solid var(--line);
+    background: #0e1319; color: var(--text); font: inherit;
+  }
+  input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--accent); }
+  input[type=range] { padding: 0; }
+  .inline { display: flex; align-items: center; gap: 10px; }
+  .inline .val { color: var(--dim); font-variant-numeric: tabular-nums; min-width: 42px; text-align: right; }
+  code { color: var(--accent); font-size: 12.5px; }
+  .bar {
+    position: fixed; left: 0; right: 0; bottom: 0; padding: 12px 20px;
+    background: rgba(12,14,18,.94); border-top: 1px solid var(--line);
+    display: flex; align-items: center; gap: 14px; justify-content: center;
+  }
+  button {
+    padding: 8px 20px; border-radius: 8px; border: 1px solid var(--accent);
+    background: var(--accent); color: #0c0e12; font: inherit; font-weight: 600; cursor: pointer;
+  }
+  button.ghost { background: transparent; color: var(--accent); }
+  button:disabled { opacity: .5; cursor: default; }
+  #status { min-width: 220px; color: var(--dim); font-size: 13px; }
+  #status.ok { color: var(--ok); }
+  #status.bad { color: var(--bad); }
+  .note { color: var(--dim); font-size: 12.5px; background: #0e1319; border: 1px solid var(--line); border-radius: 9px; padding: 10px 12px; margin-bottom: 16px; }
+  .note b { color: var(--accent); }
+  .off { opacity: .45; }
+</style>
+
+<div class="wrap">
+  <header>
+    <div>
+      <h1>DeadlockLingua 设置</h1>
+      <div class="sub">改完点「保存」即刻生效（下一条消息按新设置执行）</div>
+    </div>
+  </header>
+
+  <div class="note">
+    <b>常用开关也可以在游戏里用 <code>/tr</code> 改</b>。本页用于服务商、API Key 等一次性配置 —— 这些数据太大，走不了游戏内的窄带信道。
+    Key 显示为 <code>********</code> 表示已保存；<b>保持原样再保存不会覆盖它</b>；要清空请把该框清空后勾选「清空」。
+  </div>
+
+  <form id="form" autocomplete="off"></form>
+
+  <div class="bar">
+    <button type="button" id="save">保存</button>
+    <button type="button" class="ghost" id="reload">重新载入</button>
+    <span id="status"></span>
+  </div>
+</div>
+
+<script>
+"use strict";
+// 字段规格:分组 → 条目。path 为 config.json 内的点号路径。
+// type: text | secret | int | bool | enum | csv | range | color
+const SPEC = [
+  { group: "翻译服务", fields: [
+    { path: "provider", label: "主服务商", type: "enum", options: ["bing", "microsoft", "openai", "deepl", "google"],
+      hint: "bing 免 Key；openai 兼容接口（DeepSeek 填这里）" },
+    { path: "fallbackProviders", label: "回退服务商", type: "csv",
+      hint: "逗号分隔，按顺序尝试；只尝试已配 Key 的服务商" },
+    { path: "defaults.sourceLanguage", label: "源语言", type: "text", hint: "auto = 自动检测" },
+    { path: "defaults.targetLanguage", label: "目标语言", type: "text", hint: "中文填 zh-Hans" },
+    { path: "timeoutMs", label: "翻译超时 (ms)", type: "int" },
+  ]},
+  { group: "服务商 Key 与端点", note: "留空表示不修改；清空需勾「清空」", fields: [
+    { path: "microsoft.apiKey", label: "Microsoft Key", type: "secret" },
+    { path: "microsoft.region", label: "Microsoft 区域", type: "text" },
+    { path: "openai.apiKey", label: "OpenAI 兼容 Key", type: "secret" },
+    { path: "openai.baseUrl", label: "OpenAI Base URL", type: "text" },
+    { path: "openai.model", label: "OpenAI 模型", type: "text" },
+    { path: "deepl.apiKey", label: "DeepL Key", type: "secret" },
+    { path: "google.apiKey", label: "Google Cloud Key", type: "secret" },
+  ]},
+  { group: "游戏内显示（/tr 也能改）", fields: [
+    { path: "ui.enabled", label: "启用翻译", type: "bool" },
+    { path: "ui.displayMode", label: "显示模式", type: "enum", options: ["bilingual", "translation_only"] },
+    { path: "ui.outgoing", label: "发送前翻译", type: "enum", options: ["off", "translation", "bilingual"],
+      hint: "translation = 译成英文后发出；bilingual = 原文|译文" },
+    { path: "ui.outgoingTarget", label: "出站目标语言", type: "text", hint: "一般填 en" },
+    { path: "ui.targetLanguage", label: "入站目标语言", type: "text" },
+    { path: "ui.force", label: "强制翻译所有消息", type: "bool" },
+    { path: "ui.timeoutMs", label: "出站翻译超时 (ms)", type: "int" },
+    { path: "ui.translateOwn", label: "自己的发言也翻译", type: "bool" },
+    { path: "ui.chatLog", label: "写聊天日志", type: "bool" },
+  ]},
+  { group: "聊天日志", fields: [
+    { path: "chatLog.enabled", label: "启用日志落盘", type: "bool" },
+    { path: "chatLog.dir", label: "日志目录", type: "text", hint: "相对项目根，默认 logs/chat" },
+    { path: "deadlockConsoleLog", label: "游戏 console.log 路径", type: "text",
+      hint: "留空 = 自动探测；不存在说明游戏没带 -condebug 启动" },
+  ]},
+  { group: "悬浮窗（legacy，默认已关）", fields: [
+    { path: "overlay.enabled", label: "启用悬浮窗", type: "bool", hint: "关闭后译文只显示在游戏内，桥也不再为它翻译" },
+    { path: "overlay.autoOpen", label: "检测到游戏时自动打开", type: "bool" },
+    { path: "overlay.mode", label: "窗口实现", type: "enum", options: ["native", "web"] },
+    { path: "overlay.view", label: "显示形态", type: "enum", options: ["panel", "subtitle"] },
+    { path: "overlay.edge", label: "贴边方向", type: "enum", options: ["left", "right", "top", "bottom", "float"] },
+    { path: "overlay.opacity", label: "不透明度", type: "range", min: 0.3, max: 1, step: 0.05 },
+    { path: "overlay.fontSize", label: "字号", type: "int" },
+    { path: "overlay.background", label: "背景色", type: "color" },
+    { path: "overlay.accent", label: "主题色", type: "color" },
+  ]},
+  { group: "其他", fields: [
+    { path: "port", label: "桥端口", type: "int", hint: "改完需要重启桥" },
+    { path: "watchGame", label: "游戏退出时关闭桥", type: "bool" },
+    { path: "steamIdEnrichment.enabled", label: "SteamID 回填", type: "bool" },
+  ]},
+];
+
+const SECRET_MASK = "********";
+let serverCfg = null;
+
+function getIn(obj, path) {
+  return path.split(".").reduce(function (o, k) { return o == null ? undefined : o[k]; }, obj);
+}
+function setIn(obj, path, val) {
+  const ks = path.split(".");
+  let o = obj;
+  for (let i = 0; i < ks.length - 1; i++) {
+    if (typeof o[ks[i]] !== "object" || o[ks[i]] === null) o[ks[i]] = {};
+    o = o[ks[i]];
+  }
+  o[ks[ks.length - 1]] = val;
+}
+
+function el(tag, attrs, kids) {
+  const n = document.createElement(tag);
+  for (const k in (attrs || {})) {
+    if (k === "text") n.textContent = attrs[k];
+    else if (k === "html") n.innerHTML = attrs[k];
+    else n.setAttribute(k, attrs[k]);
+  }
+  (kids || []).forEach(function (c) { n.appendChild(c); });
+  return n;
+}
+
+function buildField(f) {
+  const wrap = el("div", { class: "row" });
+  const id = "f_" + f.path.replace(/\./g, "_");
+  const lab = el("label", { for: id, text: f.label });
+  wrap.appendChild(lab);
+
+  const cur = getIn(serverCfg, f.path);
+  let input;
+  if (f.type === "bool") {
+    input = el("input", { type: "checkbox", id: id });
+    input.checked = !!cur;
+  } else if (f.type === "enum") {
+    input = el("select", { id: id });
+    (f.options || []).forEach(function (o) {
+      const op = el("option", { value: o, text: o });
+      if (String(cur) === o) op.selected = true;
+      input.appendChild(op);
+    });
+  } else if (f.type === "range") {
+    const box = el("div", { class: "inline" });
+    input = el("input", { type: "range", id: id, min: f.min, max: f.max, step: f.step });
+    input.value = cur == null ? f.min : cur;
+    const val = el("span", { class: "val", text: String(input.value) });
+    input.addEventListener("input", function () { val.textContent = input.value; });
+    box.appendChild(input); box.appendChild(val);
+    input = box; // 用容器承载
+    input.__isRangeBox = true;
+  } else if (f.type === "csv") {
+    input = el("input", { type: "text", id: id });
+    input.value = Array.isArray(cur) ? cur.join(",") : "";
+  } else if (f.type === "secret") {
+    const box = el("div", { class: "inline" });
+    input = el("input", { type: "text", id: id, placeholder: "（未设置）" });
+    input.value = cur || "";
+    const clear = el("input", { type: "checkbox", id: id + "_clear" });
+    const clabel = el("label", { for: id + "_clear", text: "清空", style: "color:var(--dim);white-space:nowrap" });
+    box.appendChild(input); box.appendChild(clear); box.appendChild(clabel);
+    input = box;
+    input.__isSecretBox = true;
+    input.__inner = box.querySelector("input[type=text]");
+    input.__clear = clear;
+  } else {
+    input = el("input", { type: f.type === "color" ? "color" : (f.type === "int" ? "number" : "text"), id: id });
+    input.value = cur == null ? "" : cur;
+  }
+  wrap.appendChild(input);
+  if (f.hint) wrap.appendChild(el("div", { class: "hint", text: f.hint }));
+  return wrap;
+}
+
+function readField(f, node) {
+  const box = node.querySelector("[" + (f.type === "secret" ? 'type="text"' : (f.type === "range" ? 'type="range"' : "")) + "]") || node;
+  if (f.type === "bool") {
+    const cb = node.querySelector('input[type=checkbox]');
+    return cb ? cb.checked : false;
+  }
+  if (f.type === "secret") {
+    const inner = node.querySelector('input[type="text"]');
+    const clear = node.querySelector('input[type="checkbox"]');
+    if (clear && clear.checked) return { __clear: true };
+    return { __value: inner ? inner.value : "" };
+  }
+  if (f.type === "csv") {
+    const s = node.querySelector('input[type=text]').value.trim();
+    return s ? s.split(",").map(function (x) { return x.trim(); }).filter(Boolean) : [];
+  }
+  if (f.type === "int") return Number(node.querySelector("input").value);
+  if (f.type === "range") return Number(node.querySelector("input[type=range]").value);
+  return node.querySelector("input,select").value;
+}
+
+function render() {
+  const form = document.getElementById("form");
+  form.textContent = "";
+  SPEC.forEach(function (sec) {
+    const fs = el("fieldset");
+    fs.appendChild(el("legend", { text: sec.group }));
+    if (sec.note) fs.appendChild(el("div", { class: "note", text: sec.note }));
+    sec.fields.forEach(function (f) { fs.appendChild(buildField(f)); });
+    form.appendChild(fs);
+  });
+}
+
+function setStatus(msg, cls) {
+  const s = document.getElementById("status");
+  s.textContent = msg || "";
+  s.className = cls || "";
+}
+
+async function load() {
+  setStatus("载入中…");
+  try {
+    const r = await fetch("/api/v1/config", { cache: "no-store" });
+    const j = await r.json();
+    if (!j || !j.ok || !j.config) throw new Error("bad_response");
+    serverCfg = j.config;
+    render();
+    setStatus("已载入", "ok");
+  } catch (e) {
+    setStatus("载入失败：" + (e && e.message), "bad");
+  }
+}
+
+async function save() {
+  const patch = {};
+  SPEC.forEach(function (sec) {
+    sec.fields.forEach(function (f) {
+      const node = document.getElementById("f_" + f.path.replace(/\./g, "_")).closest(".row");
+      const v = readField(f, node);
+      if (v && v.__clear) return; // 清空走 clearApiKey 单独处理
+      if (v && typeof v === "object" && "__value" in v) {
+        if (v.__value && v.__value !== SECRET_MASK) setIn(patch, f.path, v.__value);
+        return;
+      }
+      setIn(patch, f.path, v);
+    });
+  });
+  // 显式清空 Key:按当前选中的 provider 映射(与 applyMaskedUpdate 的扁平式约定一致)
+  const provider = patch.provider || (serverCfg && serverCfg.provider) || "bing";
+  let cleared = false;
+  SPEC.forEach(function (sec) {
+    sec.fields.forEach(function (f) {
+      if (f.type !== "secret") return;
+      const node = document.getElementById("f_" + f.path.replace(/\./g, "_")).closest(".row");
+      const v = readField(f, node);
+      if (v && v.__clear) cleared = true;
+    });
+  });
+  if (cleared) { patch.clearApiKey = true; patch.apiKey = ""; patch.provider = provider; }
+
+  setStatus("保存中…（游戏内生效约几秒）");
+  document.getElementById("save").disabled = true;
+  try {
+    const r = await fetch("/api/v1/config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ config: patch }),
+    });
+    const j = await r.json();
+    if (!j || !j.ok) throw new Error((j && j.error) || "save_failed");
+    serverCfg = j.config;
+    render();
+    setStatus("已保存", "ok");
+  } catch (e) {
+    setStatus("保存失败：" + (e && e.message), "bad");
+  } finally {
+    document.getElementById("save").disabled = false;
+  }
+}
+
+document.getElementById("save").addEventListener("click", save);
+document.getElementById("reload").addEventListener("click", load);
+load();
+</script>

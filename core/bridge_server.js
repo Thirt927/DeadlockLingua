@@ -1028,6 +1028,19 @@ function handleGameDiagLine(line) {
   return true;
 }
 
+// 网页设置页(服务商 / API Key 等一次性配置)。读盘一次后缓存。
+let settingsPageCache = null;
+function settingsPageHtml() {
+  if (settingsPageCache !== null) return settingsPageCache;
+  try {
+    settingsPageCache = fs.readFileSync(path.join(__dirname, "settings_page.html"), "utf8");
+  } catch (e) {
+    settingsPageCache = "<!doctype html><meta charset=\"utf-8\"><p>settings_page.html 读取失败: " +
+      ((e && e.message) || "") + "</p>";
+  }
+  return settingsPageCache;
+}
+
 // ---------- BTIPC 双向信道(游戏内译文显示) ----------
 // 协议规格见 docs/btipc-v1.md。上行 = 游戏写 console.log 里的 `[LCT] BTIPC REQ` 结构化单行;
 // 下行 = 桥用 GET /btipc/dl 按位回 HTTP 状态码(200+PNG = 位1 / 404 = 位0),游戏侧 128 个
@@ -1052,6 +1065,27 @@ const btipc = btipcTransport.createTransport({
       return JSON.stringify({ ok: false, error: (e && e.message) || "unknown_error" });
     }
   },
+  // 游戏侧开机同步专用(**不是**整份配置)。
+  // 整份 masked 配置 1312 字节 = 132 帧,超过协议 128 帧上限 → op=config 走位信道必失败;
+  // 这里只回 ui 段 + 各服务商 Key 是否已配,约 230 字节 = 23 帧。
+  ui: async () => {
+    try {
+      const c = configStore.load();
+      return JSON.stringify({
+        ok: true,
+        ui: c.ui || {},
+        provider: c.provider || "",
+        keys: {
+          microsoft: !!(c.microsoft && c.microsoft.apiKey),
+          openai: !!(c.openai && c.openai.apiKey),
+          deepl: !!(c.deepl && c.deepl.apiKey),
+          google: !!(c.google && c.google.apiKey),
+        },
+      });
+    } catch (e) {
+      return JSON.stringify({ ok: false, error: (e && e.message) || "ui_failed" });
+    }
+  },
   // 读 = {};写 = {"config":{...}}。与 /api/v1/config 同语义。
   config: async (body) => {
     let payload = null;
@@ -1067,9 +1101,13 @@ const btipc = btipcTransport.createTransport({
         configStore.save(next);
         activeConfig = next;
         log("info", "config saved (btipc)");
-        return JSON.stringify({ ok: true, config: configStore.mask(next) });
+        // 写成功只回一个极小的回执:整份 masked 配置 1313 字节 = 132 帧,超过协议
+        // 128 帧上限,游戏侧根本收不到 —— 回完整配置会让设置面板永远等不到回执。
+        // 需要读完整配置请用 HTTP 的 GET /api/v1/config(网页设置页走那条)。
+        return JSON.stringify({ ok: true });
       }
-      return JSON.stringify({ ok: true, config: configStore.mask(configStore.load()) });
+      // 读:位信道放不下整份配置,明确指路(游戏侧开机同步用 op=ui 小包)
+      return JSON.stringify({ ok: false, error: "use_op_ui_or_http_config" });
     } catch (e) {
       return JSON.stringify({ ok: false, error: (e && e.message) || "config_failed" });
     }
@@ -1096,6 +1134,17 @@ const server = http.createServer((req, res) => {
     res.setHeader("Content-Type", "text/html; charset=utf-8");
     res.setHeader("Cache-Control", "no-store");
     res.end(bridgePage(url.searchParams));
+    return;
+  }
+
+  if (url.pathname === "/settings" || url.pathname === "/settings/") {
+    // 网页设置页:服务商 / API Key 等一次性配置。
+    // 为什么不做进游戏内面板:整份 masked 配置 1312 字节 = 132 帧,超过协议 128 帧上限,
+    // 走不了游戏内的窄带位信道。游戏内 /tr 只管常用的几个开关。
+    res.statusCode = 200;
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.setHeader("Cache-Control", "no-store");
+    res.end(settingsPageHtml());
     return;
   }
 

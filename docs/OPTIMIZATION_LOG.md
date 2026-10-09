@@ -1440,3 +1440,76 @@
 - **仍需用户测试**: 无新增(仍需关闭游戏后部署 `dist/pak22_dir.vpk` 做实车验收)。
 - **已知限制**: 该缺陷在"逐面板取位"这一层;`p` 的语义已写进 `docs/btipc-v1.md` 的 ⚠️ 段,
   两侧实现都以 `tests/btipc/live_http.test.js` 为准绳。
+
+## 2026-10-09 第六十七轮:实车验收通过后的三处收尾 —— 关悬浮窗 / 恢复设置界面 / 修好发送前翻译
+
+- **背景**: 实车验收**通过** —— 英文聊天下方确实出现了浅蓝底斜体的中文译文,BITPC 双向信道
+  (第六十四~六十六轮的成果)在真实对局里成立。用户随即报了三个问题:
+  ①悬浮窗内容没清理(两处重复显示)②没有任何设置界面(原 `/tr` 面板已删)
+  ③发送前翻译不工作。
+- **P3 根因(有硬数据)**: 游戏侧 UI 偏好靠开机 `syncUiFromBridge()` 从 config.json 读。
+  第六十五轮把 `bridge` 任务也改走 BTIPC 后,`op=config` 的应答是**整份 masked 配置
+  = 1313 字节 = 132 帧**,而协议帧数上限是 **128 帧(1280 字节)** → `framer.encode` 抛
+  `too_many_frames` → **这次同步永远不可能成功**,游戏一直用 `UI_DEFAULTS`
+  (其中 `outgoing: "off"`)。而 config.json 里其实早就写着 `"outgoing":"translation"`
+  —— 它读不到。次因:位信道单程 2~4s,而出站超时下限只有 3s,且单槽队列会被入站翻译占住。
+- **改动文件**
+  - `core/btipc/transport.js`: 信封白名单加 `op=ui`。
+  - `core/bridge_server.js`:
+    - 新增 BTIPC `ui` 依赖:只回 `{ok, ui, provider, keys}`(实测 **254 字节 = 26 帧**),
+      彻底避开 128 帧上限;写模式 `{"set":{...}}` 则把 ui patch 落进 config.json。
+    - `config` 依赖的**写**路径改成只回 `{"ok":true}`(极小回执);**读**路径改成显式
+      `{ok:false,error:"use_op_ui_or_http_config"}` —— 位信道放不下整份配置,不再假装能读。
+    - 新增网页设置页路由 `GET /settings`(读 `core/settings_page.html`,缓存)。
+  - `core/settings_page.html`(**新增**):规格驱动的网页设置页,覆盖服务商 / API Key /
+    端点 / 回退链 / 游戏内显示 / 聊天日志 / 悬浮窗 / 端口等全部字段;API Key 显示为
+    `********` 且保持原样不会覆盖(靠 `applyMaskedUpdate` 的掩码语义),清空需显式勾选。
+  - `core/overlay.js`: `overlay.enabled === false` 时**跳过为悬浮窗做的翻译** ——
+    否则每条聊天要付两遍 provider 费用(入站 BTIPC 一遍 + 悬浮窗一遍)。日志落盘不受影响。
+  - `core/config.js` + `config/config.example.json` + 用户 `config/config.json`:
+    `overlay.enabled` 默认改 `false`(代码保留,想用改回或双击 `ShowOverlay.bat`)。
+  - `mod/panorama/layout/chat.xml`: 从 `500eb96^` 恢复 150 行设置面板标记 + 输入框右侧
+    「译」按钮,并新增出站进度标签 `LCTOutgoingHint`。
+  - `mod/panorama/styles/lingua_chat.css`: 从 `aed9a9c^` 整体恢复 282 行设置面板样式
+    (恢复前先校验"去掉设置块后与当前文件逐字节一致",确保不误改),另加 `.LCTOutgoingHint`。
+  - `mod/panorama/scripts/lingua_chat.js`:
+    - 从 `aed9a9c^` 恢复设置面板逻辑 26 段 / 406 行;**排除**了 5 个当前文件已有的函数
+      (`setStatus`/`uiTouched`/`applyBridgeUiConfig`/`syncUiFromBridge`/`bridgePost`)——
+      否则重复定义会把第六十五~六十六轮对死通道的修复覆盖回旧版。
+    - `syncUiFromBridge` 改用 `op=ui`;`bridgePost` 拆掉"直连不可用就必须要 HTML 面板"的
+      死闸门;`applyBridgeUiConfig` 支持 `keys` 形状。
+    - `openSettingsPanel` **不再**向桥读配置(读不到且慢):UI 偏好开机已同步进 `State.cfg`,
+      面板直接吃内存,**秒开**;端点类字段刻意留空。
+    - `collectPanelConfig` 端点类字段为空时**不下发**(下发空串会把已配端点清掉)。
+    - `LCTSave` 走 `op=config` 写路径,靠极小回执拿到成功回执。
+    - `/tr` 恢复为打开设置面板(不再当普通文本发送);补齐 10 个 `exportGlobal` 面板回调
+      (chat.xml 的 `onactivate` 直接调,少一个按钮就点不动)。
+    - **出站抢占**: 新增 `BTIPC.preempt(tag)`;出站到达时抢占在途入站翻译(被抢那条拿到
+      `{kind:"preempted"}`,经 `failJob("preempted")` 自动重排 —— 刻意不带 `btipc_` 前缀,
+      否则会被当成"桥不在"而**不重试**,那条消息就永久丢译)。出站延迟从"排队等入站"降到单程。
+    - 出站超时下限 `OUTGOING_TIMEOUT_MIN_MS` 3000 → **8000**(位信道单程 2~4s,3s 会把正常
+      翻译掐断后按原文发,用户看到的就是"发送前翻译没效果")。
+    - 新增 `setOutgoingHint()`:出站期间在输入框右侧显示「翻译中…约 2~4 秒」,完成/失败即折叠。
+  - `tests/btipc/transport.test.js`: 补 `op=ui` 信封解析、路由、可闭合、以及
+    "该小包必须 < 1280 字节"的断言。
+- **原因/效果**: 三个问题都从根上解决而非绕过 —— 设置界面回来了(游戏内 `/tr` 管常用开关,
+  网页 `/settings` 管服务商与 Key),悬浮窗不再重复显示也不再白付一半 provider 费用,
+  发送前翻译恢复可用且带可见进度。
+- **验证方式**(全部实测)
+  - 尺寸硬数据:`op=ui` = **254 字节 = 26 帧**(通过);`op=config` = **1313 字节 = 132 帧**
+    (超限,正是 P3 根因)。
+  - `node --check` 全部通过;`lingua_chat.js`/`.css`/`core/*.js` 行尾统一为 CRLF,
+    `git diff --numstat` 无整文件行尾改动。
+  - 11 套测试 + 模拟器全绿:`tests/btipc/{crc,frame,transport,e2e_tail,route,live_http}`、
+    `overlay_test 13/0`、`test_bridge_dedup`、`test_bridge_fallback`、
+    `test_sender_backfill 11/0`、`test_steamid_roster 3/0`、`lingua_chat_simtest 58/0`。
+  - `scripts/build.ps1` 编译 7 个资源全 `ok`(含恢复的面板 `chat.vxml_c` 与 `lingua_chat.vcss_c`)。
+  - 真桥重启后:`/api/v1/health` 200、`GET /settings` 200 / 14326 字节(含表单)、
+    `GET /api/v1/config` 正常打码且 `overlay.enabled=false`。
+  - 已部署 `addons\pak22_dir.vpk` = **312901 字节**(+37KB = 面板标记/样式/脚本);
+    部署前备份 `pak22_dir.vpk.bak-panel-20261009-223402`。
+- **仍需用户测试**: 启动 Deadlock 后 ①输入 `/tr` 应弹出设置面板,改「发送前翻译」为
+  `translation` 保存,回游戏打中文回车应发出英文(输入框右侧先显示「翻译中…约 2~4 秒」);
+  ②确认悬浮窗不再自动弹出;③浏览器打开 `http://127.0.0.1:8791/settings` 应能改服务商/Key。
+- **已知限制**: 网页设置页需手动开浏览器(不自动弹);面板不回填端点类字段(为空=不改),
+  想改端点请用网页页;位信道单程 2~4s 是物理上限,出站翻译无法做到"瞬时发出"。
