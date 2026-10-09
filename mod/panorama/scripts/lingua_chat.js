@@ -5708,6 +5708,29 @@ function injectTranslation(row, sig, text) {
 
   // 启动时从桥同步 config.json 的 UI 设置(失败重试,避免桥尚未就绪时丢同步)
 
+  // 关键:面板可能被**实例化多份** —— chat.xml 同时用于 HUD 与大厅/主菜单时就会这样,
+  // 而 FindChildTraverse 只返回第一个。若读写都落在实例 A、用户看到的却是实例 B,
+  // 表现就是"值确实改了(保存读的也是 A,所以落盘是新值)但界面没变"。
+  // 这里统计实例数与各自可见性,并把结果记进可采集的日志,一次就能判定。
+  function settingsPanelInstances() {
+    let all = null;
+    try {
+      const r = getRoot();
+      if (r && typeof r.FindChildrenWithClassTraverse === "function") {
+        all = r.FindChildrenWithClassTraverse("LCTSettingsPanel");
+      }
+    } catch (e) {}
+    if (!all || !all.length) {
+      const one = findChild(getRoot(), SETTINGS_PANEL_ID);
+      return one ? [one] : [];
+    }
+    const out = [];
+    for (let i = 0; i < all.length; i += 1) {
+      if (isValid(all[i])) out.push(all[i]);
+    }
+    return out;
+  }
+
   function openSettingsPanel() {
     const panel = findChild(getRoot(), SETTINGS_PANEL_ID);
     if (!panel) {
@@ -5716,6 +5739,19 @@ function injectTranslation(row, sig, text) {
       diagLog("nopanel", "PANORAMA: settings panel NOT FOUND (chat.xml 未生效?)");
       return;
     }
+    // 实例统计:instances=1 说明多实例假设不成立,instances>1 就是"改的不是你看到的那个"
+    try {
+      const insts = settingsPanelInstances();
+      let desc = "";
+      for (let i = 0; i < insts.length; i += 1) {
+        let vis = "?";
+        try { vis = String(insts[i].visible); } catch (e) {}
+        let own = "?";
+        try { own = insts[i].id || "(no id)"; } catch (e) {}
+        desc += " [" + i + " id=" + own + " visible=" + vis + "]";
+      }
+      diagLog("pinst", "PANORAMA: settings panel instances=" + insts.length + desc);
+    } catch (e) {}
     try {
       panel.AddClass(SETTINGS_VISIBLE_CLASS);
     } catch (e) {}
