@@ -24,6 +24,8 @@ Deadlock 游戏聊天翻译 mod = **Panorama(Source 2 原生 UI)模组 + 本地 
   - 脚本内有具名互斥锁 `Local\DeadlockLinguaOverlay`,重复启动会直接退出,不会开出第二个窗口
   - 网页版(回退):`http://127.0.0.1:8791/overlay`(把 `config.json` 的 `overlay.mode` 改成 `"web"`)
 - 配置:`F:\agents\deadlockfanyi\BabelTower-fork\config\config.json`(provider 当前 openai→DeepSeek)
+- BTIPC 协议实现(游戏内译文显示用):桥端 `core\btipc\{crc16,framer,window,transport}.js`(**已落地**);游戏侧待实现(内联 crc16 + decode 副本,写在 `lingua_chat.js` 的 `State.btipc` 区块)
+- BTIPC 测试:`node tests\btipc\crc.test.js` / `frame.test.js` / `transport.test.js` / `e2e_tail.test.js` / `route.test.js`(全部离线可跑,不需要游戏)
 
 ## 3. 构建 + 部署(最重要流程)
 
@@ -55,6 +57,8 @@ Copy-Item F:\agents\deadlockfanyi\BabelTower-fork\dist\pak22_dir.vpk "E:\Steam\s
   - **为什么能成立**:图片加载由引擎在**渲染管线里自行发起**,不走 Panorama JS 的 HTTP API,所以 `AsyncWebRequest` 被移除不影响它。入站不需要 JS 原语,只需要一个「引擎会去取网络的声明式入口」。
   - 上行复用现成通道:`console.log` 结构化单行(`[LCT] BTIPC REQ w=.. id=.. len=.. crc=.. b64=..`),**硬依赖游戏带 `-condebug` 启动**(不带就不写 `console.log`,表现是"装了完全没反应")。
   - 协议规格见上游 `docs/btipc-v1.md`(冻结版:16 字节帧格式 / CRC-16-CCITT-FALSE 覆盖固定 14 字节 / 轮号 `r` 即隐式 ACK 与幂等重投 / BUSY 固定帧 / 风暴模式 / 参数表)。本仓库按该规格**自行实现**,不直接合并上游代码。
+  - **进度**:桥端已于 2026-10-09 落地(`core/btipc/*` + `GET /btipc/dl` + `overlay.js` 的 `onLine` 钩子 + 5s GC 定时器),5 套离线测试全绿;游戏侧客户端(128 Image 面板轮询 / `ImageLoaded` / 轮次状态机 / 译文 Label 追加)尚未实现,故目前还没有可见效果。
+  - 桥端铁律:帧号只由轮号现算(`frameIndex = round - frameStartRound`),**不许存自增计数器**(会与游戏脱步);窗口 GC 的 `END_GC_MS` 必须 > 客户端最长重试跨度(现取 45s),否则会在客户端仍在重试时自删 → 全 404 → 全零位 → 误报 crc_dead。两条都已有测试护栏。
   - 渲染能力一直都在(`Label.text` 可用,mod 照样能往聊天行插字),缺的只是数据来源 —— 现在数据来源有了。`probeInboundChannels()` 保留作 canary,但**它探不到 Image 位元通道**(探针本身有覆盖盲区,升级前不要用它否定入站可能性)。
 - **悬浮窗(native,**legacy**,保留不删不再演进)**:`scripts/overlay_window.ps1` 是 **WPF** 原生窗口(`AllowsTransparency` + `Topmost`),所以能真透明并贴屏边自动收起。**改这个文件必须存成 UTF-8 with BOM**(`[System.IO.File]::WriteAllText($p,$c,(New-Object System.Text.UTF8Encoding $true))`),否则 PowerShell 5.1 按 ANSI 读会把中文读成乱码。它用 `WebClient`(强制 UTF8)+ `ConvertTo-Json -Compress` 调桥,用 `[System.Windows.Clipboard]::SetText()` 写剪贴板(原生进程,不受浏览器剪贴板策略限制)。想切回网页版把 `overlay.mode` 改成 `"web"`。
   - **两个窗口**:面板窗(聊天/输入/设置,可拖动,贴最近的一条屏边收起成 12px 细条)+ **字幕浮层**(角落堆叠的聊天胶囊 = 发言者色牌 + 昵称 + 原文 + 译文,`WS_EX_TRANSPARENT` 鼠标完全穿透)。

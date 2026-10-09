@@ -61,6 +61,9 @@ function setDeps(d) {
   if (typeof d.translate === "function") deps.translate = d.translate;
   if (typeof d.writeChatLog === "function") deps.writeChatLog = d.writeChatLog;
   if (typeof d.isGameRunning === "function") deps.isGameRunning = d.isGameRunning;
+  // 每读到一个新增日志行就回调一次(与 [LCT-CHAT] 无关的行也会喂)。
+  // BTIPC 的 [LCT] BTIPC REQ/CAN 走这里,见 core/bridge_server.js。
+  if (typeof d.onLine === "function") deps.onLine = d.onLine;
 }
 
 // ---------- 日志行解析 ----------
@@ -310,7 +313,15 @@ function tailOnce() {
       const lines = buf.toString("utf8").split("\n");
       lines[0] = tail + lines[0];
       tail = lines.pop();
-      for (const raw of lines) ingest(raw.replace(/\r$/, ""));
+      for (const raw of lines) {
+        const clean = raw.replace(/\r$/, "");
+        ingest(clean);
+        // BTIPC 上行复用同一个 tail:所有新增行都转给 onLine(由它自己过滤)。
+        // 刻意放在 ingest 之外 —— 非 [LCT-CHAT] 行同样要喂。
+        if (typeof deps.onLine === "function") {
+          try { deps.onLine(clean); } catch (e) {}
+        }
+      }
       readFrom += len;
       advanced += len;
       if (len < MAX_CHUNK) break;

@@ -31,6 +31,7 @@ const providerRegistry = require("./providers/registry");
 const dictionary = require("./dictionary");
 const steamIdEnrich = require("./steamid_enrich");
 const overlay = require("./overlay");
+const btipcTransport = require("./btipc/transport");
 // 首次运行生成词典文件;桥启动后自动落盘高频词(自适应学习)
 dictionary.ensureFile();
 dictionary.startAutoFlush();
@@ -1015,6 +1016,54 @@ async function handleApi(req, res, url, bodyObj) {
   sendJson(res, 404, { ok: false, error: "not_found" });
 }
 
+// ---------- BTIPC 双向信道(游戏内译文显示) ----------
+// 协议规格见 docs/btipc-v1.md。上行 = 游戏写 console.log 里的 `[LCT] BTIPC REQ` 结构化单行;
+// 下行 = 桥用 GET /btipc/dl 按位回 HTTP 状态码(200+PNG = 位1 / 404 = 位0),游戏侧 128 个
+// 隐藏 Image 面板各自读回自己那一位。与悬浮窗的 [LCT-CHAT] 单向通道并列,两条线复用同一个
+// console.log tail,但 BTIPC 是双向的 —— 它让译文能重新回到游戏内的聊天行。
+const btipc = btipcTransport.createTransport({
+  log: log,
+  // target 为 null 时用桥配置的默认目标语言(裸文本请求走这里)
+  translate: async (text, target) => {
+    const cfgB = configStore.load();
+    const safeTarget = (target && /^[A-Za-z0-9-]{1,16}$/.test(target))
+      ? target
+      : ((cfgB.defaults && cfgB.defaults.targetLanguage) || "zh-Hans");
+    const result = await runTranslate(cfgB, { text: text, targetLanguage: safeTarget });
+    return result && result.translation ? result.translation : "";
+  },
+  test: async () => {
+    try {
+      const result = await runTranslate(configStore.load(), { text: "hello", targetLanguage: "zh-Hans" });
+      return JSON.stringify({ ok: true, translation: result.translation, message: "连接成功" });
+    } catch (e) {
+      return JSON.stringify({ ok: false, error: (e && e.message) || "unknown_error" });
+    }
+  },
+  // 读 = {};写 = {"config":{...}}。与 /api/v1/config 同语义。
+  config: async (body) => {
+    let payload = null;
+    try {
+      payload = JSON.parse(String(body === null || body === undefined ? "{}" : body));
+    } catch (e) {
+      payload = null;
+    }
+    if (!payload || typeof payload !== "object") return JSON.stringify({ ok: false, error: "bad_json" });
+    try {
+      if (payload.config && typeof payload.config === "object") {
+        const next = configStore.applyMaskedUpdate(configStore.load(), payload.config);
+        configStore.save(next);
+        activeConfig = next;
+        log("info", "config saved (btipc)");
+        return JSON.stringify({ ok: true, config: configStore.mask(next) });
+      }
+      return JSON.stringify({ ok: true, config: configStore.mask(configStore.load()) });
+    } catch (e) {
+      return JSON.stringify({ ok: false, error: (e && e.message) || "config_failed" });
+    }
+  },
+});
+
 // ---------- 服务器 ----------
 const server = http.createServer((req, res) => {
   let url;
@@ -1047,6 +1096,28 @@ const server = http.createServer((req, res) => {
     // 用户再在游戏里 Ctrl+V)。127.0.0.1 属 secure context,但部分浏览器策略仍会拦。
     res.setHeader("Permissions-Policy", "clipboard-write=(self)");
     res.end(overlay.pageHtml());
+    return;
+  }
+
+  // BTIPC 下行:游戏侧 128 个隐藏 Image 面板逐轮 GET 这里取帧。
+  // 状态码本身就是数据 —— 200(带 PNG)= 位 1,404(空体)= 位 0。
+  // p 只用于 URL 唯一性(防引擎缓存串窗),桥端不需要;t 同理。
+  if (url.pathname === "/btipc/dl") {
+    const out = btipc.serveDL({
+      w: url.searchParams.get("w"),
+      r: url.searchParams.get("r"),
+      p: url.searchParams.get("p"),
+      t: url.searchParams.get("t"),
+    });
+    res.statusCode = out.status;
+    res.setHeader("Cache-Control", "no-store");
+    if (out.status === 200) {
+      res.setHeader("Content-Type", "image/png");
+      res.end(out.body);
+    } else {
+      // 位 0:必须真的 404 —— 引擎对非 200 不触发 ImageLoaded,这是位编码的另一半
+      res.end("");
+    }
     return;
   }
 
@@ -1110,8 +1181,27 @@ overlay.start({
       log("warn", "chat log write failed (overlay channel): " + (e && e.message ? e.message : String(e)));
     }
   },
+  // BTIPC 上行:同一份 console.log 里的 `[LCT] BTIPC REQ/CAN` 行交给 BTIPC 传输层。
+  // 只喂实时新增的行(primeBackfill 回放的历史不喂),避免重放上一局的请求把窗口搅乱。
+  onLine: (line) => {
+    try {
+      btipc.handleLogLine(line);
+    } catch (e) {
+      log("warn", "btipc line failed: " + ((e && e.message) || String(e)));
+    }
+  },
 });
 startOverlayWatch();
+
+// BTIPC 窗口表回收:END 帧被服务后 45s,或无活动 60s(见 core/btipc/window.js)
+const btipcGcTimer = setInterval(() => {
+  try {
+    btipc.gc();
+  } catch (e) {
+    log("warn", "btipc gc failed: " + ((e && e.message) || String(e)));
+  }
+}, 5000);
+if (btipcGcTimer && typeof btipcGcTimer.unref === "function") btipcGcTimer.unref();
 
 // 端口被占用 = 已有实例在运行,静默退出(与启动器/开机自启场景兼容)
 server.on("error", (e) => {

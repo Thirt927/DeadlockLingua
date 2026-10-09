@@ -1294,3 +1294,51 @@
 - **验证方式**(全部实测): ① `node --check` 对 `core/overlay.js` 与 `lingua_chat.js` 均通过; ② `scripts/overlay_test.js` **PASS 13 / FAIL 0**; ③ `scripts/build.ps1` 构建 7 个资源全部 `ok`; ④ 已重命名 `dist/pak22_dir.vpk` 并部署到 `E:\Steam\steamapps\common\Deadlock\game\citadel\addons`(259638 字节, 2026/10/5 17:54), 并清掉 addons 里的旧 `pak01_dir.vpk`; ⑤ 重启桥后 `GET /api/v1/health` = ok、`GET /api/v1/config` 读回 `timeoutMs=15000`; ⑥ `git diff --numstat` 干净(`overlay.js 12/1`、`lingua_chat.js 1/0`, 无首行 BOM/CRLF 变动)。
 - **仍需用户测试**: 重启 Deadlock 打一局 → ① 撤退/谢了/上了/冷却提示等快捷消息**不再出现在字幕浮层**; ② 正常英文聊天仍照常翻译显示; ③ 若再遇到翻译失败, `logs/bridge.log` 里应能看到 `overlay translate failed: ...` 明细。
 - **已知限制**: 是否过滤取决于 mod 对快捷消息的 `kind=quick` 判定(HUD 气泡行 + 带 `PingLabel` 的聊天行); 若某条轮盘消息没被标成 quick, 仍会进弹幕。改动含 mod 脚本, **必须重建部署 VPK 并重启游戏**才生效; 桥端改动已随桥重启生效。
+
+## 2026-10-09 第六十四轮:BTIPC 桥端落地 —— 游戏内译文显示的地基(帧层 + 窗口表 + /btipc/dl)
+
+- **背景**: 用户提出「原来 mod 的游戏内译文效果其实还能实现」。复核确认 v2.0.0 写下的
+  「游戏内不存在任何可用的入站通道」是**覆盖不全的探针得出的过强结论** —— 2026/10/01 那轮
+  只测了「Panorama JS 能主动发起」这一类入口(`AsyncWebRequest` / HTML 面板 `SetURL` /
+  剪贴板 / `BImageFileExists`),漏了「引擎为了渲染会自己去取什么」。上游 BabelTower 用
+  `<Image>` 面板的**加载状态**做出了 1 bit 入站通道(200+PNG = 位1 / 404 = 位0,配合
+  `ImageLoaded` 事件),已实车验收。本次按上游冻结规格 `docs/btipc-v1.md` **自行实现**
+  (不合并上游代码),先落桥端。
+- **改动文件**
+  - 新增 `core/btipc/crc16.js` —— CRC-16/CCITT-FALSE(poly 0x1021 / init 0xFFFF),
+    桥端唯一实现源;游戏侧需内联同算法副本,两侧逐字节一致。
+  - 新增 `core/btipc/framer.js` —— 16 字节帧编解码(B0 END+seq / B1..B2 request_id /
+    B3 VALID+LEN / B4..B5 CRC / B6..B15 payload 10B)、BUSY 固定帧、128 位 ↔ 16 字节位映射、
+    多帧拼装。载荷上限 680B(受 console.log 整行 ≤1000 字符约束)。
+  - 新增 `core/btipc/window.js` —— `Map<win, Transfer>` 窗口表 + 轮次语义
+    (帧号 = `round - frameStartRound`,**不存自增计数器** → 同一 round 重投天然幂等)、
+    双条件 GC(END 帧被服务后 45s / 无活动 60s)。
+  - 新增 `core/btipc/transport.js` —— REQ/CAN 行解析(§14.1 六项校验,任一不过静默 drop)、
+    上层信封(`t=<target>` / `op=config` / `op=test` / 裸文本)、`serveDL` 应答。
+  - `core/overlay.js` —— 新增可选依赖 `onLine`:tail 到的新增行除 `ingest()` 外再回调一次
+    (**非** `[LCT-CHAT]` 行同样要喂)。回填历史不喂,避免重放上一局请求搅乱窗口表。
+  - `core/bridge_server.js` —— 注册 `GET /btipc/dl`(位1 → 200+`image/png`;位0 → 404+空体;
+    两者都带 `no-store`)、用 `runTranslate` / `configStore` 组装 transport 依赖、接上 `onLine`、
+    加 5s GC 定时器。
+  - 新增 `tests/btipc/{crc,frame,transport,e2e_tail,route}.test.js`。
+- **原因/效果**: 桥端已能完整应答游戏侧的帧请求 —— 播放 200/404 位流、按轮号幂等发帧、
+  翻译完成后回帧、失败降级回原文。这是恢复「游戏内译文显示」的地基;游戏侧客户端
+  (Panorama 128 个隐藏 Image 面板轮询 + `ImageLoaded` + 轮次状态机)与聊天行渲染是下一步。
+- **验证方式**(全部实测)
+  - `node --check` 对 6 个改动/新增文件全部通过;
+  - `tests/btipc/crc.test.js` **PASS**(含标准向量 `"123456789"` → `0x29B1`);
+  - `tests/btipc/frame.test.js` **PASS 51 / FAIL 0**(空 / 10B / 11B / 300B 中文 / 680B 往返、
+    §3.3 位序例 fires={0,8,10,13,15}、BUSY 固定帧确定性、改 seq/LEN/payload 必 CRC fail);
+  - `tests/btipc/transport.test.js` **PASS 50 / FAIL 0**(§14.1 全部拒绝路径、信封白名单、
+    轮次锚定与同轮幂等、END 后末帧重发、CAN 撤窗、translate 失败降级回原文、
+    `END_GC_MS > T_HARD 12s + 9×(2.5s+1s)` 不变量);
+  - `tests/btipc/e2e_tail.test.js` **PASS**(真实临时 console.log → overlay tail → onLine →
+    建窗 → 取帧拼装 = 桥给出的译文;同批 `[LCT-CHAT]` 仍进悬浮窗管线);
+  - `tests/btipc/route.test.js` **PASS 13 / FAIL 0**(VM 沙箱 + 桩模块:位1→200+PNG 体、
+    位0→404+空体且带 `no-store`、未知路径仍走通用 404、`onLine` 转发、5000ms GC 定时器);
+  - **回归无破坏**:`overlay_test.js 13/0`、`test_bridge_dedup.js`、`test_bridge_fallback.js`、
+    `test_sender_backfill.js 11/0`、`test_steamid_roster.js 3/0` 全部仍通过。
+- **仍需用户测试**: 无(桥端不影响现有悬浮窗行为;`/btipc/dl` 目前只有游戏侧会调,而游戏侧尚未接入)。
+- **已知限制**: 游戏侧客户端与游戏内渲染**尚未实现**,所以现在还没有任何可见效果;
+  整条链路要等游戏侧接入并实车验收(上游口径:`/bt6736` 回声 ≥20 连发零 fail)后才算可用。
+  另:BTIPC 上行硬依赖游戏带 `-condebug` 启动,否则不写 `console.log`。

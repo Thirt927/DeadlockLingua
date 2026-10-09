@@ -44,6 +44,11 @@ Copy-Item (Join-Path $Root "core\steamid_enrich.js") (Join-Path $Stage "core\")
 Copy-Item (Join-Path $Root "core\overlay.js") (Join-Path $Stage "core\")
 Copy-Item (Join-Path $Root "core\overlay_page.html") (Join-Path $Stage "core\")
 
+Write-Host "==> 复制 BTIPC 信道层..."
+# bridge_server.js 启动时 require("./btipc/transport"),缺了整个桥起不来
+New-Item -ItemType Directory -Path (Join-Path $Stage "core\btipc") -Force | Out-Null
+Copy-Item (Join-Path $Root "core\btipc\*.js") (Join-Path $Stage "core\btipc\")
+
 Write-Host "==> 复制配置示例与脚本..."
 Copy-Item (Join-Path $Root "config\config.example.json") (Join-Path $Stage "config\")
 Copy-Item (Join-Path $Root "config\dictionary.builtin.json") (Join-Path $Stage "config\")
