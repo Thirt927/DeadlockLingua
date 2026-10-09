@@ -55,5 +55,8 @@ _dbg_*.js
 _fix_*.js
 _test_bridge_fix.js
 
+# README 渲染预览临时产物(不入库)
+_readme_screen.*
+
 # 编辑器/Agent 工具配置(第三方设计 skill 约 5MB,属本机工具,不入库)
 .trae/

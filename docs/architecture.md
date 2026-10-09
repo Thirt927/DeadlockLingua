@@ -1,9 +1,15 @@
 # 架构文档
 
+> **状态：本文描述的「游戏外悬浮窗」路线自 v2.0.1 起归档为 legacy。**
+> 相关代码（`core/overlay.js`、`core/overlay_page.html`、`scripts/overlay_window.ps1`、
+> 各启动脚本）保留在仓库中，但不再演进。后续改用 **BTIPC 双向信道**恢复游戏内译文显示，
+> 见第 9 节。v2.0.1 的发布产物是这条 legacy 路线的终点。
+>
 > 本文描述 v2.0.0（2026-10-01）起的现状。
-> Deadlock 该次更新移除了 Panorama 的全部 HTTP 能力（`$.AsyncWebRequest` 调用即抛
+> Deadlock 该次更新移除了 Panorama 的 HTTP 能力（`$.AsyncWebRequest` 调用即抛
 > `AsyncWebRequest has been removed.`，隐藏 HTML 面板不再创建浏览器实例），
-> **游戏内收发网络已不可能**。旧的「隐藏面板 + 轮询 `panel.title`」通道已废弃，见第 8 节。
+> 通过 **HTTP / CEF** 收发数据已不可能。旧的「隐藏面板 + 轮询 `panel.title`」通道已废弃，
+> 见第 8 节。
 
 ## 1. 总览
 
@@ -111,3 +117,30 @@
 - **`$.AsyncWebRequest` 直连**：同版本调用即同步抛错，已移除。
 - `lingua_chat.js` 保留 `probeInboundChannels()` 作 canary：若引擎将来恢复 CEF/HTTP，
   会第一时间在日志中暴露。
+
+## 9. 更正：入站通道并未被穷尽（2026-10-09）
+
+v2.0.0 写下的结论「游戏内不存在任何可用的入站通道，在游戏内显示译文在架构上不可能」
+**不成立**。该探针只覆盖了「Panorama JS 能主动发起」这一类入口
+（`$.AsyncWebRequest` / HTML 面板 `SetURL` / 剪贴板 / `BImageFileExists`），
+漏了另一类：**引擎为了渲染会自己去取什么**。
+
+上游 BabelTower 用 `<Image>` 面板的**加载状态**做成了 1 bit 的入站回读：
+
+| 桥返回 | 游戏侧观察 | 位值 |
+| --- | --- | --- |
+| `200` + PNG | `ImageLoaded` 事件触发 | **1** |
+| `404` 空体 | `T_CLOSE`（600ms）内静默 | **0** |
+
+- 游戏侧建 128 个隐藏 2×2 Image 面板，逐轮 `SetImage("/btipc/dl?w=&r=&p=&t=")`
+- 128 bit = 16 字节 = 一帧，扣除 6 字节帧头后载荷 10 字节/帧
+- 实测 ~190 bit/s、位元零丢失（单 bit 延迟 P50 173ms / P99 1365ms）
+- `ImageLoaded` 是事件白名单里恰好 8 个 VALID 事件之一
+
+**为什么能成立**：图片加载由引擎在渲染管线里自行发起，不走 Panorama JS 的 HTTP API，
+所以 `AsyncWebRequest` 被移除不影响它。
+
+- 上行仍复用现成通道：`console.log` 结构化单行（`[LCT] BTIPC REQ ...`），
+  硬依赖游戏带 `-condebug` 启动（否则不写 `console.log`）。
+- 协议规格见上游 `docs/btipc-v1.md`（冻结版，含帧格式 / 轮次状态机 / CRC / 重试 / 风暴模式）；
+  本仓库按该规格自行实现，落地文档随实现补入 `docs/btipc-v1.md`。
