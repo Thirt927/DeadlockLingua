@@ -24,8 +24,8 @@ Deadlock 游戏聊天翻译 mod = **Panorama(Source 2 原生 UI)模组 + 本地 
   - 脚本内有具名互斥锁 `Local\DeadlockLinguaOverlay`,重复启动会直接退出,不会开出第二个窗口
   - 网页版(回退):`http://127.0.0.1:8791/overlay`(把 `config.json` 的 `overlay.mode` 改成 `"web"`)
 - 配置:`F:\agents\deadlockfanyi\BabelTower-fork\config\config.json`(provider 当前 openai→DeepSeek)
-- BTIPC 协议实现(游戏内译文显示用):桥端 `core\btipc\{crc16,framer,window,transport}.js`(**已落地**);游戏侧待实现(内联 crc16 + decode 副本,写在 `lingua_chat.js` 的 `State.btipc` 区块)
-- BTIPC 测试:`node tests\btipc\crc.test.js` / `frame.test.js` / `transport.test.js` / `e2e_tail.test.js` / `route.test.js`(全部离线可跑,不需要游戏)
+- BTIPC 协议实现(游戏内译文显示用):桥端 `core\btipc\{crc16,framer,window,transport}.js`(**已落地**);游戏侧 `lingua_chat.js` 的 `BTIPC` 区块(内联 crc16 / UTF-8 / base64 / 位序副本,**已落地**)
+- BTIPC 测试:`node tests\btipc\crc.test.js` / `frame.test.js` / `transport.test.js` / `e2e_tail.test.js` / `route.test.js` / `live_http.test.js`(全部离线可跑,不需要游戏;其中 `live_http` 会起一个真实监听端口的桥,用 8799 避开真桥)
 
 ## 3. 构建 + 部署(最重要流程)
 
@@ -58,7 +58,7 @@ Copy-Item F:\agents\deadlockfanyi\BabelTower-fork\dist\pak22_dir.vpk "E:\Steam\s
   - 上行复用现成通道:`console.log` 结构化单行(`[LCT] BTIPC REQ w=.. id=.. len=.. crc=.. b64=..`),**硬依赖游戏带 `-condebug` 启动**(不带就不写 `console.log`,表现是"装了完全没反应")。
   - 协议规格见上游 `docs/btipc-v1.md`(冻结版:16 字节帧格式 / CRC-16-CCITT-FALSE 覆盖固定 14 字节 / 轮号 `r` 即隐式 ACK 与幂等重投 / BUSY 固定帧 / 风暴模式 / 参数表)。本仓库按该规格**自行实现**,不直接合并上游代码。
   - **进度**:桥端(第六十四轮)+ 游戏侧(第六十五轮)均已于 2026-10-09 落地 —— `core/btipc/*` + `GET /btipc/dl` + `overlay.js` 的 `onLine` 钩子 + 5s GC 定时器;游戏侧 `lingua_chat.js` 的 BTIPC 客户端(内联 crc16/UTF-8/base64 + 128 Image 面板 + `ImageLoaded` + 轮次状态机)与 `dispatchJob → dispatchViaBtipc`。离线测试全绿(`tests/btipc/*` 5 套 + `lingua_chat_simtest.js` PASS 58/0,模拟器用真 framer 编码、游戏侧内联副本解码)。**尚未实车验收** —— 需关闭游戏后部署 `dist/pak22_dir.vpk` 并带 `-condebug` 启动。
-  - 桥端铁律:帧号只由轮号现算(`frameIndex = round - frameStartRound`),**不许存自增计数器**(会与游戏脱步);窗口 GC 的 `END_GC_MS` 必须 > 客户端最长重试跨度(现取 45s),否则会在客户端仍在重试时自删 → 全 404 → 全零位 → 误报 crc_dead。两条都已有测试护栏。
+  - 桥端铁律:①**`/btipc/dl` 的状态码是逐面板的** —— 面板 p 必须拿选中帧的第 p 位,位=1 才回 `200`,位=0 回 `404`；对同一轮所有面板回同一个状态码会让游戏侧把 16 字节全读成 1、CRC 必然不过(第六十六轮真实 HTTP 验收抓到的致命缺陷,回归见 `tests/btipc/live_http.test.js`)。②帧号只由轮号现算(`frameIndex = round - frameStartRound`),**不许存自增计数器**(会与游戏脱步)。③窗口 GC 的 `END_GC_MS` 必须 > 客户端最长重试跨度(现取 45s),否则会在客户端仍在重试时自删 → 全 404 → 全零位 → 误报 crc_dead。三条都已有测试护栏。
   - 游戏侧铁律:①**每次 SHOT 的 URL 必须唯一**(`t` 带 `shotSeq`)—— 同 URL 撞引擎缓存后不再 fire `ImageLoaded`(上游踩过 `frameFails 1→9`);②**位信道 ≈10 字节/轮(≈16 B/s)**,所以诊断/日志类重复流量一律**不许**走它(`diagLog` 只打 console.log、`flushChatLog` 不再镜像聊天行);③`pumpQueue` 里 bridge 任务要给 chat/outgoing 让位;④`RegisterEventHandler("ImageLoaded", panel, cb)` 是**固定 3 参**。
   - 渲染能力一直都在(`Label.text` 可用,mod 照样能往聊天行插字),缺的只是数据来源 —— 现在数据来源有了。`probeInboundChannels()` 已于第六十五轮**退役其面板/文件探针**(覆盖有盲区、正是它导致了错误结论,且每次启动都建一个真渲染面板),只留一行 `$` 成员表。
 - **悬浮窗(native,**legacy**,保留不删不再演进)**:`scripts/overlay_window.ps1` 是 **WPF** 原生窗口(`AllowsTransparency` + `Topmost`),所以能真透明并贴屏边自动收起。**改这个文件必须存成 UTF-8 with BOM**(`[System.IO.File]::WriteAllText($p,$c,(New-Object System.Text.UTF8Encoding $true))`),否则 PowerShell 5.1 按 ANSI 读会把中文读成乱码。它用 `WebClient`(强制 UTF8)+ `ConvertTo-Json -Compress` 调桥,用 `[System.Windows.Clipboard]::SetText()` 写剪贴板(原生进程,不受浏览器剪贴板策略限制)。想切回网页版把 `overlay.mode` 改成 `"web"`。

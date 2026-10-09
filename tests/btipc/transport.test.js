@@ -15,17 +15,29 @@ function ok(name, cond, extra) {
 }
 const tick = () => new Promise((r) => setTimeout(r, 0));
 
+// 模拟游戏侧的一轮:128 个面板各自取自己那一位(位 1 → 200,位 0 → 404),
+// 按位拼成 16 字节再解帧。这是"状态码即数据"的正确用法 —— 桥端对同一轮的
+// 不同面板必须回不同状态码,否则游戏侧会读到全 1。
+function serveRound(tr, win, r) {
+  const bits = [];
+  let n200 = 0;
+  for (let p = 0; p < F.WINDOW_PANELS; p += 1) {
+    const b = tr.serveDL({ w: win, r: r, p: p, t: "x" }).status === 200 ? 1 : 0;
+    if (b) n200 += 1;
+    bits.push(b);
+  }
+  return { decoded: F.decodeFrame(F.frameFromBits(bits)), n200: n200 };
+}
+
 // 模拟游戏侧闭合:从 startRound 起逐轮取帧,遇到 END 帧拼装成文本。
 // 对应 §4 的轮次生命周期(SHOT → 收 ImageLoaded → 组帧 → CRC → 拼装 → END 停轮)。
 function collect(tr, win, startRound) {
   const decoded = [];
   for (let i = 0; i < 200; i += 1) {
-    const s = tr.serveDL({ w: win, r: startRound + i });
-    if (s.status !== 200) return null;
-    const d = F.decodeFrame(s.frame);
-    if (!d.ok) return null;
-    decoded.push(d);
-    if (d.end) return F.assembleFrames(decoded);
+    const out = serveRound(tr, win, startRound + i);
+    if (!out.decoded.ok) return null;
+    decoded.push(out.decoded);
+    if (out.decoded.end) return F.assembleFrames(decoded);
   }
   return null;
 }
@@ -88,8 +100,10 @@ ok("不安全字符集目标语言 → 裸文本", T.splitEnvelope("t=zh Hans\nx
     translate: (text) => new Promise((res) => { pending = { text: text, res: res }; }),
   });
 
-  ok("未知窗口 → 404", tr.serveDL({ w: "abcdef", r: 1 }).status === 404);
-  ok("w 格式非法 → 404", tr.serveDL({ w: "zzz", r: 1 }).status === 404);
+  ok("未知窗口 → 404", tr.serveDL({ w: "abcdef", r: 1, p: 0 }).status === 404);
+  ok("w 格式非法 → 404", tr.serveDL({ w: "zzz", r: 1, p: 0 }).status === 404);
+  ok("p 越界 → 404", tr.serveDL({ w: "abcdef", r: 1, p: 128 }).status === 404);
+  ok("p 缺失 → 404", tr.serveDL({ w: "abcdef", r: 1 }).status === 404);
 
   const long = "a".repeat(25); // 25B → 3 帧
   tr.handleLogLine(buildReqLine(WIN, 0x00c8, long));
@@ -98,37 +112,37 @@ ok("不安全字符集目标语言 → 裸文本", T.splitEnvelope("t=zh Hans\nx
   ok("translate 收到原文", pending && pending.text === long);
   ok("op=bare 记入日志", logLines.some((l) => l.indexOf("op=bare") >= 0));
 
-  // 翻译未就绪 → 200 + BUSY 固定帧(与轮号无关)
-  let s = tr.serveDL({ w: WIN, r: 1 });
-  ok("frames 未就绪 → 200", s.status === 200);
-  ok("frames 未就绪 → BUSY 帧", F.decodeFrame(s.frame).valid === false);
-  ok("BUSY 与轮号无关", F.decodeFrame(tr.serveDL({ w: WIN, r: 9 }).frame).valid === false);
+  // 翻译未就绪 → 各面板仍按 BUSY 帧的位回答,闭合后 VALID=0(与轮号无关)
+  ok("frames 未就绪 → BUSY 帧", serveRound(tr, WIN, 1).decoded.valid === false);
+  ok("BUSY 与轮号无关", serveRound(tr, WIN, 9).decoded.valid === false);
 
   // 就绪后:frameStartRound 锚定在首个被服务的轮号
   pending.res("你好世界你好世界你好世界"); // 12 汉字 = 36B → 4 帧
   await tick();
-  const expectFrames = F.encode(0x00c8, "你好世界你好世界你好世界");
 
-  const r5 = tr.serveDL({ w: WIN, r: 5 });
-  ok("锚定轮 r=5 → frame0", r5.frameIndex === 0 && r5.frame.equals(expectFrames[0]));
-  ok("同轮重投幂等(r=5 再来一次)", tr.serveDL({ w: WIN, r: 5 }).frame.equals(expectFrames[0]));
-  ok("r=6 → frame1", tr.serveDL({ w: WIN, r: 6 }).frame.equals(expectFrames[1]));
-  ok("r=7 → frame2", tr.serveDL({ w: WIN, r: 7 }).frame.equals(expectFrames[2]));
-  const r8 = tr.serveDL({ w: WIN, r: 8 });
-  ok("r=8 → frame3(末帧,END=1)", r8.frame.equals(expectFrames[3]) && F.decodeFrame(r8.frame).end === true);
-  const r9 = tr.serveDL({ w: WIN, r: 9 });
-  ok("r 超末帧 → 末帧重发", r9.frame.equals(expectFrames[3]) && r9.repeat === true);
-  ok("r=4(锚定前)→ 兜底 frame0", tr.serveDL({ w: WIN, r: 4 }).frame.equals(expectFrames[0]));
-  ok("全部 frame 均 busy=false", [5, 6, 7, 8].every((r) => tr.serveDL({ w: WIN, r: r }).busy === false));
+  const out5 = serveRound(tr, WIN, 5);
+  ok("锚定轮 r=5 → frame0(seq=0)", out5.decoded.ok && out5.decoded.seq === 0 && out5.decoded.end === false);
+  // 状态码必须逐面板:整轮全 200 就会让游戏侧读到全 1
+  ok("一轮内 200 与 404 并存(状态码逐面板)", out5.n200 > 0 && out5.n200 < F.WINDOW_PANELS,
+    "n200=" + out5.n200);
+  const out5b = serveRound(tr, WIN, 5);
+  ok("同轮重投幂等(r=5 再来一次,逐位一致)",
+    out5b.decoded.seq === out5.decoded.seq && out5b.decoded.payload.equals(out5.decoded.payload));
+  ok("r=6 → frame1", serveRound(tr, WIN, 6).decoded.seq === 1);
+  ok("r=7 → frame2", serveRound(tr, WIN, 7).decoded.seq === 2);
+  const out8 = serveRound(tr, WIN, 8);
+  ok("r=8 → frame3(末帧,END=1)", out8.decoded.seq === 3 && out8.decoded.end === true);
+  const out9 = serveRound(tr, WIN, 9);
+  ok("r 超末帧 → 末帧重发", out9.decoded.seq === 3 && out9.decoded.end === true);
+  ok("r=4(锚定前)→ 兜底 frame0", serveRound(tr, WIN, 4).decoded.seq === 0);
 
-  // 逐帧内容可解回原文(模拟游戏侧闭合)
-  const decoded = [];
-  for (let i = 0; i < expectFrames.length; i += 1) decoded.push(F.decodeFrame(expectFrames[i]));
-  ok("游戏侧闭合还原译文", F.assembleFrames(decoded) === "你好世界你好世界你好世界");
+  // 完整位信道往返:逐轮取 128 位 → 拼帧 → 拼装
+  ok("位信道往返还原译文", collect(tr, WIN, 5) === "你好世界你好世界你好世界",
+    JSON.stringify(collect(tr, WIN, 5)));
 
   // CAN 撤窗
   tr.handleLogLine("10:00:00 [LCT] BTIPC CAN w=" + WIN);
-  ok("CAN 后窗口消失 → 404", tr.size() === 0 && tr.serveDL({ w: WIN, r: 1 }).status === 404);
+  ok("CAN 后窗口消失 → 404", tr.size() === 0 && tr.serveDL({ w: WIN, r: 1, p: 0 }).status === 404);
 
   // 非法 REQ 不得建窗
   tr.handleLogLine(buildReqLine("zzzzzz", 1, "hi"));

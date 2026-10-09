@@ -309,7 +309,8 @@ node tests\btipc\crc.test.js        # CRC-16/CCITT-FALSE 标准向量
 node tests\btipc\frame.test.js      # 帧往返 / 位序例 / BUSY 帧 / CRC 篡改
 node tests\btipc\transport.test.js  # REQ 校验 / 轮次语义 / GC 不变量
 node tests\btipc\e2e_tail.test.js   # console.log → tail → 建窗 → 取帧
-node tests\btipc\route.test.js      # /btipc/dl 状态码与响应头
+node tests\btipc\route.test.js      # /btipc/dl 路由接线（桩 transport）
+node tests\btipc\live_http.test.js  # 真实监听端口 + 真实 tail + 逐面板状态码 → 逐位拼装
 ```
 
 **模拟器（需要桥在跑）**

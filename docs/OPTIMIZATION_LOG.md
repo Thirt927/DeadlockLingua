@@ -1394,3 +1394,49 @@
   旧 pak22 已备份为 `pak22_dir.vpk.bak-btipc-20261009-211345`。
 - **已知限制**: 位信道有效载荷 ≈10 字节/轮(≈16 B/s),60B 译文约 4s —— 所以**诊断/日志类
   流量一律不许走它**(本轮已把 diag 与聊天日志镜像移出)。BTIPC 上行硬依赖 `-condebug`。
+
+## 2026-10-09 第六十六轮:真实 HTTP 验收抓到致命缺陷 —— 桥端 `/btipc/dl` 忽略了面板号 `p`
+
+- **背景**: 第六十五轮收尾时留下一个明确的验证缺口 —— 之前所有桥端测试要么用桩 transport
+  (只验路由接线),要么直接读 `serveDL()` 的返回值里的 `frame` 字段(绕过了状态码)。
+  没有任何测试验证过"**真实监听的桥进程真的会用状态码把帧发出去**",而那是实车唯一走的路。
+  本轮补了一个真实 HTTP 验收(`tests/btipc/live_http.test.js`:VM 沙箱里跑真 `http` 服务器 +
+  真 `overlay` tail + 真 `transport`,只桩掉"配置来源"与"翻译服务商"),**第一次运行就失败**。
+- **根因**: `core/btipc/transport.js` 的 `serveDL()` 完全**忽略了查询参数 `p`** ——
+  只要窗口存在且帧就绪,就对**所有** 128 个面板回同一个 `200 + PNG`。而协议要求状态码是
+  **逐面板**的:面板 p 必须拿到选中帧的第 p 位,位=1 才回 200、位=0 回 404。
+  按当时的实现,游戏侧会把一帧 16 字节**全读成 1**,CRC 必然不过 ——
+  表现就是"装了完全没反应、桥日志里能看到 BTIPC TRQ/RSP 但没有一帧能收口"。
+  这是会让整个功能失效的缺陷,靠 mock 测不出来:
+  - `route.test.js` 用的是**桩 transport**,只验了路由 glue;
+  - `e2e_tail.test.js` 断言的是 `serveDL(...).status === 200` 然后**直接读返回值里的 `frame`**
+    (它真值断言了"帧已就绪就回 200",恰好把错误行为固化成了期望);
+  - 模拟器里的"桥"是**游戏侧的对手方** mock,它自己按 `p` 取位,所以游戏侧一直是对的。
+- **改动文件**
+  - `core/btipc/transport.js`: `serveDL()` 现在校验 `p`(缺失/越界 → 404),取出选中帧后用
+    `framer.bitsOfFrame(frame)[p]` 决定 200 还是 404。BUSY 帧同样按位回答(游戏侧要读它的
+    VALID=0)。
+  - `tests/btipc/live_http.test.js`(**新增**):真实 HTTP + 真实 tail + 逐面板取位 + 逐位拼装,
+    断言"一轮内 200 与 404 并存"、"拼装出的文本 = 桩服务商对请求原文的输出"、"帧数与
+    request_id 一致"。
+  - `tests/btipc/transport.test.js`: 把取帧方式改成**逐面板 128 连查**(新增 `serveRound()`),
+    断言"一轮内 200 与 404 并存";补 `p` 越界/缺失的 404。
+  - `tests/btipc/e2e_tail.test.js`: 同样改成逐面板取位,并补"状态码逐面板"断言。
+  - `tests/btipc/route.test.js`: 断言名澄清为"桩返回 200 时 → 200",强调它只验 glue。
+  - `docs/btipc-v1.md`: §6 状态机补 `p` 与"最后按第 p 位决定状态码";新增 ⚠️ 警示段;
+    §12 新增 4b 项(真实 HTTP 端到端)。
+- **原因/效果**: 修掉之后,真实桥进程才能把帧真正发到游戏侧。这是"实车能用"的必要条件 ——
+  本轮的意义不只是修 bug,而是**建立了能发现这类缺陷的验收手段**:把"真实监听端口 + 真实
+  tail"这一层纳入回归,而不是只测纯函数与桩。
+- **验证方式**(全部实测)
+  - `tests/btipc/live_http.test.js` **PASS**(真实服务器起在 127.0.0.1:8799;日志可见
+    `BTIPC TRQ w=d43faf id=16303 len=35 op=translate` → `BTIPC RSP w=d43faf frames=3 bytes=29`,
+    随后逐位拼装出正确文本);
+  - 六套 BTIPC 测试全绿:`crc` / `frame` / `transport` / `e2e_tail` / `route` / `live_http`;
+  - 回归全绿:`overlay_test 13/0`、`test_bridge_dedup`、`test_bridge_fallback`、
+    `test_sender_backfill 11/0`、`test_steamid_roster 3/0`、`lingua_chat_simtest 58/0`;
+  - 真桥已重启(pid 变更为 27220,21:24:40 启动),`/api/v1/health` 200、
+    `/btipc/dl?w=abcdef` → `404 + Cache-Control: no-store`。
+- **仍需用户测试**: 无新增(仍需关闭游戏后部署 `dist/pak22_dir.vpk` 做实车验收)。
+- **已知限制**: 该缺陷在"逐面板取位"这一层;`p` 的语义已写进 `docs/btipc-v1.md` 的 ⚠️ 段,
+  两侧实现都以 `tests/btipc/live_http.test.js` 为准绳。

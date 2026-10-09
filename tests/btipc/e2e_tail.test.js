@@ -65,21 +65,33 @@ function reqLine(win, id, text) {
   ok("同批 [LCT-CHAT] 仍进悬浮窗管线", overlay.list(0).length === 1,
     "ring=" + overlay.list(0).length);
 
-  const busy = tr.serveDL({ w: WIN, r: 1 });
-  ok("/btipc/dl 200(帧已就绪时)", busy.status === 200, "status=" + busy.status);
-  const decoded = [];
-  for (let i = 0; i < 40; i += 1) {
-    const s = tr.serveDL({ w: WIN, r: 1 + i });
-    if (s.status !== 200) break;
-    const d = F.decodeFrame(s.frame);
-    if (!d.ok) break;
-    decoded.push(d);
-    if (d.end) break;
+  // 一轮 = 128 个面板各取自己那一位(位 1 → 200,位 0 → 404),按位拼成 16 字节。
+  // 桥端对同一轮的不同面板必须回不同状态码 —— 整轮同状态会让游戏侧读到全 1。
+  function serveRound(r) {
+    const bits = [];
+    let n200 = 0;
+    for (let p = 0; p < F.WINDOW_PANELS; p += 1) {
+      const b = tr.serveDL({ w: WIN, r: r, p: p, t: "e2e-" + r + "-" + p }).status === 200 ? 1 : 0;
+      if (b) n200 += 1;
+      bits.push(b);
+    }
+    return { decoded: F.decodeFrame(F.frameFromBits(bits)), n200: n200 };
   }
-  ok("取回的帧拼装 = 桥给出的译文", F.assembleFrames(decoded) === REPLY,
-    JSON.stringify(F.assembleFrames(decoded)));
 
-  ok("未知窗口仍 404", tr.serveDL({ w: "000000", r: 1 }).status === 404);
+  const decoded = [];
+  let assembled = null;
+  let mixedSeen = false;
+  for (let i = 0; i < 60 && assembled === null; i += 1) {
+    const out = serveRound(1 + i);
+    if (!out.decoded.ok) break;
+    if (out.n200 > 0 && out.n200 < F.WINDOW_PANELS) mixedSeen = true;
+    decoded.push(out.decoded);
+    if (out.decoded.end) assembled = F.assembleFrames(decoded);
+  }
+  ok("一轮内 200 与 404 并存(状态码逐面板)", mixedSeen);
+  ok("取回的帧拼装 = 桥给出的译文", assembled === REPLY, JSON.stringify(assembled));
+
+  ok("未知窗口仍 404", tr.serveDL({ w: "000000", r: 1, p: 0 }).status === 404);
 
   overlay.stop();
   fs.rmSync(dir, { recursive: true, force: true });

@@ -297,7 +297,8 @@ node tests\btipc\crc.test.js        # CRC-16/CCITT-FALSE test vectors
 node tests\btipc\frame.test.js      # frame round-trip / bit order / BUSY frame / CRC tampering
 node tests\btipc\transport.test.js  # REQ validation / round semantics / GC invariant
 node tests\btipc\e2e_tail.test.js   # console.log -> tail -> window -> frames
-node tests\btipc\route.test.js      # /btipc/dl status codes and headers
+node tests\btipc\route.test.js      # /btipc/dl route wiring (stubbed transport)
+node tests\btipc\live_http.test.js  # real listening port + real tail + per-panel status codes -> bit reassembly
 ```
 
 **Simulator (requires the bridge to be running)**

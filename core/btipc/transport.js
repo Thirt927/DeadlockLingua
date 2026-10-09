@@ -158,15 +158,22 @@ function createTransport(deps) {
     return false;
   }
 
-  // GET /btipc/dl?w&r&p&t。p 只用于 URL 唯一性(防引擎缓存串窗),桥端不需要它 ——
-  // 帧里已经含全部 128 位,每个面板各自读自己那一位。
+  // GET /btipc/dl?w&r&p&t。
+  // 关键:状态码是**逐面板**的 —— 面板 p 必须拿到帧里第 p 位:
+  //   位 = 1 → 200 + PNG(引擎 fire ImageLoaded);位 = 0 → 404(引擎静默)。
+  // 游戏侧把 128 个面板各自读回的那一位拼成 16 字节才是一帧,所以这里绝不能
+  // 对同一轮的所有面板返回同一个状态码(那会让游戏侧读到全 1)。
+  // t 只用于 URL 唯一性(防引擎缓存串窗),桥端不需要它。
   function serveDL(query) {
     const q = query || {};
     const win = String(q.w === undefined || q.w === null ? "" : q.w);
     if (!/^[0-9a-f]{6}$/.test(win)) return { status: 404, body: null };
+    const p = Number(q.p);
+    if (!Number.isFinite(p) || p < 0 || p >= framer.WINDOW_PANELS) return { status: 404, body: null };
     const r = Number(q.r);
     const res = tables.serve(win, Number.isFinite(r) ? r : 0);
-    if (res.status !== 200) return { status: 404, body: null };
+    if (res.status !== 200 || !res.frame) return { status: 404, body: null };
+    if (!framer.bitsOfFrame(res.frame)[p]) return { status: 404, body: null };
     return {
       status: 200,
       body: BIT1_PNG,

@@ -102,11 +102,11 @@ function get(p) {
 
 // 位 1:200 + PNG + 不可缓存
 const hit = get("/btipc/dl?w=200ok0&r=7&p=3&t=nonce123");
-ok("位1 → 200", hit.statusCode === 200, "status=" + hit.statusCode);
+ok("桩返回 200 时 → 200", hit.statusCode === 200, "status=" + hit.statusCode);
 ok("位1 → Content-Type image/png", hit.headers["content-type"] === "image/png");
 ok("位1 → 带 PNG 体", Buffer.isBuffer(hit.body) && hit.body.equals(BIT1));
 ok("响应不可缓存", hit.headers["cache-control"] === "no-store");
-ok("查询参数原样透传给 serveDL",
+ok("查询参数原样透传给 serveDL(含 p)",
   (function () {
     const c = serveCalls[serveCalls.length - 1];
     return c.w === "200ok0" && c.r === "7" && c.p === "3" && c.t === "nonce123";

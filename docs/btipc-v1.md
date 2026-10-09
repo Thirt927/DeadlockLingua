@@ -200,17 +200,25 @@ frameStartRound = 该窗口 frames[0] 首次被服务的轮号(锚定后不变)
 winMap[<win>] = { id, payload, tReq, frames|null, frameStartRound|null, tEndServed, tLast }
 
 GET /btipc/dl?w&r&p&t:
+  0. p 非法 / 缺失            → 404
   1. win 不存在 / w 格式非法   → 404(游戏侧视为 BUSY 等价,继续轮询)
-  2. frames 未就绪             → 200 + BUSY 固定帧(与 r 无关)
+  2. frames 未就绪             → 按 BUSY 固定帧的第 p 位回答(与 r 无关)
   3. frameStartRound === null  → frameStartRound = r;serve frames[0]
   4. r >= frameStartRound      → idx = r - frameStartRound
        idx < frames.length     → serve frames[idx]
        idx >= frames.length    → serve 末帧(END)again(游戏正常已停轮,兜底)
+  最后:对该帧取第 p 位 —— 位=1 → 200 + PNG;位=0 → 404
 REQ 行到达:同 w → 重置窗口(幂等覆盖);新 w → 建窗
 翻译完成:  framer.encode(id, text) → frames[]
 翻译失败:  回原文(游戏侧表现为"未翻译",不会卡死)—— 桥端现状
 GC:        末帧被服务后 END_GC_MS,或窗口 WINDOW_TTL_MS 无活动 → 删除
 ```
+
+> ⚠️ **状态码是逐面板的**:同一轮的 128 个面板**必须**拿到各自不同的状态码 —— 面板 p 拿
+> 选中帧的第 p 位,位=1 才回 `200`。若整轮都回 `200`(例如"帧已就绪就回 200"的简化实现),
+> 游戏侧会把 16 字节全读成 1、CRC 必然不过 → 看起来像"信道不通"。
+> 回归护栏:`tests/btipc/live_http.test.js` 在**真实监听端口的桥进程**上断言一轮内 200 与 404
+> 并存并逐位拼出正确文本(`transport.test.js` / `e2e_tail.test.js` 也有同样断言)。
 
 - **`END_GC_MS` 必须 > 客户端最长重试跨度**(`T_HARD` + 9×(`STORM_TCLOSE` + 冷却) ≈ 40s,
   现取 **45s**)。否则窗口会在客户端仍在重试时自删 → 128 面板全 404 → 全零位 → CRC 必败
@@ -338,6 +346,8 @@ IDLE → REQ_SENT(发 REQ 行 + 启动轮询 r=1)
 3. **桥端传输层**(校验 / 轮次 / GC 不变量) — ✅ 已固化(`tests/btipc/transport.test.js`)
 4. **接线**(tail → onLine → 建窗 → 取帧;**/btipc/dl 路由状态码与响应头) — ✅ 已固化
    (`tests/btipc/e2e_tail.test.js`、`tests/btipc/route.test.js`)
+4b. **真实 HTTP 端到端**(真实监听端口的桥进程 + 真实 tail + 逐面板状态码 → 逐位拼装) — ✅ 已固化
+   (`tests/btipc/live_http.test.js`;它抓到过"桥端忽略 `p`、整轮回 200"的实现缺陷)
 5. **游戏侧客户端** — ✅ 已实现并离线验收(`lingua_chat.js` 的 `BTIPC` 区块;
    模拟器用真实桥端 framer 编码、游戏侧内联副本解码,往返零错)
 6. **实车回声 conformance**:游戏内命令发一次传输 → 桥侧回声,解出与发送一致;
