@@ -5869,14 +5869,33 @@ function injectTranslation(row, sig, text) {
     setStatus("");
   }
 
+  // 取按钮内的"显示用 Label"。命名约定是 <按钮id>Label。
+  // ⚠️ 实测在这个引擎版本里 `findChild(<Button>, "<id>Label")` **返回 null** ——
+  // FindChildTraverse 不会深入 Button 的子节点。于是 setSelectText / setToggleText 双双
+  // 静默失效,表现正是"选项点了 / 开关点了,值确实改了(保存落盘是新值),但界面上的字不变"。
+  // 硬证据(同一次会话):从**根**找的 LCTKeyState 更新正常(显示"未配置"),
+  // 而按钮内的 Label 一律不动;setToggleText 原来的 `|| toggle` 兜底更是把 text 设给了
+  // Button 本身 —— 而 Button 不渲染 text,等于什么都没做。
+  // 所以:①优先从**面板**按 id 找(label id 在面板内唯一)②再退回遍历按钮的直接子节点。
+  function findButtonLabel(panel, btnId) {
+    if (!panel) return null;
+    const byId = findChild(panel, btnId + "Label");
+    if (byId) return byId;
+    const btn = findChild(panel, btnId);
+    if (!btn) return null;
+    try {
+      const n = btn.GetChildCount();
+      for (let i = 0; i < n; i += 1) {
+        const c = btn.GetChild(i);
+        if (c && isValid(c) && String(c.paneltype).indexOf("Label") >= 0) return c;
+      }
+    } catch (e) {}
+    return null;
+  }
+
   function setSelectText(buttonId, text) {
     const panel = findChild(getRoot(), SETTINGS_PANEL_ID);
-    const btn = panel ? findChild(panel, buttonId) : null;
-    // 标签**优先从整个面板找**(标签 id 在面板内唯一)。
-    // 只从按钮下找是有风险的:若 FindChildTraverse 不深入 Button 的子节点就会拿到 null,
-    // 而下面 `if (label)` 会**静默跳过** —— 表现恰好就是"选项选完了,但按钮上的字没变"。
-    const label = (panel ? findChild(panel, buttonId + "Label") : null) ||
-      (btn ? findChild(btn, buttonId + "Label") : null);
+    const label = findButtonLabel(panel, buttonId);
     if (label) {
       try {
         label.text = text;
@@ -5946,13 +5965,14 @@ function injectTranslation(row, sig, text) {
 
   function setToggleText(id, on) {
     const panel = findChild(getRoot(), SETTINGS_PANEL_ID);
-    const toggle = panel ? findChild(panel, id) : null;
-    if (!toggle) return;
+    if (!panel) return;
     // Button 自身不渲染 text,必须更新内嵌 Label(命名约定:<按钮id>Label)
-    const label = findChild(toggle, id + "Label") || toggle;
-    try {
-      label.text = on ? "是" : "否";
-    } catch (e) {}
+    const label = findButtonLabel(panel, id);
+    if (label) {
+      try { label.text = on ? "是" : "否"; } catch (e) {}
+    } else {
+      diagLog("tg_" + id, "PANORAMA: setToggleText 找不到 " + id + "Label");
+    }
   }
 
   function LCTOnToggle(which) {
