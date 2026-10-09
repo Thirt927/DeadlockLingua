@@ -1604,3 +1604,38 @@
   + `settings saved`,且桥端出现 `BTIPC TRQ ... op=config`。
 - **已知限制**: 面板改动需要重建 VPK 并**重启游戏**才生效(布局与脚本都打进 pak);
   若 `/` 前缀确实被引擎吃掉,`/tr` 将始终无效,以 `!tr` 或「译」按钮为准。
+
+## 2026-10-09 第七十轮:修好「发送前翻译」—— 清掉 translateOutgoing 里的同一道死闸门
+
+- **背景**: 第六十九轮加的埋点首次生效,日志直接给出答案:
+  - `settings opened vis=null saveBtn=yes` → 面板与子控件都找得到,面板本身没问题
+  - `outgoing gate mode=bilingual enabled=true bridgeUp=true offlineSince=false`
+    → **出站三道闸门全部通过**,但之后**没有任何 `t=` 翻译请求**到达桥
+- **根因**: `translateOutgoing()` 里有一道"直连不可用就必须存在 HTML 面板"的闸门:
+  ```js
+  const usable = detectAsyncWebRequest() || !!ensurePanel();
+  if (!usable) { setStatus("翻译通道不可用,已按原文发送"); done(null, null); return; }
+  ```
+  这是 2026/10/01 之前两条老通道(`AsyncWebRequest` / 隐藏 HTML 面板)的残留,而通道早已换成
+  BTIPC,与面板毫无关系。后果是**每一次出站翻译都在这里被静默拦掉**:`done(null,null)` →
+  上层走"翻译不可用"分支 → **按原文发送**。表现正是"发送前翻译没效果、发出去的是中文",
+  且因为只走 `log()`(桥不采集)而完全没有痕迹。
+  **第六十七轮我从 `bridgePost` 里清掉了同一道闸门,但漏了这个副本。**
+- **改动文件**
+  - `mod/panorama/scripts/lingua_chat.js`:
+    1. `translateOutgoing` 去掉死闸门,直接 `enqueueOutgoing`;
+       并全局复查 `detectAsyncWebRequest()` 已**无任何调用点**(只剩定义),
+       其余两处 `ensurePanel()` 都落在已废的 `dispatchViaPanel` 与自愈路径上(后者因
+       `PANEL_CHANNEL_ENABLED=false` 提前返回),不在活路径。
+    2. 出站"翻译不可用"分支的 `log()` 改为 `diagLog()`(带 `PANORAMA:` 前缀,桥可采集)。
+    3. 顺带修面板开合:`hasClass(panel,"LCTVisible")` 实测**恒为 false**(日志里 toggle 每次都报
+       open),导致面板**永远关不掉**。改用 JS 侧 `settingsOpen` 状态位为准;
+       `LCTCloseSettings` 也同步复位该位并改用 `diagLog`。
+- **验证方式**: `node --check` 通过;`build.ps1` 编译 7 个资源全 `ok`;BTIPC/回归/模拟器测试全绿;
+  已部署 `addons\pak22_dir.vpk` = **318674 字节**。
+- **仍需用户测试**: 打一句中文回车 → 输入框右侧应先出现「翻译中…约 2~4 秒」,
+  随后游戏内发出英文(或 `原文 | 译文`);桥端应出现 `BTIPC TRQ ... t=en`。
+  若仍按原文发,日志里会出现 `outgoing: translation unavailable`,即通道层失败而非被拦。
+- **经验教训**: 老通道的"闸门"式判断在本仓库至少有两份副本(`bridgePost` 与
+  `translateOutgoing`)。**清理通道代码时必须全局搜 `detectAsyncWebRequest` / `ensurePanel`**,
+  否则会留下静默拦截点 —— 这类 bug 的共同特征就是"功能不生效但没有任何日志"。

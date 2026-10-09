@@ -5552,8 +5552,8 @@ function injectTranslation(row, sig, text) {
           }
           setStatus("已发送译文: " + String(send).slice(0, 40));
         } else if (!translated) {
-          // 翻译不可用/超时:按原文发送,但必须留日志,否则用户看到原文会以为服务商坏了
-          log("outgoing: translation unavailable (timeout/error), sending original");
+          // 翻译不可用/超时:按原文发送,但必须留可采集的日志,否则用户看到原文会以为服务商坏了
+          diagLog("outfail", "PANORAMA: outgoing: translation unavailable (timeout/error), sending original");
           setStatus("翻译不可用,已按原文发送");
         } else if (translated === trimmed || sameLanguage(detected, outTarget)) {
           // 目标语言与原文相同(en->en 等):不发无用译文
@@ -5588,15 +5588,14 @@ function injectTranslation(row, sig, text) {
   }
 
   function translateOutgoing(text, done) {
-    // 通道判定必须与 dispatchJob 一致:AsyncWebRequest 直连可用时不要求 HTML 面板存在
-    // (面板通道在 2026/10/01 版本已被引擎废除,见 PANEL_CHANNEL_ENABLED)。
-    const usable = detectAsyncWebRequest() || !!ensurePanel();
-    if (!usable) {
-      setStatus("翻译通道不可用,已按原文发送");
-      done(null, null);
-      return;
-    }
-    ensureBridgeEvents();
+    // ⚠️ 这里原本有一道"直连不可用就必须存在 HTML 面板"的闸门:
+    //     const usable = detectAsyncWebRequest() || !!ensurePanel();
+    //     if (!usable) { done(null, null); return; }
+    // 那是 2026/10/01 之前两条老通道(AsyncWebRequest / 隐藏 HTML 面板)的残留,
+    // 而现在通道已换成 BTIPC,与面板毫无关系。留着它的后果是**每一次出站翻译都在这里被
+    // 静默拦掉**:done(null,null) → 上层走"翻译不可用"分支 → 按原文发送。
+    // 表现正是"发送前翻译没效果、发出去的是中文",且因为只 log() 而毫无痕迹。
+    // (第六十七轮从 bridgePost 里清掉了同一道闸门,漏了这个副本。)
     enqueueOutgoing(text, done);
   }
 
@@ -5770,19 +5769,26 @@ function injectTranslation(row, sig, text) {
 
   // 防重:XML 的 onactivate 若与其它绑定同时命中,会"开了又关",从日志上也看不出开过
   let lastSettingsToggleAt = 0;
+  // 开合状态**由 JS 记**,不用 hasClass 反查 —— 实测 hasClass(panel,"LCTVisible") 恒为 false
+  // (日志里 toggle 每次都报 open),导致面板永远关不掉。以本地状态位为准更可靠。
+  let settingsOpen = false;
   function LCTToggleSettings() {
     const now = nowMs();
     if (lastSettingsToggleAt && now - lastSettingsToggleAt < 300) return;
     lastSettingsToggleAt = now;
-    const panel = findChild(getRoot(), SETTINGS_PANEL_ID);
-    const open = !!(panel && hasClass(panel, SETTINGS_VISIBLE_CLASS));
-    diagLog("settoggle", "PANORAMA: settings toggle: " + (open ? "close" : "open"));
-    if (open) closeSettingsPanel();
-    else openSettingsPanel();
+    diagLog("settoggle", "PANORAMA: settings toggle: " + (settingsOpen ? "close" : "open"));
+    if (settingsOpen) {
+      settingsOpen = false;
+      closeSettingsPanel();
+    } else {
+      settingsOpen = true;
+      openSettingsPanel();
+    }
   }
 
   function LCTCloseSettings() {
-    log("close clicked");
+    diagLog("closeclick", "PANORAMA: close clicked");
+    settingsOpen = false;
     closeSettingsPanel();
   }
 
