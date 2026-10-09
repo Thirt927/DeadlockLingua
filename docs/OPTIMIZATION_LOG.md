@@ -1562,3 +1562,45 @@
   标题为 "DeadlockLingua 设置";浏览器 `/settings` 的折叠分组与各下拉应正常。
 - **已知限制**: `op=health` 一次约 60B(6 帧 ≈ 3.6s),会占一下单槽队列 —— 所以只在
   "打开设置面板时"主动探一次,其余时候状态由真实流量推导,不额外占带宽。
+
+## 2026-10-09 第六十九轮:修「游戏内 /tr 改不了设置」—— 补可观测性 + 放宽触发方式 + 修健康探测占带宽
+
+- **现象**: 用户反馈"游戏内 /tr 无法实现修改设置"。
+- **取证过程(排除法,都基于真实日志)**
+  1. 桥日志(记 UTC,14:49 UTC = 22:49 北京)显示该时段**只有周期 `op=health`**,完全没有
+     `op=config`、没有 `save clicked`、没有 `toggle:` —— 即**保存与开关回调都没被触发过**。
+  2. 静态核对:面板 JS 引用的 **19 个元素 id 与 chat.xml 标记完全对得上**;面板段调用的 59 个
+     标识符**全部有定义**(其余 16 个是 `.push()`/`.map()` 这类方法调用,虚警)。所以不是
+     "恢复时漏了函数"或"id 对不上"。
+  3. `exportGlobal` 写的是 `globalThis`,`[diag] player global keys` 里能看到
+     `LCTOnChatSubmit/LCTToggleSettings/LCTSave/...` 都在。
+  4. CSS 也正确:`.LCTSettingsPanel{visibility:collapse}` + `.LCTSettingsPanel.LCTVisible{visibility:visible}`。
+  5. **但 `openSettingsPanel()` 原本没有任何日志,且有 `if (!panel) return;` 静默返回** ——
+     所以"面板打不开"与"面板开了但点了没反应"在日志上**完全无法区分**,这才是一直定不了位的原因。
+- **改动文件**
+  - `mod/panorama/scripts/lingua_chat.js`
+    - `openSettingsPanel`:补日志 —— 找不到面板时记 `panel NOT FOUND (chat.xml 未生效?)`;
+      打开后记 `vis= / saveBtn= / inChat=`,把"可见性、保存按钮是否就位、是否在 CitadelChat 子树内"
+      一次打全。
+    - `LCTToggleSettings`:记 `settings toggle: open/close`;并加 **300ms 防重**(若 XML 的
+      `onactivate` 与其它绑定同时命中会"开了又关",日志上也看不出开过)。
+    - `/tr` 拦截放宽为 **`/tr` / `!tr` / `.tr`** 三种前缀并记 `cmd: ... -> toggle settings panel`。
+      动机:`/` 开头的输入**可能被引擎当控制台命令吃掉**(那样根本走不到 `oninputsubmit`),
+      而 `!lcttest` 用的 `!` 前缀一直可用 —— 给等价入口以绕开这个疑点。
+    - **修掉本轮次引入的真实副作用**:上一轮留下了每 5 秒一次的 `healthLoop`,而一次
+      `op=health` 占 **5 帧 ≈ 3s 信道时间** —— 等于把 16 B/s 的窄带信道占了约六成,会拖慢
+      真正要翻译的消息。已删除周期探测,改为"状态由真实流量推导 + 打开面板时探一次"。
+  - `docs/OPTIMIZATION_LOG.md` / `CHANGELOG.md` / `AGENTS.md` 同步。
+- **原因/效果**: 这一轮的主要价值是**把不可观测变可观测** —— 下次测试无论卡在哪一步,
+  日志都能直接指出来(命令是否到达 → 面板是否找到 → 是否真的可见 → 保存是否发出)。
+  另外修掉了健康探测占用六成信道的问题。
+- **验证方式**: `node --check` 通过;`build.ps1` 编译 7 个资源全 `ok`;12 套测试 + 模拟器全绿;
+  已部署 `addons\pak22_dir.vpk` = **316579 字节**(备份 `pak22_dir.vpk.bak-paneldbg-*`)。
+- **仍需用户测试**(这次请按顺序做,任一步不符就把 `logs\bridge.log` 留给我):
+  ①输入 `!tr` 回车 → 日志应出现 `cmd: !tr -> toggle settings panel` + `settings toggle: open`
+  + `settings: opened vis=visible saveBtn=yes inChat=yes`;
+  ②若 `!tr` 也无效,点聊天输入框右侧的「译」按钮(独立于输入框提交路径)再试;
+  ③面板打开后点任意开关 → 日志应出现 `toggle: <name>`;点保存 → 应出现 `save clicked`
+  + `settings saved`,且桥端出现 `BTIPC TRQ ... op=config`。
+- **已知限制**: 面板改动需要重建 VPK 并**重启游戏**才生效(布局与脚本都打进 pak);
+  若 `/` 前缀确实被引擎吃掉,`/tr` 将始终无效,以 `!tr` 或「译」按钮为准。

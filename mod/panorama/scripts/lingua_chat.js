@@ -5482,9 +5482,12 @@ function injectTranslation(row, sig, text) {
     const trimmed = String(raw).trim();
     if (!trimmed) return;
 
-    // /tr:打开游戏内设置面板(不发送)。面板标记在 chat.xml,逻辑见「设置面板」一节。
-    // BTIPC 打通后这条命令恢复可用(此前面板的死通道存不了任何设置,故被摘掉)。
-    if (trimmed === "/tr") {
+    // 设置面板开关。同时支持 /tr、!tr、.tr 三种前缀:
+    // `/` 开头的输入可能被引擎当成控制台命令吃掉(那样根本走不到 oninputsubmit),
+    // 所以给一个 `!` 前缀的等价入口(`!lcttest` 用的就是它,一直可用)。
+    const cmd = trimmed.toLowerCase();
+    if (cmd === "/tr" || cmd === "!tr" || cmd === ".tr") {
+      log("cmd: " + cmd + " -> toggle settings panel");
       LCTToggleSettings();
       clearInput();
       return;
@@ -5702,13 +5705,25 @@ function injectTranslation(row, sig, text) {
 
   function openSettingsPanel() {
     const panel = findChild(getRoot(), SETTINGS_PANEL_ID);
-    if (!panel) return;
+    if (!panel) {
+      // 面板标记在 chat.xml。找不到通常意味着布局没生效 —— 改完 chat.xml 必须重建 VPK 并重启游戏
+      log("settings: panel NOT FOUND (chat.xml 未生效?)");
+      return;
+    }
     try {
       panel.AddClass(SETTINGS_VISIBLE_CLASS);
     } catch (e) {}
     try {
       if (typeof panel.SetHasClass === "function") panel.SetHasClass(SETTINGS_VISIBLE_CLASS, true);
     } catch (e) {}
+    // 可见性与子控件是否就位都记一行 —— 否则"面板打不开/点了没反应"完全无法从日志判断
+    let vis = "?";
+    try { vis = String(panel.style.visibility); } catch (e) {}
+    let saveBtn = false;
+    try { saveBtn = !!findChild(panel, "LCTSaveBtn"); } catch (e) {}
+    let insideChat = false;
+    try { insideChat = !!panel.BAscendantHasClass("CitadelChat"); } catch (e) {}
+    log("settings: opened vis=" + vis + " saveBtn=" + (saveBtn ? "yes" : "no") + " inChat=" + (insideChat ? "yes" : "no"));
     syncPanelFromConfig();
     // 面板直接吃内存里的 State.cfg —— **不**在打开时向桥读配置:
     // `op=config` 的应答 1313 字节 = 132 帧,超过协议 128 帧(1280B)上限,走位信道收不到。
@@ -5746,9 +5761,16 @@ function injectTranslation(row, sig, text) {
     dropInputFocus();
   }
 
+  // 防重:XML 的 onactivate 若与其它绑定同时命中,会"开了又关",从日志上也看不出开过
+  let lastSettingsToggleAt = 0;
   function LCTToggleSettings() {
+    const now = nowMs();
+    if (lastSettingsToggleAt && now - lastSettingsToggleAt < 300) return;
+    lastSettingsToggleAt = now;
     const panel = findChild(getRoot(), SETTINGS_PANEL_ID);
-    if (panel && hasClass(panel, SETTINGS_VISIBLE_CLASS)) closeSettingsPanel();
+    const open = !!(panel && hasClass(panel, SETTINGS_VISIBLE_CLASS));
+    log("settings toggle: " + (open ? "close" : "open"));
+    if (open) closeSettingsPanel();
     else openSettingsPanel();
   }
 
@@ -6235,11 +6257,9 @@ function injectTranslation(row, sig, text) {
     $.Schedule(PROFILE_LOOP_SECONDS, scanProfileCardsLoop);
     // 场景侦察:启动后一次性 dump 顶栏/HUD/ESC 关键子树(定位玩家条目创建位置)
     $.Schedule(6.0, reconScene);
-    // 桥健康探测(每 5 秒;与翻译请求共用串行队列,量极小不影响翻译)
-    $.Schedule(2.0, function healthLoop() {
-      healthCheck();
-      $.Schedule(5.0, healthLoop);
-    });
+    // 桥状态不再周期性探测:一次 op=health 要占 5 帧(≈3s 信道时间),5 秒一轮等于把窄带
+    // 信道占了六成,会拖慢真正要翻译的消息。现在状态由真实流量的结果推导
+    // (见 BTIPC 的 settleOk/settleFail),只在"打开设置面板"时主动探一次。
     // 日志缓冲兜底冲刷(每 8 秒;确保不丢最后一小批)
     $.Schedule(8.0, function logLoop() {
       flushChatLog();
