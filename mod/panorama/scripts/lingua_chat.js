@@ -1,4 +1,4 @@
-﻿// Babel Tower - Deadlock 聊天翻译 Panorama 脚本
+// Babel Tower - Deadlock 聊天翻译 Panorama 脚本
 // ------------------------------------------------------------------
 // 独立实现(不复制任何现有 mod 代码),技术路线与 DLCT 一致:
 //   扫描聊天行 -> 去重 -> 隐藏 HTML 面板桥接本地 Core -> 原文下方追加译文
@@ -3027,8 +3027,9 @@ function resolveSteamId(record) {
     const prev = _diagKeys.get(key);
     if (key && prev && now - prev < DIAG_THROTTLE_MS) return;
     _diagKeys.set(key, now);
+    // 只走 console.log:桥端 tail 会把它写进 bridge.log(格式与旧 /api/v1/diag 一致)。
+    // 刻意不再走 BTIPC —— 位信道是 10 字节/轮,一条诊断要好几秒,会把单槽翻译队列堵死。
     try { $.Msg(LOG_PREFIX + " [diag] " + msg); } catch (e) {}
-    try { bridgePost("diag", { msg: String(msg || "").slice(0, 600) }, function () {}); } catch (e) {}
   }
   // 仅执行一次的诊断日志(无节流)
   const _diagOnceKeys = new Set();
@@ -3036,7 +3037,6 @@ function resolveSteamId(record) {
     if (_diagOnceKeys.has(key)) return;
     _diagOnceKeys.add(key);
     try { $.Msg(LOG_PREFIX + " [diag] " + msg); } catch (e) {}
-    try { bridgePost("diag", { msg: String(msg || "").slice(0, 600) }, function () {}); } catch (e) {}
   }
 
   // ================= 悬浮窗出站通道(console.log) =================
@@ -3441,20 +3441,32 @@ function injectTranslation(row, sig, text) {
   }
 
   function enqueueBridge(op, data, done) {
-    State.queue.push({ kind: "bridge", op: op, data: data, row: null, sig: null, attempts: 0, done: done });
+    State.queue.push({ kind: "bridge", op: op, data: data, row: null, sig: null, attempts: 0, done: done, enqueuedAt: nowMs() });
     pumpQueue();
   }
+
+  // bridge 任务的最长让位时间:连续聊天时不能让配置/身份上报永远排不上队
+  const BRIDGE_STARVE_MS = 10000;
 
   function pumpQueue() {
     while (State.queue.length > 0 && State.activeRequests < MAX_ACTIVE_REQUESTS) {
       let readyIndex = -1;
+      // bridge(config / 身份 / health)让位给 chat 与 outgoing:BTIPC 一次传输要好几秒,
+      // 若让 bridge 先占住单槽,用户消息会明显卡顿甚至排队超时按原文发。
+      let bridgeIndex = -1;
       for (let i = 0; i < State.queue.length; i += 1) {
         const job = State.queue[i];
-        if (!job.retryAt || nowMs() >= job.retryAt) {
-          readyIndex = i;
-          break;
+        if (job.retryAt && nowMs() < job.retryAt) continue;
+        if (job.kind === "bridge") {
+          if (bridgeIndex === -1) bridgeIndex = i;
+          // 让位太久(连续聊天)则放行,避免饿死
+          if (nowMs() - (job.enqueuedAt || 0) > BRIDGE_STARVE_MS) { readyIndex = i; break; }
+          continue;
         }
+        readyIndex = i;
+        break;
       }
+      if (readyIndex === -1) readyIndex = bridgeIndex;
       if (readyIndex === -1) break;
       const job = State.queue.splice(readyIndex, 1)[0];
       State.activeRequests += 1;
@@ -3740,23 +3752,523 @@ function injectTranslation(row, sig, text) {
     }
   }
 
-  function dispatchJob(job) {
-    const panel = ensurePanel();
-    const canHttp = detectAsyncWebRequest();
-    if (!panel && !canHttp) {
-      // 出站/桥任务不重试:通道不可用立即回传失败(出站则发原文),避免拖延用户发消息
+  // ================= BTIPC:唯一的双向通道 =================
+  // 协议规格见 docs/btipc-v1.md。不依赖任何 HTTP API:
+  //   上行 = console.log 里一行 "[LCT] BTIPC REQ w=.. id=.. len=.. crc=.. b64=.."
+  //   下行 = 128 个隐藏 Image 面板逐轮 SetImage("/btipc/dl?...");桥按位回 200(有 PNG)/ 404(空体),
+  //          只有 200 会触发 ImageLoaded —— 引擎的图片加载就是那个"入站原语"。
+  // 分层铁律:业务代码 -> BTIPC API -> 面板位传输;业务侧禁止直接拼 /btipc URL。
+  // BTIPC 单次请求的总超时:要覆盖慢 provider(0.5~2s)+ 风暴期慢闭合,故远大于单轮 T_CLOSE。
+  // 定义在外层,游戏侧业务侧(dispatchViaBtipc)与 BTIPC 内部共用同一个值。
+  const BTIPC_REQ_TIMEOUT_MS = 30000;
+
+  const BTIPC = (function () {
+    const PANEL_COUNT = 128; // 16 字节 x 8
+    const FRAME_BYTES = 16;
+    const PAYLOAD_PER_FRAME = 10;
+    const PANEL_PREFIX = "BTIPCD";
+    const MAX_PAYLOAD = 680; // UTF-8 字节上限(受 console.log 整行 <=1000 约束)
+    const T_CLOSE_MS = 600; // 单轮闭合窗口(实测 P99.9)
+    const STORM_T_CLOSE_MS = 2500; // 风暴期宽闭合
+    const STORM_TRIGGER = 2; // 连续 CRC fail 轮数 -> 进风暴
+    const STORM_ROUNDS = 4; // 风暴持续轮数
+    const T_HARD_MS = 12000; // 单轮硬超时(兜底,正常永远走不到)
+    const CRC_DEAD = 8; // 同一帧累计 fail 上限
+    const BUSY_BACKOFF_MS = 500;
+    const INITIAL_SHOT_DELAY_MS = 1200; // 等桥的 console.log tail(1s 间隔)读到 REQ 行
+    const B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+    let panels = [];
+    let transfer = null; // 当前在途传输(同一时刻仅一个)
+
+    // ---- CRC-16/CCITT-FALSE(poly 0x1021 / init 0xFFFF) ----
+    // 与桥端 core/btipc/crc16.js 逐字节一致;两侧改动必须同步。
+    function crc16(arr) {
+      let crc = 0xffff;
+      for (let i = 0; i < arr.length; i += 1) {
+        crc = (crc ^ ((arr[i] & 0xff) << 8)) & 0xffff;
+        for (let b = 0; b < 8; b += 1) {
+          if (crc & 0x8000) crc = ((crc << 1) ^ 0x1021) & 0xffff;
+          else crc = (crc << 1) & 0xffff;
+        }
+      }
+      return crc & 0xffff;
+    }
+
+    function hex(n, width) {
+      let s = (n >>> 0).toString(16);
+      while (s.length < width) s = "0" + s;
+      return s.slice(-width) || "0";
+    }
+
+    // ---- UTF-8(用普通数组,不依赖 TypedArray) ----
+    function utf8Encode(str) {
+      const out = [];
+      const s = String(str || "");
+      for (let i = 0; i < s.length; i += 1) {
+        const c = s.charCodeAt(i);
+        if (c < 0x80) {
+          out.push(c);
+        } else if (c < 0x800) {
+          out.push(0xc0 | (c >> 6), 0x80 | (c & 0x3f));
+        } else if (c >= 0xd800 && c <= 0xdbff && i + 1 < s.length) {
+          const c2 = s.charCodeAt(i + 1);
+          if (c2 >= 0xdc00 && c2 <= 0xdfff) {
+            const cp = 0x10000 + ((c - 0xd800) << 10) + (c2 - 0xdc00);
+            out.push(0xf0 | (cp >> 18), 0x80 | ((cp >> 12) & 0x3f), 0x80 | ((cp >> 6) & 0x3f), 0x80 | (cp & 0x3f));
+            i += 1;
+          } else {
+            out.push(0xe0 | (c >> 12), 0x80 | ((c >> 6) & 0x3f), 0x80 | (c & 0x3f));
+          }
+        } else {
+          out.push(0xe0 | (c >> 12), 0x80 | ((c >> 6) & 0x3f), 0x80 | (c & 0x3f));
+        }
+      }
+      return out;
+    }
+
+    function utf8Decode(bytes) {
+      let out = "";
+      let i = 0;
+      const n = bytes.length;
+      while (i < n) {
+        const b = bytes[i];
+        let cp = 0;
+        let extra = 0;
+        if (b < 0x80) { cp = b; extra = 0; }
+        else if ((b & 0xe0) === 0xc0) { cp = b & 0x1f; extra = 1; }
+        else if ((b & 0xf0) === 0xe0) { cp = b & 0x0f; extra = 2; }
+        else if ((b & 0xf8) === 0xf0) { cp = b & 0x07; extra = 3; }
+        else { i += 1; continue; }
+        if (i + extra >= n) break;
+        let bad = false;
+        for (let k = 1; k <= extra; k += 1) {
+          const cb = bytes[i + k];
+          if ((cb & 0xc0) !== 0x80) { bad = true; break; }
+          cp = (cp << 6) | (cb & 0x3f);
+        }
+        if (bad) { i += 1; continue; }
+        if (cp > 0xffff) {
+          const v = cp - 0x10000;
+          out += String.fromCharCode(0xd800 + (v >> 10), 0xdc00 + (v & 0x3ff));
+        } else {
+          out += String.fromCharCode(cp);
+        }
+        i += extra + 1;
+      }
+      return out;
+    }
+
+    function b64Encode(bytes) {
+      let out = "";
+      for (let i = 0; i < bytes.length; i += 3) {
+        const has1 = i + 1 < bytes.length;
+        const has2 = i + 2 < bytes.length;
+        const b0 = bytes[i];
+        const b1 = has1 ? bytes[i + 1] : 0;
+        const b2 = has2 ? bytes[i + 2] : 0;
+        out += B64.charAt(b0 >> 2);
+        out += B64.charAt(((b0 & 3) << 4) | (b1 >> 4));
+        out += has1 ? B64.charAt(((b1 & 15) << 2) | (b2 >> 6)) : "=";
+        out += has2 ? B64.charAt(b2 & 63) : "=";
+      }
+      return out;
+    }
+
+    // ---- 位 <-> 帧(面板 p 携带全局第 p 位,LSB 在前) ----
+    function frameFromBits(bits) {
+      const bytes = [];
+      for (let k = 0; k < FRAME_BYTES; k += 1) {
+        let v = 0;
+        for (let b = 0; b < 8; b += 1) {
+          if (bits[k * 8 + b]) v |= 1 << b;
+        }
+        bytes.push(v);
+      }
+      return bytes;
+    }
+
+    // CRC 输入 = B0..B3 + B6..B15 = 固定 14 字节(不含 CRC 自身)
+    function decodeFrame(bytes) {
+      const b0 = bytes[0];
+      const b3 = bytes[3];
+      const inp = [bytes[0], bytes[1], bytes[2], bytes[3]];
+      for (let i = 6; i < FRAME_BYTES; i += 1) inp.push(bytes[i]);
+      const want = ((bytes[4] & 0xff) << 8) | (bytes[5] & 0xff);
+      const got = crc16(inp);
+      const len = b3 & 0x7f;
+      return {
+        crcOk: want === got,
+        end: (b0 & 0x80) !== 0,
+        seq: b0 & 0x7f,
+        valid: (b3 & 0x80) !== 0,
+        len: len,
+        lenOk: len <= PAYLOAD_PER_FRAME,
+        payload: bytes.slice(6, FRAME_BYTES),
+      };
+    }
+
+    // ---- 面板 ----
+    function panelIndexFromArg(arg) {
+      if (arg === null || arg === undefined) return -1;
+      for (let i = 0; i < panels.length; i += 1) {
+        if (panels[i] && panels[i] === arg) return i;
+      }
+      // 有些版本回传的是面板 id 字符串/带 id 的对象,退化按后缀解析
+      let id = "";
+      try { id = String(arg.id || arg); } catch (e) { id = ""; }
+      if (id.indexOf(PANEL_PREFIX) === 0) {
+        const n = parseInt(id.slice(PANEL_PREFIX.length), 10);
+        if (!isNaN(n) && n >= 0 && n < PANEL_COUNT) return n;
+      }
+      return -1;
+    }
+
+    // bit = 1 的唯一符号:桥回 200 时引擎会 fire 这个事件
+    function onImageLoaded(arg) {
+      const t = transfer;
+      if (!t || t.done) return;
+      const idx = panelIndexFromArg(arg);
+      if (idx < 0) return;
+      t.fired[idx] = 1;
+    }
+
+    function ensurePanels() {
+      if (panels.length === PANEL_COUNT && isValid(panels[0])) return true;
+      const root = getRoot();
+      if (!root) return false;
+      const made = [];
+      for (let i = 0; i < PANEL_COUNT; i += 1) {
+        let p = null;
+        try { p = $.CreatePanel("Image", root, PANEL_PREFIX + i); } catch (e) { p = null; }
+        if (!isValid(p)) return false;
+        // 引擎只为"真的会被渲染"的面板发起图片加载:必须留可见尺寸,不能用 visibility:collapse
+        try {
+          p.style.width = "2px";
+          p.style.height = "2px";
+          p.style.opacity = "0.01";
+          p.style.position = "0px 0px 0px";
+        } catch (e) {}
+        try {
+          // 事件白名单里的 ImageLoaded;RegisterEventHandler 恰好 3 参,第 2 参可传面板对象
+          $.RegisterEventHandler("ImageLoaded", p, onImageLoaded);
+        } catch (e) {}
+        made.push(p);
+      }
+      panels = made;
+      log("BTIPC panels ready (" + PANEL_COUNT + ")");
+      return true;
+    }
+
+    // ---- REQ 行上行 ----
+    function sendReq(t) {
+      const bytes = utf8Encode(t.text);
+      const line = "[LCT] BTIPC REQ w=" + t.win +
+        " id=" + t.idHex +
+        " len=" + bytes.length +
+        " crc=" + hex(crc16(bytes), 4) +
+        " b64=" + b64Encode(bytes);
+      try { $.Msg(line); } catch (e) {}
+    }
+
+    // ---- 轮次 ----
+    function shootAll(t) {
+      const url = "http://" + BRIDGE_HOST + ":" + BRIDGE_PORT + "/btipc/dl" +
+        "?w=" + t.win + "&r=" + t.round;
+      for (let i = 0; i < PANEL_COUNT; i += 1) {
+        const p = panels[i];
+        if (!isValid(p)) continue;
+        // t 必须每次 SHOT 都不同:同一个 URL 撞引擎缓存后不再触发 ImageLoaded,
+        // 会让"同轮重投"变成必然失败(实测过 frameFails 1->9 的死循环)。
+        const u = url + "&p=" + i + "&t=" + t.win + "-" + t.idHex + "-" + t.round + "-" + t.shotSeq;
+        try { p.SetImage(u); } catch (e) {}
+      }
+    }
+
+    function startRound() {
+      const t = transfer;
+      if (!t || t.done) return;
+      t.shotSeq += 1;
+      t.fired = [];
+      t.roundClosed = false;
+      t.shotAt = nowMs();
+      const wide = t.stormLeft > 0;
+      if (wide) t.stormLeft -= 1;
+      const tcl = wide ? STORM_T_CLOSE_MS : T_CLOSE_MS;
+      shootAll(t);
+      const r = t.round;
+      try {
+        $.Schedule(tcl / 1000, function () { closeRound(r); });
+      } catch (e) {}
+      // T_HARD 兜底:即便 T_CLOSE 定时器没能跑起来也必须闭合,绝不无限等
+      try {
+        $.Schedule(T_HARD_MS / 1000, function () { closeRound(r); });
+      } catch (e) {}
+    }
+
+    function assembleAndSettle() {
+      const t = transfer;
+      if (!t || t.done) return;
+      const out = [];
+      let last = -1;
+      for (let i = 0; i < t.frames.length; i += 1) {
+        if (t.frames[i]) last = i;
+      }
+      for (let i = 0; i <= last; i += 1) {
+        const f = t.frames[i];
+        if (!f) continue;
+        const take = Math.min(f.len, PAYLOAD_PER_FRAME);
+        for (let k = 0; k < take; k += 1) out.push(f.payload[k]);
+      }
+      settleOk(utf8Decode(out));
+    }
+
+    function closeRound(r) {
+      const t = transfer;
+      if (!t || t.done || t.round !== r || t.roundClosed) return; // 过期定时器
+      t.roundClosed = true;
+
+      const bytes = frameFromBits(t.fired);
+      const parsed = decodeFrame(bytes);
+
+      // 全 0 轮 = 该窗口在桥端根本不存在(桥没收到 REQ,或桥没在跑)。
+      // 这一判据可靠:合法的 BUSY 帧带了 request_id 与 CRC 位,绝不可能是全 0。
+      // 目的:桥不在时不要耗满 CRC_DEAD(8 轮 + 风暴 ≈ 13s)把单槽队列堵死。
+      let allZero = true;
+      for (let i = 0; i < FRAME_BYTES; i += 1) {
+        if (bytes[i] !== 0) { allZero = false; break; }
+      }
+      if (allZero) {
+        // 4 轮余量:首轮要覆盖"桥的 tail(800ms 间隔)还没读到 REQ 行"的窗口期
+        t.zeroRounds = (t.zeroRounds || 0) + 1;
+        if (t.zeroRounds >= 4) {
+          settleFail({ kind: "bridge_down", message: "连续 " + t.zeroRounds + " 轮全 0(桥无此窗口)" });
+          return;
+        }
+      } else {
+        t.zeroRounds = 0;
+      }
+
+      // CRC 覆盖 seq/id/VALID/LEN,所以这一步同时排除了轮次错位与位丢失
+      if (!parsed.crcOk || !parsed.lenOk) {
+        t.frameFails += 1;
+        t.stormFails += 1;
+        if (t.stormFails >= STORM_TRIGGER && t.stormLeft <= 0) t.stormLeft = STORM_ROUNDS;
+        if (t.frameFails > CRC_DEAD) {
+          settleFail({ kind: "crc_dead", message: "CRC fail x" + t.frameFails });
+          return;
+        }
+        log("BTIPC: r=" + r + " seq=-1 RETRY (" + t.frameFails + ")");
+        startRound(); // 同 r 重投,桥端幂等重发同帧
+        return;
+      }
+      t.frameFails = 0;
+      t.stormFails = 0;
+
+      if (!parsed.valid) {
+        // BUSY:翻译还没好。退避后推进轮次(与"收到数据帧"共用同一条时间线)
+        log("BTIPC: r=" + r + " BUSY");
+        try {
+          $.Schedule(BUSY_BACKOFF_MS / 1000, function () {
+            const cur = transfer;
+            if (!cur || cur.done || cur.round !== r) return;
+            cur.round = r + 1;
+            startRound();
+          });
+        } catch (e) {}
+        return;
+      }
+
+      const dt = nowMs() - t.shotAt;
+      log("BTIPC: r=" + r + " seq=" + parsed.seq + " len=" + parsed.len + " dt=" + dt +
+        (parsed.end ? " END" : " OK"));
+      t.frames[parsed.seq] = parsed;
+      if (parsed.end) {
+        assembleAndSettle();
+        return;
+      }
+      t.round = r + 1;
+      startRound();
+    }
+
+    function settleOk(text) {
+      const t = transfer;
+      if (!t || t.done) return;
+      t.done = true;
+      transfer = null;
+      log("BTIPC: DONE w=" + t.win + " bytes=" + utf8Encode(text).length + " total=" + (nowMs() - t.startedAt) + "ms");
+      try { t.onDone(text); } catch (e) {}
+    }
+
+    function settleFail(err) {
+      const t = transfer;
+      if (!t || t.done) return;
+      t.done = true;
+      transfer = null;
+      log("BTIPC: FAIL w=" + t.win + " kind=" + ((err && err.kind) || "unknown"));
+      try { t.onFail(err || { kind: "unknown", message: "" }); } catch (e) {}
+    }
+
+    // ---- 对外 API ----
+    // request(text, { timeoutMs, onDone(text), onFail({kind,message}) }) -> bool
+    // 返回 false 表示同步拒绝(onFail 已经回调过)。
+    function request(text, opts) {
+      const o = opts || {};
+      const onDone = typeof o.onDone === "function" ? o.onDone : function () {};
+      const onFail = typeof o.onFail === "function" ? o.onFail : function () {};
+      if (transfer && !transfer.done) {
+        onFail({ kind: "busy", message: "已有在途传输" });
+        return false;
+      }
+      const payload = utf8Encode(String(text === null || text === undefined ? "" : text));
+      if (payload.length > MAX_PAYLOAD) {
+        onFail({ kind: "too_long", message: payload.length + " > " + MAX_PAYLOAD });
+        return false;
+      }
+      if (!ensurePanels()) {
+        onFail({ kind: "bridge_down", message: "无法创建轮询面板" });
+        return false;
+      }
+      const now = nowMs();
+      const timeoutMs = o.timeoutMs || BTIPC_REQ_TIMEOUT_MS;
+      const t = {
+        win: hex(now & 0xffffff, 6),
+        idHex: hex(now & 0xffff, 4),
+        text: String(text === null || text === undefined ? "" : text),
+        startedAt: now,
+        round: 1,
+        shotSeq: 0,
+        frames: [],
+        fired: [],
+        roundClosed: false,
+        shotAt: now,
+        frameFails: 0,
+        stormFails: 0,
+        stormLeft: 0,
+        done: false,
+        onDone: onDone,
+        onFail: onFail,
+      };
+      transfer = t;
+      log("BTIPC: REQ w=" + t.win + " id=" + t.idHex + " bytes=" + payload.length);
+      sendReq(t);
+      // 首拍延迟:桥的 tail 间隔 1s,REQ 行可能晚于首拍到达 -> 首轮全 404 会误触风暴
+      try {
+        $.Schedule(INITIAL_SHOT_DELAY_MS / 1000, function () {
+          if (transfer === t && !t.done) startRound();
+        });
+      } catch (e) {}
+      try {
+        $.Schedule(timeoutMs / 1000, function () {
+          if (transfer === t && !t.done) settleFail({ kind: "timeout", message: "REQ 超时" });
+        });
+      } catch (e) {}
+      return true;
+    }
+
+    function cancel() {
+      const t = transfer;
+      if (!t || t.done) return;
+      settleFail({ kind: "cancelled", message: "已取消" });
+    }
+
+    function busy() {
+      return !!(transfer && !transfer.done);
+    }
+
+    // 测试/诊断用
+    function _state() {
+      return { panels: panels.length, busy: busy(), round: transfer ? transfer.round : 0 };
+    }
+    function _reset() {
+      transfer = null;
+      panels = [];
+    }
+
+    return {
+      request: request,
+      cancel: cancel,
+      busy: busy,
+      _state: _state,
+      _reset: _reset,
+      crc16: crc16,
+      utf8Encode: utf8Encode,
+      utf8Decode: utf8Decode,
+      b64Encode: b64Encode,
+      decodeFrame: decodeFrame,
+      frameFromBits: frameFromBits,
+      onImageLoaded: onImageLoaded,
+    };
+  })();
+
+  // BTIPC 上行信封(见 docs/btipc-v1.md 4.1)
+  //   translate  -> "t=<target>\n<原文>"
+  //   bridge op  -> "op=<op>\n<JSON>"
+  // 目标语言不在安全字符集时不发信封,整条按裸文本(桥用默认目标语言,总比译反方向好)。
+  function btipcEnvelope(job) {
+    if (job.kind === "bridge") {
+      // job.data 是 bridgePost 里 encodeURIComponent(JSON.stringify(...)) 的产物
+      // (旧通道把 payload 塞在 GET 的 query 里,必须编码)。BTIPC 传的是原始字节,
+      // 所以这里必须先解码,否则桥端的 JSON.parse 一定失败。
+      let body = String(job.data === undefined || job.data === null ? "{}" : job.data);
+      try {
+        if (typeof decodeURIComponent === "function") body = decodeURIComponent(body);
+      } catch (e) {}
+      return "op=" + job.op + "\n" + body;
+    }
+    const target = String(job.kind === "outgoing" ? resolveOutgoingTarget() : targetLanguage());
+    if (/^[A-Za-z0-9-]{1,16}$/.test(target)) return "t=" + target + "\n" + job.record.text;
+    return String(job.record.text);
+  }
+
+  // BTIPC 分发:成功走统一出口 handleBridgePayload,失败按 job 类型降级
+  function dispatchViaBtipc(job) {
+    // 失败统一收口。绝不能把 job 悬着:队列是单槽的(MAX_ACTIVE_REQUESTS=1),
+    // 悬住一个后续消息就全部停摆(实测踩过:dispatchJob 抛异常被扫描循环吞掉)。
+    function settleFailure(kind, message) {
+      log("btipc fail (" + kind + "): " + String(message || ""));
       if (job.kind === "outgoing") {
+        // 与超时回调同一约定:done 只允许触发一次
+        if (job._timedOut) return;
+        if (job._timeout) { try { clearTimeout(job._timeout); } catch (e) {} job._timeout = null; }
         job.done(null, null);
         finishJob();
       } else if (job.kind === "bridge") {
-        job.done({ ok: false, error: "bridge_panel_unavailable" });
+        job.done({ ok: false, error: "btipc_" + kind });
         finishJob();
       } else {
-        failJob(job, "bridge_panel_unavailable");
+        failJob(job, "btipc_" + kind);
       }
-      return;
     }
-    ensureBridgeEvents();
+
+    try {
+      const text = btipcEnvelope(job);
+      const isOutgoing = job.kind === "outgoing";
+      const timeoutMs = isOutgoing
+        ? outgoingTimeoutMs()
+        : (State.cfg.timeoutMs || 15000) + BTIPC_REQ_TIMEOUT_MS;
+      BTIPC.request(text, {
+        timeoutMs: timeoutMs,
+        onDone: function (reply) {
+          if (job.kind === "bridge") {
+            let payload = null;
+            try { payload = JSON.parse(reply); } catch (e) { payload = null; }
+            handleBridgePayload(job, payload || { ok: false, error: "bad_bridge_payload" });
+            return;
+          }
+          // 译文:桥侧翻译失败时会降级回原文(无法与"原文恰好等于译文"区分),统一按成功交付
+          handleBridgePayload(job, { ok: true, translation: reply, detectedLanguage: null });
+        },
+        onFail: function (err) {
+          settleFailure((err && err.kind) || "unknown", (err && err.message) || "");
+        },
+      });
+    } catch (e) {
+      settleFailure("dispatch_threw", (e && e.message) || String(e));
+    }
+  }
+
+  function dispatchJob(job) {
     // 出站翻译排队超过 15s 未轮到(队列被其他请求占满)直接发原文,避免输入卡死
     if (job.kind === "outgoing" && job.enqueuedAt && nowMs() - job.enqueuedAt > 25000) {
       job.done(null, null);
@@ -3791,27 +4303,10 @@ function injectTranslation(row, sig, text) {
         } catch (e) {}
       }
     }
-    // 优先:AsyncWebRequest 直连本地桥(可用时最快;每条请求独立,无导航竞争)
-    if (canHttp) {
-      const apiUrl = buildApiUrl(job);
-      const panelForFallback = panel;
-      httpGetJson(apiUrl, function (payload) {
-        if (job.kind === "outgoing" && job._timedOut) return;
-        // 直连传输失败(引擎移除 AsyncWebRequest 等):切换到 HTML 面板通道重试
-        if (payload && !payload.ok && isTransportError(payload.error) && State.canHttp) {
-          State.canHttp = false;
-          log("direct transport failed (" + payload.error + "); switching to HTML panel channel");
-          if (isValid(panelForFallback)) {
-            dispatchViaPanel(job);
-            return;
-          }
-        }
-        handleBridgePayload(job, payload);
-      }, jobTimeoutMs(job));
-      return;
-    }
-    // fallback:HTML 面板导航(AsyncWebRequest 被移除的版本走这里)
-    dispatchViaPanel(job);
+    // 唯一通道:BTIPC。
+    // 2026/10/01 的更新之后,AsyncWebRequest 调用即抛、HTML 面板也不再创建浏览器实例,
+    // ② 直连与 ③ 面板导航两条老通道都已失效(它们的实现仍留在文件里,但不再参与分发)。
+    dispatchViaBtipc(job);
   }
 
   // ================= 统一桥请求状态机 =================
@@ -4109,6 +4604,9 @@ function injectTranslation(row, sig, text) {
     for (let i = 0; i < CHANNEL_GONE_ERRORS.length; i++) {
       if (e === CHANNEL_GONE_ERRORS[i]) return true;
     }
+    // BTIPC 的失败一律是"桥那一侧不在"(通道本身没坏,坏的是对端):
+    // 出站按原文发送、聊天行不挂红标(译文仍由游戏外悬浮窗兜底展示)。
+    if (e.indexOf("btipc_") === 0) return true;
     return false;
   }
 
@@ -4493,16 +4991,11 @@ function injectTranslation(row, sig, text) {
     });
     const lines = State.logBuffer.splice(0, 50);
     if (!lines.length) return;
-    bridgePost("log", { matchId: getMatchId(), lines: lines }, function (res) {
-      if (res && !res.ok) {
-        // 失败重放一次,避免丢日志;仍失败则丢弃(不阻塞翻译)
-        if (lines.length && !State.logBuffer.__retried) {
-          State.logBuffer.__retried = true;
-          State.logBuffer.unshift.apply(State.logBuffer, lines.slice(0, 20));
-          $.Schedule(5.0, flushChatLog);
-        }
-      }
-    });
+    // 刻意**不再**把这些消息记录 POST 给桥:桥端已经从 [LCT-CHAT] 通道(tail console.log)
+    // 把每条聊天写进 logs/chat 了,这里的内容完全重复。而 BTIPC 位信道是 10 字节/轮,
+    // 一条消息(~200B)要 20 帧 ≈ 13s —— 挂在单槽队列上会把翻译彻底饿死(实测踩过)。
+    // 身份/roster 记录仍走 bridgePost("log")(见 probeSteamIdRoster 附近):
+    // 那些字段 [LCT-CHAT] 带不了,且频率很低。
   }
 
   // ---- 桥健康探测(定时 ping,断线后状态栏提示 + 恢复后自动清错) ----
@@ -5183,96 +5676,24 @@ function injectTranslation(row, sig, text) {
     }
   }
 
-  // ================= 入站通道探针(一次性) =================
-  // 目的: 决定性回答"游戏内还能不能收到外部数据"。
-  // 已排除的: $.AsyncWebRequest(调用即抛)、引擎命名空间(Game/Players/GameInterfaceAPI/
-  //   GameUI/Citadel... 实测 present=(none))、globalThis 上仅 5 个引擎全局、
-  //   $. 的 29 个成员里没有任何"读文件/读剪贴板/执行控制台命令"的原语。
-  // 唯一没被严格验证过的是: HTML 面板究竟有没有拿到 CEF 浏览器实例。
-  // 之前"SetURL 不报错但 title 永远 undefined"的结论是用 data: URL 测的, 属于间接证据;
-  // 这里直接 SetURL 到**桥的真实 http 地址** —— 只要 CEF 还活着, 桥端 logs/bridge.log
-  // 必然出现一条 [panel] /bridge load, 这是无法伪造的证据。
-  const INBOUND_PROBE_PANEL_ID = "LCTInboundProbePanel";
-
+  // ================= 入站通道自检(轻量 canary) =================
+  // 历史:这里曾是一次性的「入站通道探针」—— 用运行时创建的 <HTML> 面板 + SetURL 判断
+  // 游戏内还能不能收到外部数据,并据此写下「游戏内不存在任何可用的入站通道」的结论。
+  // 那个结论是错的:探针只覆盖了「Panorama JS 能主动发起」这一类入口
+  // (AsyncWebRequest / 面板 SetURL / 剪贴板 / BImageFileExists),漏了
+  // 「引擎为了渲染会自己去取什么」—— 真正的入站通道是 Image 面板的加载状态(BTIPC)。
+  // 它还带两个副作用:每次启动都建一个「真会被渲染」的 HTML 面板;以及探不到 Image 位信道
+  // 却给出否定答案。现已退役,只留一行 $ 成员表(廉价、零副作用),便于将来发现引擎 API 变化。
   function probeInboundChannels() {
     try {
       const dk = Object.keys($);
       diagOnce("inbound-dollar", "$ keys(" + dk.length + ")=" + dk.join(","));
     } catch (e) {}
-
-    // BImageFileExists 是唯一一个"能查询游戏之外状态"的原语。若它能看见 addons 目录下
-    // 由桥创建/删除的文件, 理论上可当 1bit 的入站信道(代价极高, 仅作最后手段评估)。
-    const imgForms = [
-      "lctprobe_yes.png",
-      "citadel/addons/lctprobe_yes.png",
-      "file://{game}/citadel/addons/lctprobe_yes.png",
-    ];
-    for (let i = 0; i < imgForms.length; i += 1) {
-      const yes = imgForms[i];
-      const no = yes.replace("yes", "no");
-      let a = "?"; let b = "?";
-      try { a = String($.BImageFileExists(yes)); } catch (e) { a = "THREW"; }
-      try { b = String($.BImageFileExists(no)); } catch (e) { b = "THREW"; }
-      diagOnce("inbound-img-" + i, "BImageFileExists yes=" + a + " no=" + b + " form=" + yes);
-    }
-
-    const root = getRoot();
-    if (!root) { diagOnce("inbound-panel", "probe panel: no root"); return; }
-    let panel = null;
-    try {
-      panel = $.CreatePanel("HTML", root, INBOUND_PROBE_PANEL_ID);
-    } catch (e) {
-      diagOnce("inbound-panel", "CreatePanel(HTML) threw: " + (e && e.message ? e.message : String(e)));
-      return;
-    }
-    if (!panel) { diagOnce("inbound-panel", "CreatePanel(HTML) returned null"); return; }
-    // 引擎只为"真的会被渲染"的面板创建 CEF 实例: 必须可见。
-    // opacity:0 / 负 margin / z-index:-1 都不行; 用 opacity .01 + 2x2 视口。
-    try {
-      panel.style.width = "2px";
-      panel.style.height = "2px";
-      panel.style.opacity = "0.01";
-      panel.style.position = "0px 0px 0px";
-    } catch (e) {}
-    if (typeof panel.SetURL !== "function") {
-      diagOnce("inbound-panel", "probe panel has no SetURL");
-      try { panel.DeleteAsync(0); } catch (e) {}
-      return;
-    }
-
-    const stages = [
-      { key: "http", url: "http://" + BRIDGE_HOST + ":" + BRIDGE_PORT + "/bridge?op=probe&id=inbound_probe" },
-      { key: "data", url: "data:text/html,<title>LCTPROBE_DATA</title>" },
-      { key: "file", url: "file://{game}/citadel/addons/lctprobe.html" },
-    ];
-    let si = 0;
-    const runStage = function () {
-      if (si >= stages.length) {
-        diagOnce("inbound-done", "inbound probe finished");
-        try { panel.DeleteAsync(0); } catch (e) {}
-        return;
-      }
-      const st = stages[si];
-      si += 1;
-      try {
-        panel.SetURL(st.url);
-      } catch (e) {
-        diagOnce("inbound-seturl-" + st.key, st.key + " SetURL threw: " + (e && e.message ? e.message : String(e)));
-      }
-      $.Schedule(2.0, function () {
-        let title = "";
-        try { title = String(panel.title || ""); } catch (e) { title = "THREW"; }
-        diagOnce("inbound-title-" + st.key, st.key + " title=[" + title + "]");
-        runStage();
-      });
-    };
-    runStage();
   }
-
   function boot() {
     State.cfg = loadUiConfig();
     ensureBridgeEvents(); // 尽早注册 HTML 面板事件(读回主通道)
-    // 入站通道探针: 启动 4s 后跑一次(等布局/桥就绪)
+    // 入站通道 canary: 启动 4s 后打一次 $ 成员表(不再建面板,见函数上方说明)
     $.Schedule(4.0, probeInboundChannels);
     // 玩家 API 诊断:主页/大厅/比赛三个阶段各跑一次(命名空间可能随场景出现)
     let playerDiagTries = 0;

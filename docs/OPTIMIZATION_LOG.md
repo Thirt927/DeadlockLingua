@@ -1342,3 +1342,55 @@
 - **已知限制**: 游戏侧客户端与游戏内渲染**尚未实现**,所以现在还没有任何可见效果;
   整条链路要等游戏侧接入并实车验收(上游口径:`/bt6736` 回声 ≥20 连发零 fail)后才算可用。
   另:BTIPC 上行硬依赖游戏带 `-condebug` 启动,否则不写 `console.log`。
+
+## 2026-10-09 第六十五轮:游戏侧 BTIPC 客户端 —— 译文重新显示在游戏内聊天行
+
+- **背景**: 桥端(第六十四轮)已能应答帧请求。本轮把游戏侧接上:新增 BTIPC 客户端,
+  并把 `dispatchJob` 的分发从已死的 ②直连 / ③面板导航 换成 ①BTIPC。
+  复核时发现**游戏内渲染路径一行都没被删** —— `injectTranslation` / `injectError` /
+  `restoreFromCache` 与 `enqueue → pumpQueue → dispatchJob` 队列都完整,当年只是把
+  「数据来源」掐掉了,所以渲染那半边不需要重写。
+- **改动文件**
+  - `mod/panorama/scripts/lingua_chat.js`
+    - 新增 BTIPC 客户端(外层 `BTIPC_REQ_TIMEOUT_MS` + `BTIPC` IIFE):内联
+      CRC-16/CCITT-FALSE、UTF-8 编解码、base64 编码(不依赖 TypedArray / `atob`)、
+      128 位 ↔ 16 字节位映射、帧解码(CRC 覆盖固定 14 字节)、128 个隐藏 `BTIPCD*`
+      Image 面板 + `RegisterEventHandler("ImageLoaded", panel, cb)`(**固定 3 参**)、
+      轮次状态机(T_CLOSE 600ms 闭合 / 同 r 重投 / BUSY 退避 / 风暴宽闭合 / T_HARD 兜底)。
+    - 新增 `btipcEnvelope()`(信封 `t=<target>` / `op=<op>`;bridge 任务的 URL 编码数据先解码)
+      与 `dispatchViaBtipc()`(成功走统一出口 `handleBridgePayload`,失败按 job 类型降级;
+      整体 try/catch —— 同步异常绝不能让 job 悬着,单槽队列悬一个就全卡)。
+    - `dispatchJob` 改为只走 BTIPC;②③ 老通道实现保留在文件里但不再参与分发。
+    - `isChannelGone` 把 `btipc_*` 一并视为「通道对端不在」:聊天行不挂红标、出站按原文发。
+    - `diagLog` / `diagOnce` 不再 POST(改由 console.log 承载);`flushChatLog` 不再镜像
+      聊天行(桥端已从 `[LCT-CHAT]` 落盘)—— 两者都是位信道下的**重复流量**,
+      会把单槽队列彻底饿死(实测:一条 ~200B 的日志 = 20 帧 ≈ 13s)。
+    - `pumpQueue` 让 bridge 任务给 chat / outgoing 让位(10s 饿死保护)。
+    - 退役 `probeInboundChannels()` 的面板/文件探针(覆盖有盲区、正是它导致错误结论,
+      且每次启动都建一个「真会被渲染」的 HTML 面板),只留一行 `$` 成员表。
+  - `core/bridge_server.js`: `onLine` 里把 `[LCT] [diag]` 行捡回 `bridge.log`(格式同旧 `/api/v1/diag`)。
+  - `scripts/lingua_chat_simtest.js`: 模拟器补 BTIPC 位信道 —— 用**真实桥端 framer** 编码、
+    游戏侧用内联副本解码(跨实现一致性由 CRC 兜底);新增 `[19]` 专测。
+  - `scripts/test_sender_backfill.js`: 断言改到 `[LCT-CHAT]` 通道(聊天落档的权威来源已变)。
+- **关键设计**
+  - **每次 SHOT 的 URL 必须唯一**:`t` 里带 `shotSeq`,同轮重投也换 URL。上游 v1.0 因同 `r`
+    重投的 URL 逐字节相同、撞引擎缓存后不再 fire `ImageLoaded`,踩过 `frameFails 1→9` 死循环。
+  - **全 0 轮 = 桥端没有这个窗口**:合法 BUSY 帧带 `request_id` 与 CRC 位,绝不可能是全 0;
+    连续 4 轮全 0 即判 `bridge_down`。桥不在时约 3.6s 收口,而不是耗满 `CRC_DEAD`(≈13s)
+    把单槽队列堵死(4 轮余量用于覆盖"桥的 tail 还没读到 REQ 行"的窗口期)。
+- **验证方式**(全部实测)
+  - `node --check` 通过;`lingua_chat.js` 行尾已统一为 CRLF(5758 行全 CRLF,0 个孤立 LF);
+  - `scripts/lingua_chat_simtest.js` **PASS 58 / FAIL 0**(含真桥翻译;新增 `[19]` 覆盖
+    跨实现往返 / 128 面板覆盖 / SHOT URL 唯一性 / 桥缺席快速降级且不挂红标);
+  - 桥端 5 套 `tests/btipc/{crc,frame,transport,e2e_tail,route}.test.js` 全绿;
+  - 回归:`overlay_test 13/0`、`test_bridge_dedup`、`test_bridge_fallback`、
+    `test_sender_backfill 11/0`、`test_steamid_roster 3/0` 全绿;
+  - `scripts/build.ps1` 编译 7 个资源全 `ok`;桥已重启,实测 `/btipc/dl?w=abcdef` 返回
+    `404 + Cache-Control: no-store`(路由生效,与通用 404 可区分)、`/api/v1/health` 200;
+  - 清理:退役探针在 addons 里的遗留 `lctprobe.html` / `lctprobe_yes.png` 已删除。
+- **仍需用户测试**: **关闭 Deadlock** 后重新部署 `dist/pak22_dir.vpk`(本轮部署时游戏在运行、
+  文件被占用,未能覆盖)并**带 `-condebug` 启动**;进游戏后英文聊天下方应直接出现中文译文,
+  `logs/bridge.log` 里应出现 `BTIPC TRQ` / `BTIPC RSP` 与逐帧 `BTIPC: r=.. seq=.. OK`。
+  旧 pak22 已备份为 `pak22_dir.vpk.bak-btipc-20261009-211345`。
+- **已知限制**: 位信道有效载荷 ≈10 字节/轮(≈16 B/s),60B 译文约 4s —— 所以**诊断/日志类
+  流量一律不许走它**(本轮已把 diag 与聊天日志镜像移出)。BTIPC 上行硬依赖 `-condebug`。

@@ -1016,6 +1016,18 @@ async function handleApi(req, res, url, bodyObj) {
   sendJson(res, 404, { ok: false, error: "not_found" });
 }
 
+// 游戏侧的 diagLog/diagOnce 现在只打 console.log(不再走 BTIPC —— 位信道每轮只有
+// 10 字节,一条诊断要好几秒,会把单槽翻译队列堵死)。这里把它们捡回来写进 bridge.log,
+// 保持与旧 /api/v1/diag 完全一样的格式,免得诊断信息在游戏内版本切换后凭空消失。
+function handleGameDiagLine(line) {
+  const s = String(line || "");
+  const at = s.indexOf("[LCT] [diag]");
+  if (at < 0) return false;
+  const msg = s.slice(at + "[LCT] [diag]".length).trim().slice(0, 2000);
+  if (msg) log("info", "[diag] PANORAMA: " + msg);
+  return true;
+}
+
 // ---------- BTIPC 双向信道(游戏内译文显示) ----------
 // 协议规格见 docs/btipc-v1.md。上行 = 游戏写 console.log 里的 `[LCT] BTIPC REQ` 结构化单行;
 // 下行 = 桥用 GET /btipc/dl 按位回 HTTP 状态码(200+PNG = 位1 / 404 = 位0),游戏侧 128 个
@@ -1189,6 +1201,9 @@ overlay.start({
     } catch (e) {
       log("warn", "btipc line failed: " + ((e && e.message) || String(e)));
     }
+    try {
+      handleGameDiagLine(line);
+    } catch (e) {}
   },
 });
 startOverlayWatch();

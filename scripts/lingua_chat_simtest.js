@@ -6,6 +6,11 @@
 const http = require("http");
 const path = require("path");
 
+// 桥端 BTIPC 实现的唯一真实来源:模拟器用它编码,游戏侧用自己的内联副本解码。
+// 两侧若漂移(CRC/位序/UTF-8/base64 任一处),游戏侧 CRC 必然不过,测试立刻抓到。
+const FRAMER = require(path.join(__dirname, "..", "core", "btipc", "framer.js"));
+const CRC16 = require(path.join(__dirname, "..", "core", "btipc", "crc16.js")).crc16;
+
 // node 原生 setTimeout 引用:mock 基础设施必须用它,不查全局
 // (test16 会摘掉全局 setTimeout 模拟 Panorama 环境,若 mock 依赖全局会被误炸)
 const nativeSetTimeout = setTimeout;
@@ -140,13 +145,103 @@ function freshEnv(cfg, envOpts) {
 
   contextPanel.SetAttributeString("lct_ui", JSON.stringify(cfg)); // UI_CONVAR = "lct_ui"
 
+  // ---------------- 模拟 BTIPC 位信道(桥端行为) ----------------
+  // 游戏侧已不再走 HTTP:上行是 `[LCT] BTIPC REQ` 行(从 $.Msg 抓),下行是 128 个
+  // Image 面板的 SetImage —— 桥按位回 200/404,只有 200 会 fire ImageLoaded。
+  // 这里用**真实桥端 framer** 编码,游戏侧用自己内联的 frameFromBits/CRC 解码。
+  const btipcWindows = new Map();
+  const imageHandlers = new Map();
+  const btipcShots = []; // 每次 SetImage 的 URL(诊断用)
+  let btipcReqCount = 0;
+
+  function btipcServe(win, r, p) {
+    const w = btipcWindows.get(win);
+    if (!w) return 0; // 桥端无此窗口 -> 404 -> 事件不 fire
+    let frame;
+    if (!w.frames) {
+      frame = FRAMER.buildBusyFrame(w.id); // 翻译未就绪 -> BUSY 固定帧(带 id/CRC 位,绝不全 0)
+    } else {
+      if (w.frameStartRound === null) w.frameStartRound = r;
+      const idx = Math.max(0, Math.min(r - w.frameStartRound, w.frames.length - 1));
+      frame = w.frames[idx];
+    }
+    return FRAMER.bitsOfFrame(frame)[p] ? 1 : 0;
+  }
+
+  function installImagePanel(p) {
+    p.SetImage = function (url) {
+      btipcShots.push(url);
+      let u = null;
+      try { u = new URL(url, "http://x"); } catch (e) { return; }
+      const q = u.searchParams;
+      const bit = btipcServe(q.get("w"), Number(q.get("r")), Number(q.get("p")));
+      if (!bit) return; // 位 0:不 fire
+      const h = imageHandlers.get(p);
+      if (h) nativeSetTimeout(() => { try { h(p); } catch (e) {} }, 0);
+    };
+  }
+
+  function btipcHandleReq(line) {
+    const at = line.indexOf("[LCT] BTIPC REQ");
+    if (at < 0) return;
+    if (envOpt.btipcBridgeDown) return; // 模拟桥没在跑:窗口永不建立 -> 客户端全 0 轮
+    const m = /^\[LCT\] BTIPC REQ w=([0-9a-f]{6}) id=([0-9a-f]{4}) len=(\d{1,4}) crc=([0-9a-f]{4}) b64=([A-Za-z0-9+/=]*)$/
+      .exec(line.slice(at).replace(/\r+$/, ""));
+    if (!m) return;
+    btipcReqCount += 1;
+    const win = m[1];
+    const id = parseInt(m[2], 16);
+    const len = Number(m[3]);
+    const payload = Buffer.from(m[5], "base64");
+    if (payload.length !== len) return;
+    if (CRC16(payload).toString(16).padStart(4, "0") !== m[4]) return;
+    const text = payload.toString("utf8");
+    let target = "zh-Hans";
+    let body = text;
+    const nl = text.indexOf("\n");
+    if (nl >= 0) {
+      const tm = /^t=([A-Za-z0-9-]{1,16})(;tm=\d{1,7})?$/.exec(text.slice(0, nl));
+      if (tm) { target = tm[1]; body = text.slice(nl + 1); }
+    }
+    btipcWindows.set(win, { id: id, frames: null, frameStartRound: null });
+    // 用真实桥翻译(与旧路径同一个 /api/v1/translate)
+    const req = http.request({
+      host: "127.0.0.1", port: 8791, path: "/api/v1/translate", method: "POST",
+      headers: { "Content-Type": "application/json" }, timeout: 15000,
+    }, (res) => {
+      let data = "";
+      res.on("data", (c) => { data += c; });
+      res.on("end", () => {
+        let obj = null;
+        try { obj = JSON.parse(data); } catch (e) {}
+        const cur = btipcWindows.get(win);
+        if (!cur) return;
+        // 桥侧翻译失败 -> 降级回原文(与真实桥端 transport 的降级一致)
+        cur.frames = FRAMER.encode(id, (obj && obj.translation) || body);
+      });
+    });
+    req.on("error", () => {});
+    req.write(JSON.stringify({ text: body, sourceLanguage: "auto", targetLanguage: target }));
+    req.end();
+  }
+
   globalThis.$ = {
-    Msg: (...a) => console.log("[LCT-sim]", ...a),
+    Msg: (...a) => {
+      // BTIPC 上行就在这行输出里(tail -> 桥端 REQ 解析器),先喂给模拟桥再接原日志
+      try { btipcHandleReq(Array.prototype.join.call(a, " ")); } catch (e) {}
+      console.log("[LCT-sim]", ...a);
+    },
     Schedule: (sec, fn) => { const t = nativeSetTimeout(fn, sec * 1000); PENDING_SCHEDULES.push(t); return t; },
     CreatePanel: (type, parent, id) => {
       // 记录运行时创建的 HTML 面板:项目已确认这种面板不可用,自愈绝不能走这条路
       if (type === "HTML") createdPanels.push(id);
-      return parent.addChild(new MockPanel(id)).setClass(type === "Label" ? "Label" : type);
+      const p = parent.addChild(new MockPanel(id)).setClass(type === "Label" ? "Label" : type);
+      if (type === "Image") installImagePanel(p); // BTIPC 的位信道载体
+      return p;
+    },
+    // 事件白名单里的 ImageLoaded;RegisterEventHandler 恰好 3 参,第 2 参传面板对象
+    RegisterEventHandler: (name, panel, handler) => {
+      if (name === "ImageLoaded") imageHandlers.set(panel, handler);
     },
     RegisterForUnhandledEvent: () => {},
     DispatchEvent: () => {},
@@ -190,6 +285,8 @@ function freshEnv(cfg, envOpts) {
   return {
     contextPanel, messagesPanel, hudMessages, hudMessages2, lobbyPanel,
     bridgePanel, setUrlCalls, createdPanels, wedge,
+    btipcWindows, btipcShots, imageHandlers,
+    btipcReqCount: () => btipcReqCount,
     addRow(kind, sender, text, opts) {
       const row = new MockPanel(null).setClass("ChatMessage", "Expired");
       if (opts && opts.own) row.setClass("IsSelf");
@@ -326,13 +423,22 @@ async function test3_recycleToAnotherEnglish() {
   console.log("\n[3] row recycled to another english msg -> new translation replaces old, no residue");
   const env = freshEnv(CFG.translationOnly);
   const row = env.addRow("text", "Alice", "hello can you push mid");
-  await waitFor(() => labelsOf(row).length > 0, 10000);
+  await waitFor(() => labelsOf(row).length > 0, 15000);
+  await sleep(300);
+  const before = (labelsOf(row)[0] && labelsOf(row)[0].text) || "";
   env.recycleRow(row, "text", "Alice", "retreat please");
-  await waitFor(() => labelsOf(row).length > 0, 10000);
+  // 关键:不能只等"有标签" —— 上一轮的标签可能还在,会立刻满足条件导致断言过早。
+  // 必须等到标签文本真的换成了新消息的译文(BTIPC 一轮约 3s,不是旧 HTTP 的毫秒级)。
+  await waitFor(() => {
+    const l = labelsOf(row);
+    return l.length > 0 && l[0].text.length > 0 && l[0].text !== before;
+  }, 15000);
   await sleep(300);
   const labels = labelsOf(row);
   assert("exactly 1 label (no residue)", labels.length === 1, labels.length + " labels");
-  assert("label is current message translation", labels[0] && labels[0].text.length > 0 && labels[0].text.indexOf("retreat") === -1, labels[0] && labels[0].text);
+  assert("label is current message translation",
+    labels[0] && labels[0].text.length > 0 && labels[0].text.indexOf("retreat") === -1 && labels[0].text !== before,
+    labels[0] && labels[0].text);
   assert("original collapsed (translation_only)", row.FindChildTraverse("MessageContents").style.visibility === "collapse");
 }
 
@@ -623,6 +729,47 @@ async function test18_overlayChatEmitted() {
   assert("own flag 0 for other player's message", !!payload && payload.o === 0, payload && String(payload.o));
 }
 
+// BTIPC 端到端:位信道现在是唯一的翻译通道。验两件事 ——
+//   (a) 跨实现一致性:模拟桥用 core/btipc/framer 编码,游戏侧用自己内联的
+//       frameFromBits/CRC 解码。任一侧漂移(位序 / CRC / UTF-8 / base64)都会 CRC 失败。
+//   (b) 桥缺席时的降级:连续全 0 轮 -> bridge_down,快速失败、不挂红标、不卡队列。
+async function test19_btipcChannel() {
+  console.log("\n[19] BTIPC channel: cross-impl framing + bridge-down fast degrade");
+  const env = freshEnv(CFG.translationOnly);
+  const row = env.addRow("text", "Alice", "hello can you push mid");
+  const ok = await waitFor(() => labelsOf(row).length > 0, 15000);
+  const labels = labelsOf(row);
+  assert("BTIPC: translation returned through the bit channel and rendered in-game",
+    ok && labels.length === 1 && labels[0].text.length > 0, labels[0] && labels[0].text);
+  assert("BTIPC: bridge received at least one REQ line", env.btipcReqCount() >= 1,
+    "reqs=" + env.btipcReqCount());
+  assert("BTIPC: SHOT covers panel 0 and panel 127",
+    env.btipcShots.some((u) => u.indexOf("&p=0&") >= 0) &&
+    env.btipcShots.some((u) => u.indexOf("&p=127&") >= 0),
+    "shots=" + env.btipcShots.length);
+  // 同一 URL 撞引擎缓存后不再 fire ImageLoaded —— 所以每次 SHOT 的 URL 必须唯一。
+  // 这是上游 v1.0 踩过的坑(frameFails 1->9 死循环),这里钉成回归。
+  assert("BTIPC: every SHOT URL is unique (cache-busting nonce)", (function () {
+    const seen = new Set();
+    for (const u of env.btipcShots) {
+      if (seen.has(u)) return false;
+      seen.add(u);
+    }
+    return env.btipcShots.length > 0;
+  })(), "shots=" + env.btipcShots.length);
+
+  // (b) 桥缺席
+  const env2 = freshEnv(CFG.translationOnly, { btipcBridgeDown: true });
+  const row2 = env2.addRow("text", "Bob", "hello can you push mid");
+  const t0 = Date.now();
+  await sleep(7000);
+  const elapsed = Date.now() - t0;
+  assert("BTIPC: bridge absent -> degrades fast (does NOT burn CRC_DEAD)",
+    elapsed < 12000, "elapsed=" + elapsed + "ms");
+  assert("BTIPC: bridge absent -> no red error label in chat",
+    labelsOf(row2).length === 0, labelsOf(row2).map((l) => l.text).join(" | "));
+}
+
 async function test0_stateFieldsDeclared() {
   const fs = require("fs");
   const src = fs.readFileSync(SCRIPT, "utf8");
@@ -659,6 +806,7 @@ async function main() {
   await test16_outgoingWithoutGlobalSetTimeout();
   await test17_panelChannelDisabledNoSpinning();
   await test18_overlayChatEmitted();
+  await test19_btipcChannel();
   console.log("\n=== RESULT: PASS " + passCount + " / FAIL " + failCount + " ===");
   process.exit(failCount === 0 ? 0 : 1);
 }

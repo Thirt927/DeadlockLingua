@@ -338,7 +338,8 @@ IDLE → REQ_SENT(发 REQ 行 + 启动轮询 r=1)
 3. **桥端传输层**(校验 / 轮次 / GC 不变量) — ✅ 已固化(`tests/btipc/transport.test.js`)
 4. **接线**(tail → onLine → 建窗 → 取帧;**/btipc/dl 路由状态码与响应头) — ✅ 已固化
    (`tests/btipc/e2e_tail.test.js`、`tests/btipc/route.test.js`)
-5. **游戏侧客户端** — ⬜ 待实现
+5. **游戏侧客户端** — ✅ 已实现并离线验收(`lingua_chat.js` 的 `BTIPC` 区块;
+   模拟器用真实桥端 framer 编码、游戏侧内联副本解码,往返零错)
 6. **实车回声 conformance**:游戏内命令发一次传输 → 桥侧回声,解出与发送一致;
    ≥20 连发零 fail —— ⬜ 待实现(上游口径)
 7. **实车端到端**:真实对局开「发送前翻译」/ 入站译文,聊天行显示译文,
@@ -346,3 +347,14 @@ IDLE → REQ_SENT(发 REQ 行 + 启动轮询 r=1)
 
 > 上游(BabelTower 1.0.7)已用同一套协议完成第 6、7 项实车验收,
 > 可直接作为本仓库游戏侧实现的对标基线。
+
+## 13. 与上游 v1.0 的两处有意偏离
+
+1. **每次 SHOT 的 URL 都带自增 `shotSeq`**(`t=<win>-<id>-<round>-<shotSeq>`)。
+   上游 v1.0 的 `t` 只到轮号,同 `r` 重投时 128 个 URL 逐字节相同 —— 撞引擎缓存后
+   不再 fire `ImageLoaded`,他们会踩到 `frameFails 1→9` 的死循环。本仓库把「同轮重投
+   也要换 URL」做进第一版,已用测试钉住(`lingua_chat_simtest.js` `[19]`)。
+2. **「连续全 0 轮」判 `bridge_down`**。合法 BUSY 帧带 `request_id` 与 CRC 位,
+   不可能全 0;所以全 0 ⇒ 桥端没有这个窗口(没收到 REQ,或桥不在)。连续 4 轮即放弃
+   (4 轮余量覆盖"桥的 tail 还没读到 REQ 行"的窗口期),约 3.6s 收口;
+   上游靠 `CRC_DEAD`(8 轮 + 风暴 ≈ 13s)兜底,会把单槽队列堵死。

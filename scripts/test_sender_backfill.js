@@ -89,10 +89,33 @@ function freshEnv(cfg) {
   contextPanel.addChild(new MockPanel("ChatLinesPanel"));
   contextPanel.SetAttributeString("lct_ui", JSON.stringify(cfg));
 
+  // 聊天行现在只经 [LCT-CHAT] 通道出向(桥端 tail console.log 落盘 logs/chat),
+  // 不再由 mod 自己 POST /log —— 见 lingua_chat.js 的 flushChatLog 注释。
+  // 所以这组测试要断言的"S/文本去重与补全"落在 [LCT-CHAT] 载荷上。
+  const chatLines = [];
   globalThis.$ = {
-    Msg: (...a) => console.log("[LCT-bf]", ...a),
+    Msg: (...a) => {
+      const line = Array.prototype.join.call(a, " ");
+      const at = line.indexOf("[LCT-CHAT]");
+      if (at >= 0) {
+        try {
+          const p = JSON.parse(line.slice(at + "[LCT-CHAT]".length));
+          chatLines.push({
+            sender: String(p.n || ""),
+            text: String(p.t || ""),
+            channel: String(p.c || ""),
+            hero: String(p.h || ""),
+            kind: String(p.k || "chat"),
+            own: p.o === 1,
+          });
+        } catch (e) {}
+      }
+      console.log("[LCT-bf]", ...a);
+    },
     Schedule: (sec, fn) => { const t = nativeSetTimeout(fn, sec * 1000); PENDING_SCHEDULES.push(t); return t; },
     CreatePanel: (type, parent, id) => parent.addChild(new MockPanel(id)).setClass(type === "Label" ? "Label" : type),
+    // BTIPC 位信道的事件注册点;本组测试不验翻译,只保证不抛
+    RegisterEventHandler: () => {},
     RegisterForUnhandledEvent: () => {},
     DispatchEvent: () => {},
     GetContextPanel: () => contextPanel,
@@ -124,6 +147,7 @@ function freshEnv(cfg) {
 
   return {
     logPosts,
+    chatLines,
     addRow(sender, text, opts) {
       const row = new MockPanel(null).setClass("ChatMessage", "Expired");
       if (opts && opts.own) row.setClass("IsSelf");
@@ -177,15 +201,9 @@ async function waitFor(cond, timeoutMs) {
   return false;
 }
 function allMsgEntries(env) {
-  // Client payload lines carry no type field (bridge adds type:"msg" on disk write);
-  // every line in a /log post is a chat-log entry.
-  const out = [];
-  for (const p of env.logPosts) {
-    for (const l of (p.lines || [])) {
-      if (l && typeof l === "object" && "text" in l) out.push(l);
-    }
-  }
-  return out;
+  // 聊天落档的权威来源现在是 [LCT-CHAT] 通道(桥端 tail 后写 logs/chat)。
+  // 每条已去重、sender 已解析的聊天对应一行,所以这里直接读它。
+  return (env.chatLines || []).slice();
 }
 function waitForMsgs(env, count, timeoutMs) {
   return waitFor(() => allMsgEntries(env).length >= count, timeoutMs);
