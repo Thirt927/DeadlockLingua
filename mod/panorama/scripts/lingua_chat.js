@@ -5505,6 +5505,12 @@ function injectTranslation(row, sig, text) {
     // 发送前翻译(off=发原文 / translation=仅译文 / bilingual=原文|译文)
     // 若检测到消息已是目标语言(sameLanguage),则按原文发送,不做无用翻译
     const outgoingMode = State.cfg.outgoing || "off";
+    // 用 diagLog(**会被桥记录**)而不是 log():log() 走的是 `[LCT]` 前缀,而桥只采集
+    // `[diag] PANORAMA:`,所以 log() 的输出在 bridge.log 里完全看不到 ——
+    // 上一轮就是因此把"没日志"误判成"没执行",这里必须走可采集的通道。
+    diagLog("outgate", "PANORAMA: outgoing gate mode=" + outgoingMode +
+      " enabled=" + (!!State.cfg.enabled) + " bridgeUp=" + (!!State.bridgeUp) +
+      " offlineSince=" + (!!State.bridgeOfflineSince));
     if (State.cfg.enabled && outgoingMode !== "off" && trimmed.charAt(0) !== "/") {
       // 已确认桥离线时不要卡着不发:否则按回车"没反应",而且 outgoingPending
       // 去重会把之后每一次回车全部吞掉(表现就是"打 hello 按回车发不出去")。
@@ -5708,6 +5714,7 @@ function injectTranslation(row, sig, text) {
     if (!panel) {
       // 面板标记在 chat.xml。找不到通常意味着布局没生效 —— 改完 chat.xml 必须重建 VPK 并重启游戏
       log("settings: panel NOT FOUND (chat.xml 未生效?)");
+      diagLog("nopanel", "PANORAMA: settings panel NOT FOUND (chat.xml 未生效?)");
       return;
     }
     try {
@@ -5723,7 +5730,7 @@ function injectTranslation(row, sig, text) {
     try { saveBtn = !!findChild(panel, "LCTSaveBtn"); } catch (e) {}
     let insideChat = false;
     try { insideChat = !!panel.BAscendantHasClass("CitadelChat"); } catch (e) {}
-    log("settings: opened vis=" + vis + " saveBtn=" + (saveBtn ? "yes" : "no") + " inChat=" + (insideChat ? "yes" : "no"));
+    diagLog("setopen", "PANORAMA: settings opened vis=" + vis + " saveBtn=" + (saveBtn ? "yes" : "no") + " inChat=" + (insideChat ? "yes" : "no"));
     syncPanelFromConfig();
     // 面板直接吃内存里的 State.cfg —— **不**在打开时向桥读配置:
     // `op=config` 的应答 1313 字节 = 132 帧,超过协议 128 帧(1280B)上限,走位信道收不到。
@@ -5769,7 +5776,7 @@ function injectTranslation(row, sig, text) {
     lastSettingsToggleAt = now;
     const panel = findChild(getRoot(), SETTINGS_PANEL_ID);
     const open = !!(panel && hasClass(panel, SETTINGS_VISIBLE_CLASS));
-    log("settings toggle: " + (open ? "close" : "open"));
+    diagLog("settoggle", "PANORAMA: settings toggle: " + (open ? "close" : "open"));
     if (open) closeSettingsPanel();
     else openSettingsPanel();
   }
@@ -5823,11 +5830,19 @@ function injectTranslation(row, sig, text) {
   function setSelectText(buttonId, text) {
     const panel = findChild(getRoot(), SETTINGS_PANEL_ID);
     const btn = panel ? findChild(panel, buttonId) : null;
-    const label = btn ? findChild(btn, buttonId + "Label") : null;
+    // 标签**优先从整个面板找**(标签 id 在面板内唯一)。
+    // 只从按钮下找是有风险的:若 FindChildTraverse 不深入 Button 的子节点就会拿到 null,
+    // 而下面 `if (label)` 会**静默跳过** —— 表现恰好就是"选项选完了,但按钮上的字没变"。
+    const label = (panel ? findChild(panel, buttonId + "Label") : null) ||
+      (btn ? findChild(btn, buttonId + "Label") : null);
     if (label) {
       try {
         label.text = text;
-      } catch (e) {}
+      } catch (e) {
+        diagLog("seltext_fail", "PANORAMA: setSelectText 赋值失败 " + buttonId);
+      }
+    } else {
+      diagLog("seltext_" + buttonId, "PANORAMA: setSelectText 找不到标签 " + buttonId + "Label");
     }
   }
 
@@ -5916,7 +5931,7 @@ function injectTranslation(row, sig, text) {
       setStatus("翻译自己的消息" + (State.cfg.translateOwn ? "已开启" : "已关闭"));
     }
     saveUiConfig();
-    log("toggle: " + which);
+    diagLog("toggle_" + which, "PANORAMA: toggle: " + which);
   }
 
   // 循环切换(服务商/显示模式/发送模式)
@@ -6011,7 +6026,7 @@ function injectTranslation(row, sig, text) {
     syncCustomInputs();
     saveUiConfig();
     closeSelectMenus();
-    log("pickLang: " + field + " -> " + value);
+    diagLog("picklang", "PANORAMA: pickLang: " + field + " -> " + value);
     if (value === "custom") {
       const customId = field === "targetLanguage" ? "LCTTargetLangCustom" : "LCTOutgoingTargetCustom";
       const custom = findChild(getRoot(), customId);
@@ -6031,7 +6046,7 @@ function injectTranslation(row, sig, text) {
     syncPanelFromConfig();
     saveUiConfig();
     closeSelectMenus();
-    log("pickOption: " + field + " -> " + value);
+    diagLog("pickopt", "PANORAMA: pickOption: " + field + " -> " + value);
   }
 
   function collectPanelConfig() {
@@ -6087,7 +6102,7 @@ function injectTranslation(row, sig, text) {
   }
 
   function LCTSave() {
-    log("save clicked");
+    diagLog("saveclick", "PANORAMA: save clicked");
     closeSelectMenus();
     const p = collectPanelConfig();
     for (const f of ["provider", "targetLanguage", "displayMode", "outgoing", "outgoingTarget", "enabled", "force", "timeoutMs", "chatLog", "translateOwn"]) markUiTouched(f);
@@ -6110,7 +6125,8 @@ function injectTranslation(row, sig, text) {
         syncProviderRows();
         saveUiConfig();
         setStatus("已保存(服务商 " + (p.provider || "bing") + ")");
-        log("settings saved");
+        diagLog("savesaved", "PANORAMA: settings saved provider=" + (p.provider || "bing") +
+          " outgoing=" + p.outgoing + " enabled=" + p.enabled);
       } else {
         setStatus("保存失败: " + ((res && res.error) || "unknown"));
       }
