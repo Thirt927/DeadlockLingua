@@ -1,146 +1,182 @@
 # 架构文档
 
-> **状态：本文描述的「游戏外悬浮窗」路线自 v2.0.1 起归档为 legacy。**
-> 相关代码（`core/overlay.js`、`core/overlay_page.html`、`scripts/overlay_window.ps1`、
-> 各启动脚本）保留在仓库中，但不再演进。后续改用 **BTIPC 双向信道**恢复游戏内译文显示，
-> 见第 9 节。v2.0.1 的发布产物是这条 legacy 路线的终点。
+> **本文描述 v2.1.0（2026-10-09）起的现状:译文重新显示在游戏内。**
 >
-> 本文描述 v2.0.0（2026-10-01）起的现状。
-> Deadlock 该次更新移除了 Panorama 的 HTTP 能力（`$.AsyncWebRequest` 调用即抛
-> `AsyncWebRequest has been removed.`，隐藏 HTML 面板不再创建浏览器实例），
-> 通过 **HTTP / CEF** 收发数据已不可能。旧的「隐藏面板 + 轮询 `panel.title`」通道已废弃，
-> 见第 8 节。
+> 数据是**双向**的,靠自研的 **BTIPC 双向信道**:
+> - 上行:游戏把请求打成结构化单行写进 `console.log`(`[LCT] BTIPC REQ ...`),桥增量 tail 读回
+> - 下行:桥把译文切成 16 字节帧,按位用 HTTP 状态码回答(200 = 位 1 / 404 = 位 0),
+>   游戏侧 128 个隐藏 Image 面板逐轮读回
+>
+> **协议以 [btipc-v1.md](btipc-v1.md) 为唯一契约**(帧格式 / 轮次状态机 / CRC / 重试 / 参数表),
+> 本文只讲整体结构与接线。⚠️ 上行硬依赖游戏带 **`-condebug`** 启动,否则不写 `console.log`。
+>
+> **游戏外悬浮窗自 v2.0.1 起归档为 legacy**(代码保留、不再演进),其管道见第 8 节。
+> v2.0.0 那个「游戏内不可能显示译文」的结论已被更正,见第 9 节。
 
 ## 1. 总览
 
 ```
-┌──────────────────────── 游戏进程 ─────────────────────────┐
-│  Panorama（聊天 UI）                                       │
-│  lingua_chat.js: 扫描聊天行 / 顶栏与资料卡身份采集         │
-│  每落档一条聊天 → $.Msg("[LCT-CHAT]" + 单行 JSON)          │
-└────────────────────────────┬───────────────────────────────┘
-                             │ 单向：写 console.log（游戏安装目录）
+┌──────────────────────── 游戏进程(Panorama) ────────────────────────┐
+│  lingua_chat.js                                                     │
+│   扫描聊天行 → 去重 / 缓存 / 语言启发式 → 串行队列(MAX_ACTIVE=1)    │
+│   BTIPC 客户端(State 同层):                                      │
+│     上行  $.Msg("[LCT] BTIPC REQ w=.. id=.. len=.. crc=.. b64=..")  │
+│     下行  128 个隐藏 2×2 <Image> 面板逐轮 SetImage("/btipc/dl?...") │
+│           ImageLoaded 到达 = 位1,静默 = 位0 → 组 16 字节 → CRC 校验 │
+│   译文由 injectTranslation() 追加为聊天行下的 Label                 │
+└───────────┬──────────────────────────────────┬──────────────────────┘
+            │ 上行:console.log(需 -condebug)   │ 下行:GET /btipc/dl?w&r&p&t
+            ▼                                  │  (状态码即数据:200 / 404)
+┌──────────────────────── 本地桥 Node.js(core/) ──────────────────────┐
+│  overlay.js: 增量 tail console.log                                  │
+│     ├→ [LCT-CHAT] 行 → 去重 → 翻译链 → 环形缓冲(悬浮窗用,legacy)   │
+│     ├→ [LCT] [diag] 行 → 写进 logs/bridge.log                       │
+│     └→ [LCT] BTIPC REQ 行 → btipc/transport 校验 → 建窗 → 翻译       │
+│  btipc/{crc16,framer,window,transport}.js:                          │
+│     帧编解码(16B/帧,载荷 10B)+ 窗口表 + 轮次语义 + GC               │
+│     GET /btipc/dl:按 (w,r) 幂等发帧;**逐面板**回第 p 位(200/404)   │
+│  providers/*: bing(免Key)/microsoft/openai/deepl/google + 回退链    │
+│  glossary / dictionary: 术语表注入 + 自适应词典 + 结果缓存          │
+│  steamid_enrich.js: 赛后按公开 API 回填整局 SteamID                 │
+│  HTTP 监听 127.0.0.1:8791                                          │
+│   /btipc/dl  /api/v1/translate|test|config|health|quickchat|…      │
+│   /api/v1/overlay/messages|translate(悬浮窗,legacy)               │
+└────────────────────────────┬────────────────────────────────────────┘
+                             │ HTTP(仅本机)
                              ▼
-┌──────────────────────── 本地桥 Node.js（core/）───────────┐
-│  overlay.js: 增量 tail console.log，解析 [LCT-CHAT]        │
-│   去重 → 串行/并发翻译 → 环形缓冲（最近 300 条）           │
-│  providers/*: bing(免Key) / microsoft / openai / deepl /   │
-│               google；失败按 fallbackProviders 回退        │
-│  glossary / dictionary: 术语表注入 + 自适应词典 + 结果缓存 │
-│  HTTP 监听 127.0.0.1:8791                                  │
-│   /api/v1/overlay/messages   悬浮窗轮询最近聊天            │
-│   /api/v1/overlay/translate  悬浮窗出站（中文→英文）       │
-│   /api/v1/translate|test|config|health|log|diag            │
-│  steamid_enrich.js: 赛后按公开 API 回填整局 SteamID        │
-└────────────────────────────┬───────────────────────────────┘
-                             │ HTTP（仅本机）
-                             ▼
-┌────────────── 游戏外悬浮窗（scripts/overlay_window.ps1）───┐
-│ 原生 WPF 窗口：面板窗（聊天/输入/设置）+ 字幕浮层（可穿透） │
-│  面板：轮询 /api/v1/overlay/messages 显示原文 + 译文        │
-│  出站：输入中文 → /api/v1/overlay/translate → 写剪贴板      │
-│  桥检测到 deadlock.exe 启动时自动拉起；退出时关闭           │
-│  回退：overlay.mode="web" → 浏览器打开 /overlay             │
-└────────────────────────────────────────────────────────────┘
+┌──────────── 游戏外悬浮窗(scripts/overlay_window.ps1,legacy)────────┐
+│ 原生 WPF:面板窗 + 字幕浮层(鼠标穿透);轮询 /api/v1/overlay/messages │
+│ 出站:输入中文 → /api/v1/overlay/translate → 写剪贴板 → 手动粘贴     │
+│ 保留可用,但不再是主显示路径                                        │
+└────────────────────────────────────────────────────────────────────┘
 ```
 
-## 2. 消息流（收）—— 单向 `游戏 → console.log`
+## 2. 消息流(收)—— BTIPC 双向
 
-1. `lingua_chat.js` 扫描聊天行；每落档一条就发一行 `$.Msg("[LCT-CHAT]" + JSON)`
-   （`emitOverlayChat`，埋点在 `pushEntry()`）。行格式：
-   `<时间戳> [PanoramaScript] [LCT-CHAT]{"o":0,"n":"Alice","c":"chat","h":"","t":"hello"}`
-2. `core/overlay.js` **增量**读取 `console.log`：记录上次字节偏移，并用「尾部指纹」检测
-   日志重写（每次启动游戏 `console.log` 被清空重写，只靠 size 变化会从错位字节读起）。
-3. 解析 → 去重（2 分钟窗口，覆盖聊天行与顶栏气泡的同一句副本）→ 入队翻译。
-4. 翻译链：词典直译 → 结果缓存（10 分钟）→ 服务商（注入术语表）→ 失败按
-   `fallbackProviders` 依次回退。主服务商单次上限约 20s。
-5. 译文进环形缓冲（最近 300 条），悬浮窗轮询 `/api/v1/overlay/messages` 取回显示。
-6. 会话标识 `session`：桥重启 / 进新一局（日志被重写）/ 游戏退出都会变，
-   悬浮窗据此清屏，避免上一局聊天残留。
+1. `lingua_chat.js` 扫描聊天行(0.2s / 0.8s 两档),签名去重、写过缓存、跳过自己的消息与
+   已目标语言的消息。
+2. 入队(串行,`MAX_ACTIVE_REQUESTS = 1`)→ `dispatchJob` → `dispatchViaBtipc`。
+3. **上行**:按信封拼请求(见 [btipc-v1.md §4.1](btipc-v1.md)),`$.Msg` 出一行
+   `[LCT] BTIPC REQ w=<6hex> id=<4hex> len=<字节> crc=<hex4> b64=<payload>`;payload ≤ 680 字节。
+4. 桥端 `overlay.js` 增量 tail 该文件(记录字节偏移 + 尾部指纹,检测游戏重写日志),
+   把 `BTIPC REQ` 行交给 `btipc/transport` 做六项校验(行长 / 行尾锚定 / w / id / len / crc / b64),
+   全过才建窗并开始翻译;任一不过**静默 drop**。
+5. **翻译链**:词典直译 → 结果缓存(10 分钟)→ 服务商(注入术语表)→ 失败按
+   `fallbackProviders` 回退。桥侧最终**总有一个字符串**(翻译失败则回原文)。
+6. 桥把结果 `framer.encode()` 成 16 字节/帧的队列。`T_CLOSE`(600ms)后游戏侧闭合一轮:
+   128 位 → 16 字节 → CRC 校验 seq/id/VALID/LEN → 按 `seq` 拼装;`END=1` 即完成。
+7. `injectTranslation(row, sig, text)` 在聊天行下方建/更新一个 `Label`(浅蓝底斜体);
+   聊天滚动回收后由 `restoreFromCache()` 按签名重建。
 
-## 3. 消息流（发）—— 剪贴板
+带宽现实:**有效载荷 ≈10 字节/轮(≈16 B/s)**,60B 译文约 4s。所以诊断、聊天日志镜像等
+重复流量一律**不走**这条通道(见第 7 节)。
 
-- 悬浮窗输入中文 → `POST /api/v1/overlay/translate` → 译成英文 → 写入系统剪贴板。
-- 用户回游戏，打开聊天按 `Ctrl+V` **手动粘贴**发送。
-  （游戏侧收不到任何外部数据，无法自动把文字注入游戏输入框。）
-- 早期「接管 `chat.xml` 的 `oninputsubmit` 做发送前翻译」的游戏内出站路径，
-  随网络能力一并失效，不再保留。
+## 3. 消息流(发)—— 游戏内发送前翻译
 
-## 4. 桥协议（受限，非通用代理）
+- `chat.xml` 的输入框提交由 `LCTOnChatSubmit()` 接管;开启发送前翻译时先经 BTIPC 把中文
+  译成目标语言(信封 `t=<target>`),再派发原版提交事件,由游戏自己的链路发出。
+- 通道失败 / 超时 → **按原文发送**(不阻塞用户)。
+- 悬浮窗的剪贴板路线(译好写剪贴板 → 用户回游戏 `Ctrl+V`)作为 legacy 备选保留。
+
+## 4. 桥协议(受限,非通用代理)
 
 | 端点 | 方法 | 说明 |
 | --- | --- | --- |
-| `/api/v1/overlay/messages` | GET | 悬浮窗轮询：最近聊天 + 会话标识 + 目标语言 |
-| `/api/v1/overlay/translate` | POST/GET | 悬浮窗出站：中文 → 英文（供复制） |
+| `/btipc/dl?w&r&p&t` | GET | **BTIPC 下行**。取窗口 `w` 第 `r` 轮的帧,**逐面板**回第 `p` 位:位=1 → `200`+PNG,位=0 → `404`。详见 [btipc-v1.md §6](btipc-v1.md) |
 | `/api/v1/translate` | POST/GET | 通用翻译 `{text,sourceLanguage,targetLanguage,provider?}` |
-| `/api/v1/test` | POST/GET | 用当前配置翻译固定文本，验证连通性/Key |
-| `/api/v1/config` | GET/POST | 读（打码）/ 写（支持打码回传）配置 |
-| `/api/v1/health` | GET | 健康检查（版本、当前服务商、回退链） |
-| `/api/v1/log` | POST/GET | 写一条聊天日志（旧游戏内通道，现由 console.log 通道替代） |
+| `/api/v1/test` | POST/GET | 用当前配置翻译固定文本,验证连通性/Key |
+| `/api/v1/config` | GET/POST | 读(打码)/ 写(支持打码回传)配置 |
+| `/api/v1/health` | GET | 健康检查(版本、当前服务商、回退链) |
+| `/api/v1/quickchat` | GET | 快捷语音模板语料 |
+| `/api/v1/gamenames` | GET | 英雄/装备名保护名单 |
+| `/api/v1/log` | POST/GET | 写一条聊天日志(现由 `console.log` 通道主导) |
 | `/api/v1/diag` | POST/GET | 游戏侧诊断信息写入桥日志 |
-| `/overlay` | GET | 网页版悬浮窗（`overlay.mode="web"` 时的回退） |
-| `/bridge` | GET | 旧游戏内面板页面（已废弃，仅诊断用） |
+| `/api/v1/overlay/messages` | GET | 悬浮窗轮询:最近聊天 + 会话标识 + 目标语言(legacy) |
+| `/api/v1/overlay/translate` | POST/GET | 悬浮窗出站:中文 → 英文(legacy) |
+| `/overlay` | GET | 网页版悬浮窗(legacy) |
+| `/bridge` | GET | 旧游戏内面板页面(已废弃,仅诊断用) |
 
-安全：仅监听 `127.0.0.1`；请求体 ≤ 64KB；单文本 ≤ 4000 字符；无任意 URL 代理；
-日志不含 apiKey；apiKey 只在本地 `config/config.json`（`.gitignore` 忽略）。
+**上行走 `console.log`,不走 HTTP**:游戏 → 桥没有请求端点。
+安全:仅监听 `127.0.0.1`;请求体 ≤ 64KB;单文本 ≤ 4000 字符;无任意 URL 代理;
+日志不含 apiKey;apiKey 只在本地 `config/config.json`(`.gitignore` 忽略)。
 
 ## 5. 配置
 
-- **桥配置**（`config/config.json`，含 apiKey）：由悬浮窗设置面板经 `/api/v1/config`
-  写回，或手动编辑。首次运行从 `config/config.example.json` 生成。
-- **悬浮窗/字幕偏好**：`overlay.*`（`view` / `edge` / `opacity` / `background` / `accent` /
-  `subtitle.*` 等），同样保存在 `config/config.json`。
-- **进程与开窗**：`watchGame`（默认 `false` = 桥常驻，游戏退出只关悬浮窗）、
-  `overlay.autoOpen`（检测到游戏启动时自动开窗）。
+- **桥配置**(`config/config.json`,含 apiKey):由悬浮窗设置页经 `/api/v1/config` 写回
+  (提交要包成 `{config:{...}}`,读取要解包 `{ok, config:{...}}`),或手动编辑。
+  首次运行从 `config/config.example.json` 生成。
+- **游戏侧 UI 偏好**(`enabled` / `displayMode` / `outgoing` / `outgoingTarget` / `force` /
+  `timeoutMs` / `targetLanguage`):由 `lingua_chat.js` 从桥配置同步,不包含任何密钥。
+- **悬浮窗 / 字幕偏好**:`overlay.*`(`view` / `edge` / `opacity` / `background` / `accent` /
+  `subtitle.*` 等),同样落在 `config/config.json`(legacy)。
+- **进程与开窗**:`watchGame`(默认 `false` = 桥常驻)、`overlay.autoOpen`。
+- **`deadlockConsoleLog`**:游戏 `console.log` 路径,桥启动时自动探测;不存在即说明游戏
+  没带 `-condebug`。
 
-## 6. 游戏内身份采集（SteamID）
+## 6. 游戏内身份采集(SteamID)
 
-- 顶栏条目本身不含 steamid，steamid 只存在于悬停资料卡；主动模拟悬停会抢鼠标控制，
-  已移除。
-- 被动采集：ESC 玩家行（`players_list_entry.xml` 隐藏 `{i:r:account_id}`）、
-  资料卡（`profile_card.xml` / `citadel_db_page_profile.xml`），零交互。
-- 桥端 `steamid_enrich.js` 在赛后按公开 API 补全整局 roster，写 `identity_cache.json`；
+- 顶栏条目本身不含 steamid,steamid 只存在于悬停资料卡;主动模拟悬停会抢鼠标控制,已移除。
+- 被动采集:ESC 玩家行(`players_list_entry.xml` 隐藏 `{i:r:account_id}`)、
+  资料卡(`profile_card.xml` / `citadel_db_page_profile.xml`),零交互。
+- 桥端 `steamid_enrich.js` 在赛后按公开 API 补全整局 roster,写 `identity_cache.json`;
   本机身份由桥端从 `console.log` 连接行回填。
 
 ## 7. 复用与扩展
 
-- 新增翻译服务商：`core/providers/` 新增文件并在 `registry.js` 注册即可，游戏侧无需改动。
-- 术语表：`core/glossary.js`（英雄中英名 / 商店装备 / 战术术语），注入每次翻译提示词。
-- 多语言：设置面板改 `targetLanguage` 即可。
+- 新增翻译服务商:`core/providers/` 新增文件并在 `registry.js` 注册即可,游戏侧无需改动。
+- 术语表:`core/glossary.js`(英雄中英名 / 商店装备 / 战术术语),注入每次翻译提示词。
+- 多语言:改 `targetLanguage` 即可。
+- **改 BTIPC 任一侧必须同步另一侧**:游戏侧把 crc16 / 位序 / UTF-8 / base64 都内联了一份副本
+  (Panorama 无模块系统)。改完跑 `tests/btipc/*` 与 `scripts/lingua_chat_simtest.js`。
+- **不要把窄带通道当通用管道用**:位信道 ≈16 B/s,诊断 / 日志镜像 / 大配置同步这类流量
+  要保持走 `console.log` 或按需触发,否则单槽队列会被堵死(第六十五轮实测踩过)。
 
-## 8. 历史（已废弃）
+## 8. 历史与 legacy
 
-- **隐藏 HTML 面板 + 轮询 `panel.title`**：Panorama 无法直接发 HTTP 时，
-  用隐藏 HTML 面板加载 `/bridge` 页面，页面内 JS 同源调用受限 API，
-  再把结果写回 `document.title`，Panorama 轮询读回。该通道在 2026-10-01 更新后
-  彻底失效（面板不再创建浏览器实例，桥端 `/bridge` 请求计数为 0）。
-- **`$.AsyncWebRequest` 直连**：同版本调用即同步抛错，已移除。
-- `lingua_chat.js` 保留 `probeInboundChannels()` 作 canary：若引擎将来恢复 CEF/HTTP，
-  会第一时间在日志中暴露。
+### 8.1 已废弃的通道
 
-## 9. 更正：入站通道并未被穷尽（2026-10-09）
+- **隐藏 HTML 面板 + 轮询 `panel.title`**:用隐藏 HTML 面板加载 `/bridge` 页面,页面内 JS
+  同源调用受限 API,再把结果写回 `document.title`,Panorama 轮询读回。2026-10-01 更新后
+  彻底失效(面板不再创建浏览器实例,桥端 `/bridge` 请求计数为 0)。
+- **`$.AsyncWebRequest` 直连**:同版本调用即同步抛错,已移除。
 
-v2.0.0 写下的结论「游戏内不存在任何可用的入站通道，在游戏内显示译文在架构上不可能」
-**不成立**。该探针只覆盖了「Panorama JS 能主动发起」这一类入口
-（`$.AsyncWebRequest` / HTML 面板 `SetURL` / 剪贴板 / `BImageFileExists`），
-漏了另一类：**引擎为了渲染会自己去取什么**。
+### 8.2 游戏外悬浮窗(v2.0.x 主路径,自 v2.0.1 起 legacy)
 
-上游 BabelTower 用 `<Image>` 面板的**加载状态**做成了 1 bit 的入站回读：
+**代码保留、可用,但不再是主显示路径**:`core/overlay.js`、`core/overlay_page.html`、
+`scripts/overlay_window.ps1` 及配套启动脚本。
+
+原管道:游戏侧 `pushEntry()` 里 `$.Msg("[LCT-CHAT]" + 单行 JSON)` → 桥 `overlay.js` 增量 tail
+→ 去重 → 翻译链 → 环形缓冲(最近 300 条)→ 悬浮窗轮询 `/api/v1/overlay/messages` 显示;
+出站走"译好写剪贴板 + 用户 `Ctrl+V`"。会话标识 `session` 在桥重启 / 进新一局 / 游戏退出时变化,
+悬浮窗据此清屏。
+
+这条线仍被复用:桥端 **聊天日志落盘**(`logs/chat/<matchId>.jsonl`)与 **`[diag]` 回收**
+都挂在同一个 `console.log` tail 上(见第 1 节)。
+
+### 8.3 探针退役
+
+`lingua_chat.js` 的 `probeInboundChannels()` 曾用运行时创建的 `<HTML>` 面板 + `SetURL` 判断
+"游戏内还能不能收到外部数据"。它有两个问题:每次启动都建一个真会被渲染的面板;以及**覆盖有
+盲区**(漏了 Image 位信道)却给出否定答案。第六十五轮已退役其面板/文件探针,只留一行
+`$` 成员表。
+
+## 9. 更正:入站通道并未被穷尽(2026-10-09)
+
+v2.0.0 写下的结论「游戏内不存在任何可用的入站通道,在游戏内显示译文在架构上不可能」
+**不成立**。那轮探针只覆盖了「Panorama JS 能主动发起」这一类入口
+(`$.AsyncWebRequest` / HTML 面板 `SetURL` / 剪贴板 / `BImageFileExists`),
+漏了另一类:**引擎为了渲染会自己去取什么**。
+
+`<Image>` 面板的**加载状态**可以当 1 bit 用:
 
 | 桥返回 | 游戏侧观察 | 位值 |
 | --- | --- | --- |
 | `200` + PNG | `ImageLoaded` 事件触发 | **1** |
-| `404` 空体 | `T_CLOSE`（600ms）内静默 | **0** |
+| `404` 空体 | `T_CLOSE`(600ms)内静默 | **0** |
 
-- 游戏侧建 128 个隐藏 2×2 Image 面板，逐轮 `SetImage("/btipc/dl?w=&r=&p=&t=")`
-- 128 bit = 16 字节 = 一帧，扣除 6 字节帧头后载荷 10 字节/帧
-- 实测 ~190 bit/s、位元零丢失（单 bit 延迟 P50 173ms / P99 1365ms）
-- `ImageLoaded` 是事件白名单里恰好 8 个 VALID 事件之一
+**为什么能成立**:图片加载由引擎在**渲染管线里自行发起**,不走 Panorama JS 的 HTTP API,
+所以 `AsyncWebRequest` 被移除不影响它。入站不需要 JS 原语,只需要一个"引擎会去取网络的
+声明式入口"。
 
-**为什么能成立**：图片加载由引擎在渲染管线里自行发起，不走 Panorama JS 的 HTTP API，
-所以 `AsyncWebRequest` 被移除不影响它。
-
-- 上行仍复用现成通道：`console.log` 结构化单行（`[LCT] BTIPC REQ ...`），
-  硬依赖游戏带 `-condebug` 启动（否则不写 `console.log`）。
-- 协议规格见上游 `docs/btipc-v1.md`（冻结版，含帧格式 / 轮次状态机 / CRC / 重试 / 风暴模式）；
-  本仓库按该规格自行实现，落地文档随实现补入 `docs/btipc-v1.md`。
+- 上行仍复用现成通道:`console.log` 结构化单行,**硬依赖 `-condebug`**。
+- 完整规格(帧格式 / 轮次状态机 / CRC / 重试 / 风暴模式 / 参数表)见 **[btipc-v1.md](btipc-v1.md)**。
