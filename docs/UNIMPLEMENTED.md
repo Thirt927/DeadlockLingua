@@ -5,7 +5,8 @@
 > (`AsyncWebRequest` / 面板 `SetURL` / CEF),经这些通道收发数据已不可能。
 > 但**入站并非不可能** —— 上游 BabelTower 用 `<Image>` 面板加载状态 + `ImageLoaded` 事件
 > 做出了 1 bit 入站通道(BTIPC),本仓库将按该规格自行实现,以恢复游戏内译文显示(见「一、5」)。
-> 在实现落地前,译文由**游戏外悬浮窗**显示(v2.0.1 起归档为 legacy),发消息走**剪贴板**。
+> v2.1.0(2026-10-09)起译文主显示路径为**游戏内**(BTIPC 双向信道,已落地并实车验收);
+> 游戏外悬浮窗自 v2.0.1 起归档为 legacy(代码保留可用),出站发消息也可走剪贴板路线。
 > 详见 docs/architecture.md 第 9 节。
 
 ## 一、未实现 / 待完善
@@ -30,7 +31,7 @@
 ### 4. 消息行 hero 读取稳定性
 - 聊天行 HeroImage 的 hero_id 对话框变量当前为空(heroimg probe hero_id=0/-1/-1),依赖顶栏昵称->英雄映射回填(第十三轮已加兜底,待实战验证)。
 
-### 5. BTIPC 双向信道 / 游戏内译文显示(**进行中**)
+### 5. BTIPC 双向信道 / 游戏内译文显示(**已于 v2.1.0 落地,实车验收通过**)
 - **目标**:恢复 v2.0.0 之前的游戏内体验 —— 译文直接追加在聊天行下方,发送前翻译走原版发送链路。
 - **方案**(按上游 `docs/btipc-v1.md` 冻结规格**自行实现**,不合并上游代码):
   - 上行:`console.log` 结构化单行 `[LCT] BTIPC REQ w=.. id=.. len=.. crc=.. b64=..`;
@@ -40,8 +41,9 @@
   - 帧:16 字节 = 128 bit,载荷 10 字节/帧(6 字节帧头);CRC-16/CCITT-FALSE 覆盖固定 14 字节;
     轮号 `r` 前进即隐式 ACK,重投同一 `r` 要求桥幂等重发同帧
   - 上层信封:`t=<target>\n<原文>` / `op=config` / `op=test`;payload 上限 680 字节
-- **待办**:桥端 `core/btipc/`(crc16 / framer / window / transport)+ `/btipc/dl` 路由;
-  游戏侧 `State.btipc` 客户端;译文 Label 追加到聊天行;发送前翻译回填 `TextEntry`。
+- **已落地(第六十四/六十五轮,2026-10-09)**:桥端 `core/btipc/{crc16,framer,window,transport}.js` + `GET /btipc/dl` 路由 + `overlay.js` 的 `onLine` 钩子 + 5s GC 定时器;游戏侧 `lingua_chat.js` 的 BTIPC 客户端(128 个隐藏 Image 面板 + `ImageLoaded` 轮次状态机 + 内联 crc16/UTF-8/base64 副本)+ `dispatchJob -> dispatchViaBtipc`;译文 Label 追加到聊天行;发送前翻译经 BTIPC 译成目标语言后回填原版提交链路。
+- **离线验证**:`tests/btipc/*` 五套(crc/frame/transport/e2e_tail/route,其中 `live_http` 起真实监听端口)全绿;`scripts/lingua_chat_simtest.js` PASS 58/0(模拟器用真实桥端 framer 编码、游戏侧内联副本解码,跨实现漂移会被 CRC 抓到)。
+- **仍未完成**:上游**实车验收**(关游戏 → 部署 `dist/pak22_dir.vpk` → 带 `-condebug` 启动 → 对局内看译文直接出现在聊天行下方)。实车通过后把 AGENTS.md §2 里「尚未实车验收」的注记移除。
 - **已知坑(来自上游实车)**:同 `r` 重投的 URL 必须变化(否则撞引擎缓存不触发 `ImageLoaded`);
   桥端窗口 GC 必须晚于客户端最长重试跨度;同轮位到达乱序,须按面板 id 定位位值而非到达序;
   存在迟到整轮重放,须按 `(id, round)` 幂等去重。

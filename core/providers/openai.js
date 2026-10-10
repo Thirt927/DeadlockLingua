@@ -24,7 +24,7 @@ function describeHttpError(status, bodyText) {
   switch (status) {
     case 401: return "API Key 无效(401)" + (msg ? ": " + msg : "");
     case 403: return "无权限/额度问题(403)" + (msg ? ": " + msg : "");
-    case 404: return "接口地址或模型不存在(404): 检查 baseUrl/model(DeepSeek 官方: https://api.deepseek.com 或 /v1 + 模型 deepseek-chat / deepseek-reasoner)" + (msg ? ": " + msg : "");
+    case 404: return "接口地址或模型不存在(404): 检查 baseUrl 是否带对前缀(OpenAI 需 /v1,DeepSeek 需 https://api.deepseek.com)以及 model 名是否正确" + (msg ? ": " + msg : "");
     case 429: return "请求过于频繁或额度不足(429)" + (msg ? ": " + msg : "");
     default:
       if (status >= 500) return "服务商错误(" + status + ")" + (msg ? ": " + msg : "");

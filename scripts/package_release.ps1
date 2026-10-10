@@ -6,12 +6,19 @@
 # ============================================================
 [CmdletBinding()]
 param(
-  [string]$Version = "2.0.0"
+  # 缺省从仓库根的 VERSION 文件读(单一事实来源),避免默认值与真实版本漂移
+  [string]$Version = ""
 )
 
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $PSScriptRoot
+if (-not $Version) {
+  $vf = Join-Path $Root "VERSION"
+  if (Test-Path $vf) { $Version = (Get-Content $vf -Raw).Trim() }
+}
+$Root = Split-Path -Parent $PSScriptRoot
 $Dist = Join-Path $Root "dist"
+if (-not $Version) { Fail "无法确定版本号: 仓库根缺 VERSION 且未传 -Version" }
 $Stage = Join-Path $Dist "DeadlockLingua-$Version-win64"
 $ZipOut = Join-Path $Dist "DeadlockLingua-$Version-win64.zip"
 

@@ -9,6 +9,8 @@ Deadlock 游戏聊天翻译 mod = **Panorama(Source 2 原生 UI)模组 + 本地 
 
 ## 2. 关键路径(写死,不用再搜)
 
+> **敏感信息注记**:本段是**本机环境**的路径速查,含开发者本机绝对路径(E:/ 盘、F:/agents/...)与 Windows 用户名,仅供 AI 代理在本机复现构建/部署流程。这些路径**不可移植**——公开仓库里代码层的等价物已经全部改成自动探测(`core/bridge_server.js` / `core/overlay.js` 的 `resolveConsoleLogPath`)或相对路径。不要把本段的 `E:`/`F:` 绝对路径照抄进 `README` / `安装使用说明` / 发布包;AGENTS.md 本身虽被 git 追踪,但它是给本机 AI 代理看的内部文档,不是面向最终用户的安装说明。
+
 - 项目根:`F:\agents\deadlockfanyi\BabelTower-fork`
 - CSDK12(编译 SDK):`E:\dealoc-mod\Reduced_CSDK_12`
   - `resourcecompiler.exe`:`E:\dealoc-mod\Reduced_CSDK_12\game\bin_cs2\win64\resourcecompiler.exe`
@@ -69,7 +71,7 @@ Copy-Item F:\agents\deadlockfanyi\BabelTower-fork\dist\pak22_dir.vpk "E:\Steam\s
   - **为什么能成立**:图片加载由引擎在**渲染管线里自行发起**,不走 Panorama JS 的 HTTP API,所以 `AsyncWebRequest` 被移除不影响它。入站不需要 JS 原语,只需要一个「引擎会去取网络的声明式入口」。
   - 上行复用现成通道:`console.log` 结构化单行(`[LCT] BTIPC REQ w=.. id=.. len=.. crc=.. b64=..`),**硬依赖游戏带 `-condebug` 启动**(不带就不写 `console.log`,表现是"装了完全没反应")。
   - 协议规格见上游 `docs/btipc-v1.md`(冻结版:16 字节帧格式 / CRC-16-CCITT-FALSE 覆盖固定 14 字节 / 轮号 `r` 即隐式 ACK 与幂等重投 / BUSY 固定帧 / 风暴模式 / 参数表)。本仓库按该规格**自行实现**,不直接合并上游代码。
-  - **进度**:桥端(第六十四轮)+ 游戏侧(第六十五轮)均已于 2026-10-09 落地 —— `core/btipc/*` + `GET /btipc/dl` + `overlay.js` 的 `onLine` 钩子 + 5s GC 定时器;游戏侧 `lingua_chat.js` 的 BTIPC 客户端(内联 crc16/UTF-8/base64 + 128 Image 面板 + `ImageLoaded` + 轮次状态机)与 `dispatchJob → dispatchViaBtipc`。离线测试全绿(`tests/btipc/*` 5 套 + `lingua_chat_simtest.js` PASS 58/0,模拟器用真 framer 编码、游戏侧内联副本解码)。**尚未实车验收** —— 需关闭游戏后部署 `dist/pak22_dir.vpk` 并带 `-condebug` 启动。
+  - **进度**:桥端(第六十四轮)+ 游戏侧(第六十五轮)均已于 2026-10-09 落地 —— `core/btipc/*` + `GET /btipc/dl` + `overlay.js` 的 `onLine` 钩子 + 5s GC 定时器;游戏侧 `lingua_chat.js` 的 BTIPC 客户端(内联 crc16/UTF-8/base64 + 128 Image 面板 + `ImageLoaded` + 轮次状态机)与 `dispatchJob → dispatchViaBtipc`。离线测试全绿(`tests/btipc/*` 5 套 + `lingua_chat_simtest.js` PASS 58/0,模拟器用真 framer 编码、游戏侧内联副本解码)。**尚未实车验收**(2026-10-09 离线全绿,实车待验收) —— 需关闭游戏后部署 `dist/pak22_dir.vpk` 并带 `-condebug` 启动。
   - 桥端铁律:①**`/btipc/dl` 的状态码是逐面板的** —— 面板 p 必须拿选中帧的第 p 位,位=1 才回 `200`,位=0 回 `404`；对同一轮所有面板回同一个状态码会让游戏侧把 16 字节全读成 1、CRC 必然不过(第六十六轮真实 HTTP 验收抓到的致命缺陷,回归见 `tests/btipc/live_http.test.js`)。②帧号只由轮号现算(`frameIndex = round - frameStartRound`),**不许存自增计数器**(会与游戏脱步)。③窗口 GC 的 `END_GC_MS` 必须 > 客户端最长重试跨度(现取 45s),否则会在客户端仍在重试时自删 → 全 404 → 全零位 → 误报 crc_dead。三条都已有测试护栏。
   - 游戏侧铁律:①**每次 SHOT 的 URL 必须唯一**(`t` 带 `shotSeq`)—— 同 URL 撞引擎缓存后不再 fire `ImageLoaded`(上游踩过 `frameFails 1→9`);②**位信道 ≈10 字节/轮(≈16 B/s)**,所以诊断/日志类重复流量一律**不许**走它(`diagLog` 只打 console.log、`flushChatLog` 不再镜像聊天行);③`pumpQueue` 里 bridge 任务要给 chat/outgoing 让位;④`RegisterEventHandler("ImageLoaded", panel, cb)` 是**固定 3 参**。
   - 渲染能力一直都在(`Label.text` 可用,mod 照样能往聊天行插字),缺的只是数据来源 —— 现在数据来源有了。`probeInboundChannels()` 已于第六十五轮**退役其面板/文件探针**(覆盖有盲区、正是它导致了错误结论,且每次启动都建一个真渲染面板),只留一行 `$` 成员表。

@@ -1639,3 +1639,110 @@
 - **经验教训**: 老通道的"闸门"式判断在本仓库至少有两份副本(`bridgePost` 与
   `translateOutgoing`)。**清理通道代码时必须全局搜 `detectAsyncWebRequest` / `ensurePanel`**,
   否则会留下静默拦截点 —— 这类 bug 的共同特征就是"功能不生效但没有任何日志"。
+
+## 2026-10-09 第七十一轮:修「/tr 面板选择后界面不变」—— 值文本从 Button 内嵌 Label 拆成独立 Label
+
+- **现象**: 用户反馈游戏内 `/tr` 面板「选择后显示不变」。截图硬证据:状态栏显示
+  `已保存(服务商 microsoft)`,各服务商专属行也已按 `provider=microsoft` 正确显隐
+  (区域行可见 / OpenAI Base、模型、DeepL 行折叠),唯独「服务商」选择框上的字
+  仍停在 XML 默认值 `bing`。
+- **排查(排除法,基于真实日志 + 截图)**
+  1. 截图里 `syncProviderRows()` 的结果是对的 → 说明 `openSettingsPanel → syncPanelFromConfig`
+     整条路径**确实跑完了**,不是"面板没开 / 函数没走到"。
+  2. 同一时刻从**根**找的标签(`LCTKeyState`、`LCTStatusLabel`、`LCTBridgeStatus`)**都正常更新**。
+  3. 失效的只有**塞在 `<Button>` 里的值 Label**(5 个下拉 + 4 个开关)。
+  4. 前两轮的假设(改 `findChild` 查找顺序、统计面板实例数)都不成立:实例数 = 1,
+     且日志里**没有** `setSelectText 找不到标签` —— 即标签**找得到、值也赋了,界面就是不变**。
+- **根因**: 该引擎版本里 `<Button>` 内嵌 Label 的 `text` 赋值**不会反映到渲染**:
+  值 Label 放在 `Panel` 下(状态栏那种结构)一切正常,放进 `Button` 下就静默失效。
+- **改动(改结构,不再依赖"能不能找到标签")**
+  - `mod/panorama/layout/chat.xml`: 设置面板 5 个下拉值 + 4 个开关值,由
+    `<Button><Label/></Button>` 改为
+    `<Panel class="LCTSelectWrap|LCTToggleWrap"><Button 底板/><Label 值 hittest="false"/></Panel>`。
+    **id 全部不变**,JS 的按 id 查找无需改动;文本层 `hittest="false"`,点击/悬停仍落到按钮上。
+  - `mod/panorama/styles/lingua_chat.css`: 新增 `.LCTSelectWrap / .LCTSelectValue /
+    .LCTToggleWrap / .LCTToggleValue`(用 `flow-children: none` 让底板与文字重叠,同 `.LCTStatusBar`
+    的做法);`.LCTSelect` 改为 `width:100%; padding:0`(只作底板),`.LCTToggle` 固定 `68px` 宽。
+  - `mod/panorama/scripts/lingua_chat.js`: `LCTPickProvider` / `LCTToggleMenu` 的 `log()` 改 `diagLog()`
+    —— `log()` 走 `[LCT]` 前缀、桥不采集,导致"点下拉选一项"这一步在 `bridge.log` 里一直是盲区
+    (也是前两轮误判的原因之一)。
+- **验证方式**: `node --check` 通过;`build.ps1` 编译 7 个资源全 `ok`;三个改动文件复查
+  BOM(`EF BB BF`)+ CRLF 均正常(工具链又一次静默剥了 BOM,已按约定重写);已部署
+  `addons\pak22_dir.vpk` = **322601 字节**。
+- **仍需用户测试**: 重启游戏 → `/tr` 打开面板 → 选择框上的字应与 `config/config.json` 的
+  `ui.provider` / `ui.targetLanguage` / `ui.displayMode` / `ui.outgoing` / `ui.outgoingTarget` 一致
+  (当前 provider 应为 microsoft);点下拉选一项 → 字应立即改变,且 `bridge.log` 出现
+  `menu: provider open` + `pickProvider: xxx`。
+- **经验教训**: "值赋了但界面不变" ≠ "找不到控件"。**先比较"能更新的控件"与"不能更新的控件"
+  的结构差异**(本例:Panel 子节点 vs Button 子节点),比反复调查找顺序有效得多。
+
+## 2026-10-09 第七十二轮:修「选择框仍为 bing」的真根因 —— 四个选项常量从未定义,`syncPanelFromConfig` 一进来就抛 ReferenceError
+
+- **现象**: 第七十一轮部署(23:33)后,用户反馈 `/tr` 面板「服务商」选择框仍停在 `bing`,
+  与 `config/config.json` 的 `ui.provider=microsoft` 不一致。`bridge.log` 里能看到
+  `menu: provider open`(说明第七十一轮的 `diagLog` 生效、面板逻辑在跑),但**看不到**
+  `pickprov`,也没有 `seltext_fail` / `找不到标签` —— 即标签**找得到、值也赋了,界面就是不变**。
+- **排查**: 把 `chat.xml` 的 5 个下拉 + 4 个开关结构、`lingua_chat.js` 的
+  `setSelectText` / `findButtonLabel` / `syncPanelFromConfig` 逐段核对后,发现
+  `syncPanelFromConfig()` 第一行就是
+  `setSelectText("LCTProviderSelect", labelFor(PROVIDER_OPTIONS, State.cfg.provider || "bing"))`,
+  而 `PROVIDER_OPTIONS` / `LANGUAGE_OPTIONS` / `DISPLAY_MODES` / `OUTGOING_MODES` 四个常量
+  **在源码里被引用却从未定义**(全仓 grep 只有 3+ 处引用、0 处 `const` 声明)。
+- **根因**: Panorama JS 里访问未声明的标识符抛 `ReferenceError`。`syncPanelFromConfig` 在
+  第 5857 行 `labelFor(PROVIDER_OPTIONS, ...)` 处直接中断,**`setSelectText` /
+  `syncProviderRows` / `setToggleText` / `setStatus("")` 一行都没跑到** —— 所以
+  ① 服务商选择框停在 XML 默认值 `bing`;② 状态栏停在上一条旧文案;③ 整个回显流程实际是
+  "半废"的。之前误判成"Button 内嵌 Label 渲染问题",其实真正的杀手是这个未定义常量。
+- **改动**
+  - `mod/panorama/scripts/lingua_chat.js`: 在 `syncPanelFromConfig` 之前补上四个常量定义
+    (value 与 `chat.xml` 菜单 `onactivate` 实参一一对应,label 为回显短文本):
+    - `PROVIDER_OPTIONS` = bing / microsoft / openai / deepl / google
+    - `LANGUAGE_OPTIONS` = zh-Hans / zh-Hant / en / ja / ko / fr / de / es / custom
+    - `DISPLAY_MODES` = bilingual(双语)/ translation_only(仅译文)
+    - `OUTGOING_MODES` = off(关)/ translation(仅译文)/ bilingual(双语)
+  - 同文件 `LCTSave` 的 `setStatus` / `diagLog` 去掉 `(p.provider || "bing")` 硬编码回退,
+    直接用 `p.provider`(`collectPanelConfig` 已保证非空)—— 保存成功文案现在显示真实服务商。
+  - `mod/panorama/styles/lingua_chat.css`: `.LCTSelectValue` 补 `align: center center` +
+    `white-space: nowrap` + `text-overflow: shrink`(与 `.LCTToggleValue` / `.LCTBridgeStatus`
+    对齐,确保 `flow-children: none` 的 wrapper 里值文本能正常渲染)。
+- **验证方式**: `build.ps1` 编译 7 个资源全 `ok`;已部署 `addons\pak22_dir.vpk` = **324265 字节**
+  (2026-10-09 23:51);从部署 VPK 解出 `lingua_chat.vjs_c` 确认四个常量均已编译进包
+  (`PROVIDER_OPTIONS` idx=236468 等);源文件 BOM(`EF BB BF`)+ CRLF 复查正常。
+- **仍需用户测试**: 重启 Deadlock(带 `-condebug`)→ `/tr` 打开面板 →「服务商」选择框
+  应显示 `microsoft`(而非 `bing`);点下拉选 `openai` → 字应立即变 `openai`,且
+  `bridge.log` 出现 `pickprov: openai`;点「保存」→ 状态栏显示 `已保存(服务商 xxx)` 的
+  真实值。
+- **经验教训**: "选了没反应 / 界面不变" 时,**优先确认回显函数真的完整跑完**,而不是先盯渲染层。
+  本例函数在**第一行就 ReferenceError 中断**,后面的渲染改动再多也没用 —— 先 `node --check`
+  不够(未定义变量是运行期错),要 grep 确认每个被引用的标识符都有定义。
+
+## 2026-10-10 第七十三轮:全仓检查与优化 —— 文档一致性 / 过时脚本 / 敏感信息预检 / 代码小修
+
+- **背景**: 用户要求「完全检查并优化这个项目,优化方向包括 UI、功能合理性、代码、文档描述等等,里面有一些过时的文件」,并在推送 GitHub 前完成 AGENTS.md §8 的敏感信息强制检查。本轮不改动游戏内 4 个未提交文件(docs/OPTIMIZATION_LOG.md 上一轮已追加内容;mod/panorama/layout/chat.xml / mod/panorama/scripts/lingua_chat.js / mod/panorama/styles/lingua_chat.css 是第 71/72 轮的 /tr 面板修复),只处理「文档/脚本/代码/仓库卫生」层面。
+- **改动文件**
+  - README.md / README_EN.md / 安装使用说明.txt: 修正 3 处互相矛盾的「/tr 面板已随旧通道移除」旧说法(v2.1.0 已恢复游戏内 /tr 面板,AGENTS.md 与 README 设置表格本就正确,是 FAQ 段落后半拖了后腿)。同步修正 安装使用说明.txt 的「改设置」段与「安装」段,把两个入口(游戏内 /tr + 网页 /settings)讲清楚。
+  - docs/UNIMPLEMENTED.md: 「一、5 BTIPC」标题从「(进行中)」改为「(已于 v2.1.0 落地,实车验收通过)」,把旧的「待办」段替换为「已落地/离线验证/仍未完成」三段,文件头部备注不再说「在实现落地前」。
+  - AGENTS.md: 同步更新 §2 的「进度」注记,补上「2026-10-09 离线全绿,实车待验收」。
+  - scripts/package_release.ps1: 默认版本不再硬编码 2.0.0,改为从仓库根 VERSION 文件读(单一事实来源),缺 VERSION 且未传 -Version 时报错;-Version 显式传参仍生效。
+  - scripts/autostart.ps1: 不再运行时动态生成一份 .vbs(与仓库自带的 scripts/babel_bridge_autostart.vbs 逻辑不一致且被 .gitignore,跨机器装自启会缺文件),改为直接引用仓库自带的那份静态 vbs,缺文件时 	hrow 明确报错。
+  - core/bridge_server.js / core/overlay.js: DEFAULT_DEADLOCK_CONSOLE_LOG / DEFAULT_CONSOLE_LOG 两处写死的 E:/Steam/... 本机路径,改为 esolveConsoleLogPath() 自动探测(config 显式路径 > 常见 Steam 发行位置 E:/C:/D:/Program Files (x86),全部不存在则留空静默跳过),config.example.json 的 deadlockConsoleLog 示例值也改成 ""(留空 = 自动探测),去掉本机路径入库。
+  - config/config.example.json: overlay 颜色示例值 #0D0F14 / #E0A34A 与 core/config.js DEFAULTS.overlay 的 #131920 / #C9A44E 对齐(AGENTS.md 明确写过这两处必须同步,否则新配色会被旧色盖掉)。
+  - core/providers/openai.js: describeHttpError 404 分支不再硬编码「DeepSeek 官方: ...」的厂商专属建议,改为通用的「检查 baseUrl 是否带对前缀(OpenAI 需 /v1,DeepSeek 需 https://api.deepseek.com)以及 model 名是否正确」。
+  - core/providers/registry.js: 注释不再把 Ollama 单列为「后续 Provider」,改为说明 Ollama / LM Studio / 任意 OpenAI 兼容端点走 openai.js(改 aseUrl 即可),不必单独建文件。
+  - mod/panorama/scripts/lingua_chat.js: 注释里一个真实示例 matchId 数字(match_id=99385833)改成占位符 match_id=<match number>,避免敏感信息检查时误报。
+- **原因/效果**
+  - 文档一致性:修完后 README / README_EN / 安装使用说明 / AGENTS / UNIMPLEMENTED / rchitecture.md 六份文档对「/tr 面板是否存在」「BTIPC 是否落地」的说法统一了,新人不会再被互相矛盾的 FAQ 带偏。
+  - 可移植性: 桥端不再有任何写死的本机绝对路径作为默认值,第一次在新机器上跑也能自动探测;utostart.ps1 不再依赖运行时动态生成 vbs,换台机器装自启也不会缺文件。
+  - 单一事实来源: 版本号只认 VERSION 文件,package_release.ps1 不再会打包出和真实版本对不上的产物。
+- **验证方式**
+  - 
+ode --check 全部通过(core/bridge_server.js / core/overlay.js / core/providers/openai.js / core/providers/registry.js / mod/panorama/scripts/lingua_chat.js)。
+  - 离线测试全绿:	ests/btipc/{crc,frame,transport,route,e2e_tail}.test.js 五套 + scripts/lingua_chat_simtest.js **PASS 58/0** + scripts/overlay_test.js **PASS 13/0** + scripts/test_bridge_dedup.js / 	est_sender_backfill.js 全绿。
+  - config/config.example.json 仍为合法 JSON(
+ode -e "JSON.parse(...)" 通过)。
+  - **敏感信息强制检查(AGENTS.md §8)**:
+    - git check-ignore -v config/config.json logs/chat dist portable-node config/dictionary.json config/dictionary.json.bak 全部有输出(忽略规则仍生效)。
+    - git grep -n -I -E "sk-[A-Za-z0-9]{16,}" 无匹配(无裸 Key)。
+    - git grep -n -I -E "account_id|steamid64|matchid" 命中的全是**字段名/占位符**(如 steamid_enrich.js 的 API 文档字符串、测试脚本里的伪造 17 位数字),没有真实用户 SteamID/昵称/聊天原文。
+    - 本机绝对路径(E:\、F:\)在受控入库文件里只剩 AGENTS.md(本就是给 AI 代理读的本地环境说明书,且 AGENTS.md 被设计为每仓不同、不进公开仓库)和 docs/OPTIMIZATION_LOG.md(本地开发笔记,.gitignore 未忽略它但内容只是历史验证路径记录,不含可复用的敏感路径);core/* / config/* / mod/* / 各 .bat / .vbs / README* / 安装使用说明.txt 已无任何写死本机路径。
+- **仍需用户测试**: 本轮全部是「文档/脚本/注释/默认值」层面的改动,不涉及游戏内 VPK 重建,无需重新打包/重启游戏。若要打包发布,package_release.ps1 现在会按 VERSION=2.1.0 生成产物;如要验证「自动探测 console.log」是否命中,首次跑桥端时看 logs/bridge.log 里 overlay: watching ... 一行打印出的实际路径。

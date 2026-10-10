@@ -15,7 +15,23 @@ const fs = require("fs");
 const path = require("path");
 
 const CHAT_MARKER = "[LCT-CHAT]";
-const DEFAULT_CONSOLE_LOG = "E:/Steam/steamapps/common/Deadlock/game/citadel/console.log";
+// 默认 console.log 路径(config.deadlockConsoleLog 未配时的兜底)。与 bridge_server.js
+// 的 resolveConsoleLogPath 同一套探测顺序;overlay.js 独立 tail,不能 require 桥端模块
+// (它只接受运行时注入的 deps),故在此本地复一份候选表。
+function resolveConsoleLogPath(cfg) {
+  const explicit = String((cfg && cfg.deadlockConsoleLog) || "").trim();
+  if (explicit) return explicit;
+  const candidates = [
+    "E:/Steam/steamapps/common/Deadlock/game/citadel/console.log",
+    "C:/Steam/steamapps/common/Deadlock/game/citadel/console.log",
+    "D:/Steam/steamapps/common/Deadlock/game/citadel/console.log",
+    "C:/Program Files (x86)/Steam/steamapps/common/Deadlock/game/citadel/console.log",
+  ];
+  for (const p of candidates) {
+    try { if (fs.existsSync(p)) return p; } catch (e) {}
+  }
+  return "";
+}
 
 // 增量读取:与 bridge_server.js 的 matchId 扫描同思路 —— 边界指纹检测日志重写,
 // 因为每次启动游戏 console.log 会被清空重写,只靠 size 变化判断增量会从错位字节开始读。
@@ -251,7 +267,7 @@ function primeBackfill(file, size) {
 
 function tailOnce() {
   const cfg = deps.getConfig();
-  const file = String((cfg && cfg.deadlockConsoleLog) || DEFAULT_CONSOLE_LOG || "");
+  const file = resolveConsoleLogPath(cfg);
   if (!file) return;
   if (fileState.path !== file) {
     resetFileState();
@@ -390,7 +406,7 @@ function start(d) {
   } catch (e) {}
   timer = setInterval(tick, POLL_MS);
   if (timer && typeof timer.unref === "function") timer.unref();
-  deps.log("info", "overlay: watching " + String((deps.getConfig() || {}).deadlockConsoleLog || DEFAULT_CONSOLE_LOG) + " for " + CHAT_MARKER);
+  deps.log("info", "overlay: watching " + (resolveConsoleLogPath(deps.getConfig()) || "(auto-detect failed)") + " for " + CHAT_MARKER);
 }
 
 function stop() {

@@ -2,8 +2,8 @@
 // 内置:
 //   bing      Bing Translator(公共免费接口,免 Key,默认)
 //   microsoft Microsoft Translator(Azure,需自己的 Key,质量/额度更稳)
-// 后续 Provider(DeepL / OpenAI 兼容 / Ollama 等)只需在 providers/ 下新增文件
-// 并在下方注册,即可被 Core 使用,游戏侧无需改动。
+// 新增 Provider:在 providers/ 下加文件并在下方注册,游戏侧无需改动。
+// Ollama / LM Studio / 任意 OpenAI 兼容端点走 openai.js(改 baseUrl 即可),不必单独建文件。
 "use strict";
 
 const providers = {

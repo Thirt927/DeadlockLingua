@@ -37,16 +37,11 @@ function Clear-ApprovedFlag {
 }
 
 if ($Action -eq "Install") {
-  $Node = Join-Path $Root "portable-node\node.exe"
-  if (-not (Test-Path $Node)) { $Node = "node" }
-  $Server = Join-Path $Root "core\bridge_server.js"
-  if (-not (Test-Path $Server)) { throw "找不到桥服务器: $Server" }
+  # 静态 vbs(仓库里已有一份,逻辑与 StartDeadlock.bat 一致:先 cd 到项目根、优先便携 node)。
+  # 不再运行时动态生成——旧版动态生成的那一份与静态版逻辑不一致(不 cd、路径拼接易翻车),
+  # 且生成的文件被 .gitignore 忽略,跨机器装自启就缺文件。改为统一用仓库自带的那份。
+  if (-not (Test-Path $VbsPath)) { throw "找不到无窗口启动脚本: $VbsPath (应由 scripts\babel_bridge_autostart.vbs 提供)" }
 
-  # 生成无窗口启动脚本(第 2 个参数 0 = 隐藏窗口)
-  # 引号规则:VBScript 中 "" 表示一个字面引号;两个路径之间必须是 2引号+空格+2引号
-  $vbs = 'Set sh = CreateObject("WScript.Shell")' + "`r`n"
-  $vbs += 'sh.Run """' + $Node + '"" ""' + $Server + '""", 0, False' + "`r`n"
-  [System.IO.File]::WriteAllText($VbsPath, $vbs, (New-Object System.Text.UTF8Encoding($false)))
 
   # 注册到 HKCU Run(wscript 静默执行 vbs)
   Set-ItemProperty -Path $RunKey -Name $ValueName -Value ('"' + (Join-Path $env:WINDIR "System32\wscript.exe") + '" "' + $VbsPath + '"')
@@ -54,13 +49,11 @@ if ($Action -eq "Install") {
   Clear-ApprovedFlag
   $installed = (Get-ItemProperty -Path $RunKey -Name $ValueName).$ValueName
   Write-Host "已注册开机自启(Run 键): $installed"
-  Write-Host "vbs 位置: $VbsPath"
   Write-Host ""
   Write-Host "之后直接 Steam 启动 Deadlock 即可;游戏退出时桥自动关闭。"
   Write-Host "卸载: powershell -ExecutionPolicy Bypass -File scripts\autostart.ps1 -Action Remove"
 } else {
   $removed = $false
-  if (Test-Path $VbsPath) { Remove-Item $VbsPath -Force; $removed = $true }
   if (Test-Path $RunKey) {
     $p = Get-ItemProperty -Path $RunKey -Name $ValueName -ErrorAction SilentlyContinue
     if ($p) {

@@ -357,7 +357,23 @@ function normBridgeName(name) {
 // 旧实现只读尾部 512KB,比赛打几分钟后 'Lobby ... for Match N created' 就
 // 被刷出窗口(实测 1.9MB 日志里该行在 29% 处)。改为增量扫描:记录上次字节偏移,
 // 每次只读新增部分,兼容日志增长与轮转/清空。同时从连接行解析本机玩家昵称+steamid。
-const DEFAULT_DEADLOCK_CONSOLE_LOG = "E:/Steam/steamapps/common/Deadlock/game/citadel/console.log";
+// 默认 console.log 路径(config.deadlockConsoleLog 未配时的兜底)。
+// 优先走自动探测:config 显式路径 > Steam 常见发行位置(E: 盘优先,兼容 C:/D: 等)。
+// 全部不存在则返回空串,readLatestGameMatchId 静默跳过(不影响桥启动)。
+function resolveConsoleLogPath(cfg) {
+  const explicit = String((cfg && cfg.deadlockConsoleLog) || "").trim();
+  if (explicit) return explicit;
+  const candidates = [
+    "E:/Steam/steamapps/common/Deadlock/game/citadel/console.log",
+    "C:/Steam/steamapps/common/Deadlock/game/citadel/console.log",
+    "D:/Steam/steamapps/common/Deadlock/game/citadel/console.log",
+    "C:/Program Files (x86)/Steam/steamapps/common/Deadlock/game/citadel/console.log",
+  ];
+  for (const p of candidates) {
+    try { if (fs.existsSync(p)) return p; } catch (e) {}
+  }
+  return "";
+}
 // console.log 每次游戏启动会被清空重写:仅靠 stat.size >= offset 判断增量会从错位
 // 字节开始读,永远错过本次比赛的 created 行(实际出现过旧 matchId 被写进新日志)。
 // 用“边界指纹”检测重写:记录上次扫描结束时文件尾部若干字节,下次扫描先校验同位置
@@ -369,7 +385,7 @@ const MATCH_ID_GRACE_MS = 120 * 1000; // keep returning the finished match id fo
 const MIGRATE_SESSION_FRESH_MS = 5 * 60 * 1000; // only migrate session files written within the last 5 minutes
 const IDENTITY_CACHE_FILENAME = "identity_cache.json"; // cross-match nickname -> steamid cache (passive profile-card collection)
 function readLatestGameMatchId(cfg) {
-  const file = String((cfg && cfg.deadlockConsoleLog) || DEFAULT_DEADLOCK_CONSOLE_LOG || "");
+  const file = resolveConsoleLogPath(cfg);
   if (!file) return "";
   try {
     if (gameMatchFile.path !== file) {

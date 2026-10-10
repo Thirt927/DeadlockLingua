@@ -418,7 +418,7 @@ A: A provider failure falls back to the original text (no hang); when the bridge
 A: Double-click `StartBridgeSilent.vbs`, or check Task Manager for `node.exe`.
 
 **Q: Can I still change settings in game? Typing `/tr` does nothing.**
-A: The in-game `/tr` panel was removed with the old channels; `/tr` is now sent as ordinary chat text. Use the overlay's "Settings" page (double-click `ShowOverlay.bat`).
+A: Yes. The in-game `/tr` panel was restored together with the BTIPC channel in v2.1.0 — type `/tr` (or `!tr` / `.tr`, or click the "译" button right of the chat input) to open the quick toggles instantly; provider / API key and other one-time settings live on the web settings page `http://127.0.0.1:8791/settings` (the bit channel carries 10 bytes per frame and the full config is ~1.3 KB, so it does not fit).
 
 **Q: I'd rather use the overlay to read translations.**
 A: Still possible — the code is there. Switch the view mode in settings; `overlay.mode="web"` falls back to a browser window.
