@@ -1,4 +1,4 @@
-// Babel Tower - Deadlock 聊天翻译 Panorama 脚本
+﻿// Babel Tower - Deadlock 聊天翻译 Panorama 脚本
 // ------------------------------------------------------------------
 // 独立实现(不复制任何现有 mod 代码),技术路线与 DLCT 一致:
 //   扫描聊天行 -> 去重 -> 隐藏 HTML 面板桥接本地 Core -> 原文下方追加译文
@@ -2889,7 +2889,7 @@ function resolveSteamId(record) {
       const s = String(v || "").trim();
       return (s && !/^0+$/.test(s)) ? s : "";
     };
-    // Convars 优先:Deadlock 连接日志会输出 match_id=99385833,引擎通常同时
+    // Convars 优先:Deadlock 连接日志会输出 match_id=<match number>,引擎通常同时
     // 暴露同名 convar;Panorama 全局对象在当前版本会抛 Code generation 错误。
     try {
       const convars = [
@@ -5844,6 +5844,43 @@ function injectTranslation(row, sig, text) {
     }
   }
 
+  // 下拉选项定义(value 与 chat.xml 菜单 onactivate 的实参一一对应,label 是选中后
+  // 回显在值 Label 上的短文本)。⚠️ 此前这四个常量只被 syncPanelFromConfig /
+  // LCTCycle / LCTPickLang 引用却**从未定义**,于是 labelFor(PROVIDER_OPTIONS, ...) 在第一行就抛
+  // ReferenceError,syncPanelFromConfig 整个中断,setSelectText 一行都没执行 →
+  // 各选择框停在 chat.xml 里的 XML 默认值("bing"/"zh-Hans"/"双语"/"关"/"en"),
+  // 这正是"选了没反应、界面不变"的根因。补齐定义后回显即可生效。
+  const PROVIDER_OPTIONS = [
+    { value: "bing", label: "bing" },
+    { value: "microsoft", label: "microsoft" },
+    { value: "openai", label: "openai" },
+    { value: "deepl", label: "deepl" },
+    { value: "google", label: "google" },
+  ];
+
+  const LANGUAGE_OPTIONS = [
+    { value: "zh-Hans", label: "zh-Hans" },
+    { value: "zh-Hant", label: "zh-Hant" },
+    { value: "en", label: "en" },
+    { value: "ja", label: "ja" },
+    { value: "ko", label: "ko" },
+    { value: "fr", label: "fr" },
+    { value: "de", label: "de" },
+    { value: "es", label: "es" },
+    { value: "custom", label: "custom" },
+  ];
+
+  const DISPLAY_MODES = [
+    { value: "bilingual", label: "双语" },
+    { value: "translation_only", label: "仅译文" },
+  ];
+
+  const OUTGOING_MODES = [
+    { value: "off", label: "关" },
+    { value: "translation", label: "仅译文" },
+    { value: "bilingual", label: "双语" },
+  ];
+
   function syncPanelFromConfig() {
     setFieldText("LCTApiKey", "");
     setFieldText("LCTRegion", "");
@@ -6031,7 +6068,8 @@ function injectTranslation(row, sig, text) {
     updateKeyStateLabel();
     saveUiConfig();
     closeSelectMenus();
-    log("pickProvider: " + value);
+    // 走 diagLog:log() 是 `[LCT]` 前缀,桥不采集 —— 之前下拉选择在 bridge.log 里完全看不到
+    diagLog("pickprov", "PANORAMA: pickProvider: " + value);
   }
 
   function LCTCycle(which) {
@@ -6071,6 +6109,7 @@ function injectTranslation(row, sig, text) {
       } catch (e) {}
     }
     log("menu: " + field + (isOpen ? " close" : " open"));
+    diagLog("menu_" + field, "PANORAMA: menu: " + field + (isOpen ? " close" : " open"));
   }
 
   // 菜单选项选择
@@ -6186,8 +6225,8 @@ function injectTranslation(row, sig, text) {
         }
         syncProviderRows();
         saveUiConfig();
-        setStatus("已保存(服务商 " + (p.provider || "bing") + ")");
-        diagLog("savesaved", "PANORAMA: settings saved provider=" + (p.provider || "bing") +
+        setStatus("已保存(服务商 " + p.provider + ")");
+        diagLog("savesaved", "PANORAMA: settings saved provider=" + p.provider +
           " outgoing=" + p.outgoing + " enabled=" + p.enabled);
       } else {
         setStatus("保存失败: " + ((res && res.error) || "unknown"));

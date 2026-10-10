@@ -1,4 +1,4 @@
-/* Babel Tower - 聊天翻译 UI 样式
+﻿/* Babel Tower - 聊天翻译 UI 样式
    仅使用 Source 2 Panorama 支持的 CSS(flow-children / align / visibility 等),
    技术写法参照已发布的同类 mod(如 DLCT)验证过的模式。 */
 
@@ -223,13 +223,15 @@
 }
 
 /* ---- 选择控件(点击切换/展开菜单) ---- */
+/* 值文本是本控件上层的独立 Label(.LCTSelectValue),按钮只作可点击底板、
+   不再承载文字 —— 见下方 .LCTSelectWrap 的说明。 */
 .LCTSelect {
-  padding: 2px 12px;
+  width: 100%;
+  height: 28px;
+  padding: 0px;
   background-color: #20242a;
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 4px;
-  min-width: 200px;
-  height: 28px;
   color: #e8e2d6;
   font-size: 14px;
   font-weight: bold;
@@ -247,6 +249,56 @@
 
 .LCTSelect:active {
   brightness: 0.85;
+}
+
+/* 值文本层。⚠️ 关键:值 Label 必须是**普通 Panel 的子节点**,不能塞进 <Button> 里。
+   实测(2026-10-09 /tr 面板回显问题):写进 Button 内嵌 Label 的 text 会被静默忽略 ——
+   同一时刻从根找的 LCTKeyState / 状态栏标签都正常更新,而行显隐(syncProviderRows)也正常,
+   唯独按钮里的 Label 一律停在 XML 默认值。改为"按钮做底板 + 独立 Label 显示值"后,
+   该 Label 与状态栏标签结构一致,赋值即可生效。
+   Wrapper 用 flow-children: none 让底板与文本重叠(同 .LCTStatusBar 的做法),
+   文本 hittest=false,鼠标事件仍落到下面的按钮上。 */
+.LCTSelectWrap {
+  width: 100%;
+  height: 28px;
+  flow-children: none;
+}
+
+.LCTSelectValue {
+  align: center center;
+  width: 100%;
+  height: 28px;
+  text-align: center;
+  vertical-align: center;
+  color: #e8e2d6;
+  font-size: 14px;
+  font-weight: bold;
+  white-space: nowrap;
+  text-overflow: shrink;
+}
+
+/* 开关(是/否)同理:底板按钮 + 独立 Label */
+.LCTToggle {
+  align: left center;
+  width: 68px;
+  padding: 0px;
+}
+
+.LCTToggleWrap {
+  width: 100%;
+  height: 28px;
+  flow-children: none;
+}
+
+.LCTToggleValue {
+  align: left center;
+  width: 68px;
+  height: 28px;
+  text-align: center;
+  vertical-align: center;
+  color: #c9c2b4;
+  font-size: 14px;
+  font-weight: bold;
 }
 
 /* 下拉菜单(默认隐藏;在行内流式展开,下方内容被推开属正常) */
