@@ -25,13 +25,14 @@
   border: 1px solid rgba(255, 210, 127, 0.55);
   border-radius: 3px;
   color: #ffd27f;
-  font-size: 13px;
+  font-size: 11px;
   font-weight: bold;
   height: 22px;
   margin-left: 6px;
-  padding: 0px 8px;
+  padding: 0px 6px;
   vertical-align: middle;
-  width: 30px;
+  min-width: 34px;
+  width: 38px;
 }
 
 .LCTSettingsButton:hover {
@@ -47,15 +48,19 @@
   visibility: collapse;
 }
 
-/* ---- 设置面板(默认隐藏,居中弹窗) ---- */
+/* Babel Tower - settings panel design tokens (used by scripts/tmp_panel_redesign.js)
+   设计约定(改样式请遵守,避免"框与字、框与框不协调"):
+   - 间距 8px 节奏:行内 padding 4px 2px、行间距 2px、分组标题上间距 10px
+   - 行结构统一「左标签(fill) + 右控件列 176px」,所有控件同宽
+   - 控件统一高度 30px / 圆角 4px / 1px 边框;正文字号 13px,分组标题 11px */
 .LCTSettingsPanel {
   align: center center;
-  width: 660px;
-  height: 600px;
-  background-color: gradient( linear, 0% 0%, 0% 100%, from( #141a20 ), color-stop( 0.48, #0e1318 ), to( #0a0d10 ) );
-  border: 1px solid rgba(255, 252, 244, 0.08);
-  border-radius: 6px;
-  box-shadow: rgba(0, 0, 0, 0.45) 0px 16px 34px 0px;
+  width: 560px;
+  height: 620px;
+  background-color: gradient( linear, 0% 0%, 0% 100%, from( #151b22 ), color-stop( 0.5, #0e1318 ), to( #0a0d10 ) );
+  border: 1px solid rgba(201, 164, 78, 0.22);
+  border-radius: 8px;
+  box-shadow: rgba(0, 0, 0, 0.55) 0px 18px 40px 0px;
   flow-children: down;
   z-index: 5000;
   visibility: collapse;
@@ -65,30 +70,96 @@
   visibility: visible;
 }
 
-/* 标题栏 */
+/* 标题栏:标题 + 副标题 + 右侧关闭 */
 .LCTSettingsHeader {
   width: 100%;
-  height: 52px;
-  background-color: gradient( linear, 0% 0%, 0% 100%, from( #1a2027 ), color-stop( 0.6, #141a20 ), to( #10151a ) );
+  height: 48px;
+  background-color: rgba(255, 255, 255, 0.03);
   flow-children: right;
-  padding: 0px 18px;
-  border-bottom: 1px solid rgba(201, 164, 78, 0.18);
+  padding: 0px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
 }
 
 .LCTPanelTitle {
-  font-size: 18px;
+  font-size: 17px;
   color: #f2f4f8;
   font-weight: bold;
   letter-spacing: 0.5px;
   vertical-align: center;
 }
 
-/* 副标题(与主标题同一行,小字浅灰,视觉分层) */
+.LCTPanelSub {
+  font-size: 12px;
+  color: #8a94a3;
+  vertical-align: center;
+  margin-left: 8px;
+}
 
+.LCTHeaderClose {
+  width: 28px;
+  height: 28px;
+  min-width: 0px;
+  padding: 0px;
+  align: right center;
+  background-color: transparent;
+  border: 0px solid transparent;
+  border-radius: 4px;
+  color: #8a94a3;
+  font-size: 13px;
+  font-weight: bold;
+  text-align: center;
+  transition-property: background-color, color;
+  transition-duration: 0.15s;
+}
+
+.LCTHeaderClose:hover {
+  background-color: rgba(217, 112, 95, 0.2);
+  color: #ffffff;
+}
+
+/* 状态栏:左侧提示占满剩余宽度,右侧桥状态固定,两者不会重叠 */
+.LCTStatusBar {
+  width: 100%;
+  height: 28px;
+  flow-children: right;
+  padding: 0px 16px;
+  background-color: rgba(0, 0, 0, 0.28);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.LCTStatusLabel {
+  width: fill-parent-flow( 1 );
+  height: 28px;
+  vertical-align: center;
+  color: #9fb4d0;
+  font-size: 12px;
+  text-overflow: shrink;
+  white-space: nowrap;
+}
+
+.LCTBridgeWrap {
+  flow-children: right;
+  height: 28px;
+  margin-left: 12px;
+}
+
+.LCTBridgeDot {
+  vertical-align: center;
+  font-size: 11px;
+  margin-right: 5px;
+  color: #6b7684;
+}
+
+.LCTBridgeStatus {
+  vertical-align: center;
+  color: #7fd8a8;
+  font-size: 12px;
+  white-space: nowrap;
+}
 
 /* 主体与滚动列表
    注意:Body 必须给确定高度(fill-parent-flow),否则 List 的 fill-parent-flow
-   会按内容高度解析(~650px),把底部保存/测试按钮挤出 560px 面板外(用户看不到保存按钮)。 */
+   会按内容高度解析,把底部按钮挤出面板。 */
 .LCTSettingsBody {
   width: 100%;
   height: fill-parent-flow(1.0);
@@ -100,56 +171,66 @@
   height: fill-parent-flow(1.0);
   flow-children: down;
   overflow: squish scroll;
-  padding: 10px 18px;
+  padding: 6px 14px 12px 14px;
 }
 
-/* 设置行:纵向(标签在上,控件在下) */
-.LCTSettingsRow {
-  width: 100%;
-  flow-children: down;
-  padding: 7px 10px;
-  margin-bottom: 4px;
-  border-radius: 6px;
-  border-left: 2px solid transparent;
-}
-
-.LCTSettingsRow:hover {
-  background-color: rgba(255, 210, 127, 0.045);
-  border-left: 2px solid rgba(201, 164, 78, 0.55);
-}
-
-.LCTRowLabel {
-  color: #a8b0be;
-  font-size: 13px;
-  font-weight: bold;
-  letter-spacing: 0.2px;
-  margin-bottom: 4px;
-}
-
-/* 分组小标题:浅灰大写字母风格,带左边色条做视觉锚点 */
+/* 分组标题 */
 .LCTSectionTitle {
   width: 100%;
-  color: #6b7684;
+  color: #7f8b99;
   font-size: 11px;
   font-weight: bold;
   letter-spacing: 1px;
-  padding: 6px 0px 4px 0px;
-  margin-top: 2px;
+  padding: 10px 2px 4px 2px;
   margin-bottom: 2px;
-  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
 }
 
+.LCTSectionTitleFirst {
+  border-top: 0px solid transparent;
+  padding-top: 2px;
+}
 
-/* 输入框:文字颜色显式设置(否则可能不可见) */
+/* 设置行:左标签 + 右控件列 */
+.LCTSettingsRow {
+  width: 100%;
+  flow-children: right;
+  padding: 4px 2px;
+  margin-bottom: 2px;
+  border-radius: 4px;
+  transition-property: background-color;
+  transition-duration: 0.12s;
+}
+
+.LCTSettingsRow:hover {
+  background-color: rgba(255, 255, 255, 0.035);
+}
+
+.LCTRowLabel {
+  width: fill-parent-flow( 1 );
+  color: #b8c0cc;
+  font-size: 13px;
+  vertical-align: top;
+  padding-top: 8px;
+  margin-right: 12px;
+}
+
+/* 右控件列:固定宽度,保证所有控件左右对齐 */
+.LCTFieldCol {
+  width: 176px;
+  flow-children: down;
+}
+
+/* 输入框 */
 .LCTInput {
   width: 100%;
-  height: 28px;
-  background-color: #10151a;
-  border: 1px solid rgba(255, 255, 255, 0.07);
+  height: 30px;
+  background-color: #0d1218;
+  border: 1px solid rgba(255, 255, 255, 0.10);
   border-radius: 4px;
-  color: #f2f4f8;
-  font-size: 14px;
-  padding: 0px 8px;
+  color: #eef2f7;
+  font-size: 13px;
+  padding: 0px 9px;
 }
 
 .LCTInput:hover {
@@ -158,47 +239,52 @@
 
 /* 按钮(共用) */
 .LCTBtn, .LCTToggle {
-  padding: 2px 12px;
-  background-color: #1c2127;
-  border: 0px solid transparent;
+  min-width: 72px;
+  height: 30px;
+  padding: 2px 14px;
+  background-color: #1e242b;
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 4px;
-  min-width: 68px;
-  height: 28px;
-  color: #c9c2b4;
-  font-size: 14px;
+  color: #d7dce3;
+  font-size: 13px;
   font-weight: bold;
   text-align: center;
-  transition-property: background-color, brightness;
-  transition-duration: 0.18s;
+  transition-property: background-color, border-color, color;
+  transition-duration: 0.15s;
   transition-timing-function: ease-in-out;
 }
 
 .LCTBtn:hover, .LCTToggle:hover {
-  background-color: #242b33;
+  background-color: #262e37;
+  border: 1px solid rgba(201, 164, 78, 0.45);
   color: #ffffff;
 }
 
 .LCTBtn:active, .LCTToggle:active {
-  background-color: #171c22;
+  background-color: #171d23;
 }
 
 .LCTBtnSave {
   background-color: #2f5d3a;
+  border: 1px solid rgba(143, 224, 180, 0.35);
   color: #ffffff;
 }
 
 .LCTBtnSave:hover {
   background-color: #3a7048;
+  border: 1px solid rgba(143, 224, 180, 0.6);
   color: #ffffff;
 }
 
 .LCTBtnTest {
-  background-color: #2a4a6b;
+  background-color: #27435f;
+  border: 1px solid rgba(143, 200, 240, 0.3);
   color: #ffffff;
 }
 
 .LCTBtnTest:hover {
-  background-color: #355d85;
+  background-color: #325877;
+  border: 1px solid rgba(143, 200, 240, 0.55);
   color: #ffffff;
 }
 
@@ -207,124 +293,105 @@
   width: 100%;
   height: 56px;
   flow-children: right;
-  padding: 0px 18px;
-  border-top: 1px solid rgba(201, 164, 78, 0.18);
-  background-color: gradient( linear, 0% 0%, 0% 100%, from( #141a20 ), to( #0f1418 ) );
-}
-
-/* 状态栏(独立一行, 避免被 footer 水平流挤压) */
-.LCTStatusBar {
-  width: 100%;
-  height: 30px;
-  flow-children: none;
-  padding: 0px 18px;
-  border-bottom: 1px solid rgba(255, 252, 244, 0.05);
-  background-color: rgba(10, 13, 17, 0.75);
-}
-.LCTStatusLabel {
-  vertical-align: center;
-  color: #9fb4d0;
-  font-size: 12px;
-  width: 100%;
-  text-overflow: shrink;
-  white-space: normal;
-  max-height: 100%;
+  padding: 0px 16px;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  background-color: rgba(0, 0, 0, 0.22);
 }
 
 .LCTKeyHint {
   vertical-align: center;
-  color: #6b7684;
+  color: #6f7a88;
   font-size: 11px;
-  margin-left: 8px;
+  margin-left: 10px;
   white-space: nowrap;
 }
 
-/* ---- 选择控件(点击切换/展开菜单) ---- */
-/* 值文本是本控件上层的独立 Label(.LCTSelectValue),按钮只作可点击底板、
-   不再承载文字 —— 见下方 .LCTSelectWrap 的说明。 */
+/* 高级设置分组头 */
+.LCTAdvancedHead {
+  margin-top: 2px;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+/* ---- 选择控件(点击展开菜单) ----
+   值文本是本控件上层的独立 Label(.LCTSelectValue),按钮只作可点击底板。
+   ⚠️ 实测(2026-10-09):写进 Button 内嵌 Label 的 text 会被静默忽略,
+   所以值必须放在按钮上层、由脚本赋值的独立 Label 里。 */
+.LCTSelectWrap {
+  width: 100%;
+  height: 30px;
+  flow-children: none;
+}
+
 .LCTSelect {
   width: 100%;
-  height: 28px;
+  height: 30px;
   padding: 0px;
-  background-color: #1c2127;
+  background-color: #1e242b;
   border: 1px solid rgba(255, 255, 255, 0.09);
   border-radius: 4px;
-  color: #f2f4f8;
-  font-size: 14px;
-  font-weight: bold;
-  text-align: center;
-  transition-property: background-color, brightness;
-  transition-duration: 0.18s;
-  transition-timing-function: ease-in-out;
+  color: #eef2f7;
+  transition-property: background-color, border-color;
+  transition-duration: 0.15s;
 }
 
 .LCTSelect:hover {
-  background-color: #242b33;
+  background-color: #262e37;
   border: 1px solid rgba(201, 164, 78, 0.45);
 }
 
 .LCTSelect:active {
-  background-color: #171c22;
-}
-
-/* 值文本层。⚠️ 关键:值 Label 必须是**普通 Panel 的子节点**,不能塞进 <Button> 里。
-   实测(2026-10-09 /tr 面板回显问题):写进 Button 内嵌 Label 的 text 会被静默忽略 ——
-   同一时刻从根找的 LCTKeyState / 状态栏标签都正常更新,而行显隐(syncProviderRows)也正常,
-   唯独按钮里的 Label 一律停在 XML 默认值。改为"按钮做底板 + 独立 Label 显示值"后,
-   该 Label 与状态栏标签结构一致,赋值即可生效。
-   Wrapper 用 flow-children: none 让底板与文本重叠(同 .LCTStatusBar 的做法),
-   文本 hittest=false,鼠标事件仍落到下面的按钮上。 */
-.LCTSelectWrap {
-  width: 100%;
-  height: 28px;
-  flow-children: none;
+  background-color: #171d23;
 }
 
 .LCTSelectValue {
   align: center center;
   width: 100%;
-  height: 28px;
+  height: 30px;
   text-align: center;
   vertical-align: center;
-  color: #f2f4f8;
-  font-size: 14px;
+  color: #eef2f7;
+  font-size: 13px;
   font-weight: bold;
   white-space: nowrap;
-  text-overflow: shrink;
 }
 
-/* 开关(是/否)同理:底板按钮 + 独立 Label */
+/* 开关:按钮作底板 + 上层状态 Label(是/否),开启时文字变绿 */
+.LCTToggleWrap {
+  width: 72px;
+  height: 30px;
+  flow-children: none;
+  align: right center;
+}
+
 .LCTToggle {
-  align: left center;
-  width: 68px;
+  width: 72px;
+  min-width: 0px;
   padding: 0px;
 }
 
-.LCTToggleWrap {
-  width: 100%;
-  height: 28px;
-  flow-children: none;
-}
-
 .LCTToggleValue {
-  align: left center;
-  width: 68px;
-  height: 28px;
+  align: center center;
+  width: 72px;
+  height: 30px;
   text-align: center;
   vertical-align: center;
-  color: #c9c2b4;
-  font-size: 14px;
+  color: #9aa4b2;
+  font-size: 13px;
   font-weight: bold;
 }
 
-/* 下拉菜单(默认隐藏;在行内流式展开,下方内容被推开属正常) */
+.LCTToggleValue.LCTOn {
+  color: #8fe0b4;
+}
+
+/* 下拉菜单(在控件列内展开,推开下方内容) */
 .LCTSelectMenu {
   visibility: collapse;
   flow-children: down;
   width: 100%;
   margin-top: 4px;
-  background-color: #0f141a;
-  border: 1px solid rgba(201, 164, 78, 0.18);
+  background-color: #0d1218;
+  border: 1px solid rgba(201, 164, 78, 0.25);
   border-radius: 4px;
   padding: 3px;
 }
@@ -336,19 +403,19 @@
 .LCTMenuOption {
   width: 100%;
   height: 26px;
-  padding: 0px 8px;
+  padding: 0px 9px;
   background-color: transparent;
   border: 0px solid transparent;
   border-radius: 3px;
-  color: #c9c2b4;
-  font-size: 13px;
+  color: #cfd6df;
+  font-size: 12px;
   text-align: left;
-  transition-property: background-color, brightness;
+  transition-property: background-color, color;
   transition-duration: 0.12s;
 }
 
 .LCTMenuOption:hover {
-  background-color: rgba(201, 164, 78, 0.16);
+  background-color: rgba(201, 164, 78, 0.18);
   color: #ffffff;
 }
 
@@ -362,27 +429,17 @@
   visibility: visible;
 }
 
-/* 服务商专属配置行(默认隐藏,由脚本按当前服务商显示) */
-#LCTRowRegion, #LCTRowOpenaiBase, #LCTRowOpenaiModel, #LCTRowDeeplEndpoint {
+/* API Key 配置状态提示 */
+.LCTKeyState {
+  color: #6f7a88;
+  font-size: 11px;
+  margin-top: 3px;
+}
+
+/* 服务商专属配置行 + 高级行:默认隐藏,由脚本按「高级开关 + 服务商」显示 */
+#LCTRowApiKey, #LCTRowRegion, #LCTRowOpenaiBase, #LCTRowOpenaiModel, #LCTRowDeeplEndpoint, #LCTRowFallback, #LCTRowTimeout {
   visibility: collapse;
 }
-
-
-/* 桥状态(状态栏右侧):指示灯 + 文本整体右对齐 */
-.LCTBridgeWrap {
-  align: right center;
-  flow-children: right;
-  height: 100%;
-  margin-right: 4px;
-}
-
-.LCTBridgeStatus {
-  vertical-align: center;
-  color: #7fd8a8;
-  font-size: 12px;
-  white-space: nowrap;
-}
-
 /* ---- 译文标签(追加在原文下方,蓝色气泡:浅蓝斜体 + 深色半透明底) ---- */
 .LCTTranslation {
   color: #8fd8ff;

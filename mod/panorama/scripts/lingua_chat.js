@@ -5037,6 +5037,32 @@ function injectTranslation(row, sig, text) {
     // 那些字段 [LCT-CHAT] 带不了,且频率很低。
   }
 
+  // ---- 鼠标指针:面板打开期间申请「自由光标」 ----
+  // Deadlock 平时不显示鼠标指针(默认按住 Tab 才出现),而 /tr 面板要靠鼠标点。
+  // Panorama 里没有 Convars / 控制台通道(实测 globalThis 只有 $、panorama 与几个声音
+  // 函数),所以这里 best-effort:能走 Convars 就走,不能就派发引擎的
+  // HeroTestingToggleFreeCursor 事件(未注册的 unhandled 事件派发是安全的哑操作)。
+  // 结果写进 diagLog,桥日志里能看到实际走了哪条路径。
+  let freeCursorHeld = false;
+  function requestFreeCursor(on) {
+    if (on === freeCursorHeld) return;
+    let how = "none";
+    try {
+      if (typeof Convars !== "undefined" && Convars && Convars.SetValue) {
+        Convars.SetValue("hud_free_cursor", on ? "1" : "0");
+        how = "convar";
+      }
+    } catch (e) {}
+    if (how === "none") {
+      try {
+        $.DispatchEvent("HeroTestingToggleFreeCursor");
+        how = "event";
+      } catch (e) { how = "failed"; }
+    }
+    freeCursorHeld = on;
+    diagLog("cursor", "PANORAMA: free cursor " + (on ? "on" : "off") + " via " + how);
+  }
+
   // ---- 桥健康探测 + 状态渲染 ----
   // 起因(实测): healthCheck 只在启动时跑过一次,而当时 `op=health` 在桥端**并不存在** ——
   // 那行 `op=health\n{}` 落进了"裸文本"分支,被当成待翻译文本发出去;回来的是一段译文,
@@ -5484,11 +5510,10 @@ function injectTranslation(row, sig, text) {
     const trimmed = String(raw).trim();
     if (!trimmed) return;
 
-    // 设置面板开关。同时支持 /tr、!tr、.tr 三种前缀:
-    // `/` 开头的输入可能被引擎当成控制台命令吃掉(那样根本走不到 oninputsubmit),
-    // 所以给一个 `!` 前缀的等价入口(`!lcttest` 用的就是它,一直可用)。
+    // 设置面板开关:只认 /tr(用户要求去掉 !tr / .tr 等冗余别名)。
     const cmd = trimmed.toLowerCase();
-    if (cmd === "/tr" || cmd === "!tr" || cmd === ".tr") {
+    // 只保留 /tr 一个入口(!tr / .tr 已按用户要求移除)
+    if (cmd === "/tr") {
       log("cmd: " + cmd + " -> toggle settings panel");
       LCTToggleSettings();
       clearInput();
@@ -5782,6 +5807,9 @@ function injectTranslation(row, sig, text) {
     // 桥状态:先用已知值渲染(可能已是当前值),再主动探一次拿最新
     refreshBridgeStatus();
     try { healthCheck(); } catch (e) {}
+    // 打开面板期间申请自由光标,并允许鼠标按下直接给控件焦点
+    try { if (typeof panel.SetDisableFocusOnMouseDown === "function") panel.SetDisableFocusOnMouseDown(false); } catch (e) {}
+    try { requestFreeCursor(true); } catch (e) {}
     // 聚焦面板本身(与 DLCT 一致:优先控件,失败则面板;面板持焦后 Tab/Enter 可用)
     // 仅在面板仍可见时聚焦,否则异步回调会在用户已关闭设置后把焦点抢回隐藏面板
     try {
@@ -5794,6 +5822,7 @@ function injectTranslation(row, sig, text) {
   }
 
   function closeSettingsPanel() {
+    try { requestFreeCursor(false); } catch (e) {}
     const panel = findChild(getRoot(), SETTINGS_PANEL_ID);
     if (panel) {
       try {
@@ -6011,6 +6040,11 @@ function injectTranslation(row, sig, text) {
     const label = findButtonLabel(panel, id);
     if (label) {
       try { label.text = on ? "是" : "否"; } catch (e) {}
+      // 开/关用颜色区分,扫一眼就能看出状态
+      try {
+        if (on) label.AddClass("LCTOn");
+        else label.RemoveClass("LCTOn");
+      } catch (e) {}
     } else {
       diagLog("tg_" + id, "PANORAMA: setToggleText 找不到 " + id + "Label");
     }
@@ -6064,7 +6098,7 @@ function injectTranslation(row, sig, text) {
     setRow("LCTRowOutgoingTarget", (State.cfg.outgoing || "off") !== "off");
     const advLabel = findChild(getRoot(), "LCTAdvancedLabel");
     if (advLabel) {
-      try { advLabel.text = uiAdvancedOpen ? "已展开" : "已收起"; } catch (e) {}
+      try { advLabel.text = uiAdvancedOpen ? "展开" : "收起"; } catch (e) {}
     }
     let hint = "";
     if (p === "bing") hint = "免 Key 公共接口,可能有隐形限流;失败可配置自动回退";

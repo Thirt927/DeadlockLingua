@@ -1791,3 +1791,18 @@ ode -e "JSON.parse(...)" 通过)。
 - **构建/部署**: 用 CSDK12 重新编译 7 个资源 → `dist/pak01_dir.vpk` → 覆盖为 `dist/pak22_dir.vpk` → 部署到 `E:\Steam\...\addons\pak22_dir.vpk`(328,385 字节,2026-10-14 22:24,旧文件已备份为 `pak22_dir.vpk.bak-before-rebuild-20261014`)。VPK 内已验证包含新增文案与 id(高级/收起/已展开/LCTBridgeDot/LCTAdvancedHead 等)。
 - **验证方式**: XML 用 [xml] 解析通过;node --check 通过;离线测试(btipc 五套 + simtest 58/0 + overlay 13/0 + sender_backfill 11/0)全绿;VPK 解包比对新增字符串全部命中。
 - **仍需用户测试**: **必须重启游戏**(VPK 生效需重启),然后:①看聊天输入框右侧是否出现「译」按钮(有 = 布局覆盖生效);②输入 /tr(或 !tr / .tr)打开面板;③面板里点「高级设置」确认展开/收起。若仍无「译」按钮,说明 addon 加载在更新后确实被阻断,下一步排查 addons 加载路径与 DMM 登记(可对比其它 mod 是否也不生效)。
+
+## 第七十七轮(2026-10-14): /tr 面板按实机反馈重做 + 只保留 /tr + 自由光标尝试
+
+- **背景(用户实机反馈五项)**: ①输入框右侧按钮显示成「几个点」而不是「译」;②鼠标没法聚焦,得一直按住 Tab 才能操作面板;③桥没开时,面板最下方左侧提示与右侧桥状态文字叠在一起;④`!tr` / `.tr` 冗余,只保留 `/tr`;⑤整体不美观,「框与字、框与框不协调」,要求重新设计。
+- **改动文件**: `mod/panorama/layout/chat.xml`、`mod/panorama/styles/lingua_chat.css`、`mod/panorama/scripts/lingua_chat.js` + 文档(AGENTS.md / README.md / README_EN.md / 安装使用说明.txt / CHANGELOG.md)。
+- **改动内容**:
+  - **按钮改字**: `LCTSettingsButton` 内文字 译 → **set**(「译」在该字体下渲染为方点,实测不可读);按钮宽度按 3 个 ASCII 字符调到 38px。
+  - **面板重排(设计规范)**: 行结构统一为「左标签 fill-parent-flow + 右控件列 `.LCTFieldCol` 176px」;控件统一 30px 高 / 4px 圆角 / 1px 边框 / 13px 字;分组标题 11px + 上分隔线;行内 padding 4px 2px、行距 2px;面板 560×620,标题栏 48px(关闭按钮移到右上角)、状态栏 28px、底部操作栏 56px。信息架构重排:翻译(启用/强制/翻译自己/聊天日志) → 服务商(服务商 + 高级设置折叠) → 语言与显示 → 发送前翻译。
+  - **状态栏不再重叠**: 状态栏改 `flow-children: right`,左提示 `fill-parent-flow(1)` + `text-overflow: shrink`,右侧桥状态 + 指示灯作为固定宽度的 `.LCTBridgeWrap` 跟随 —— 彻底消除左/右文字重叠(原实现是左侧 100% 宽 + 右侧绝对右对齐,长文案必叠)。
+  - **开关配色**: `setToggleText()` 同步加/移 `.LCTOn` 类,开启绿色、关闭灰色。
+  - **只留 /tr**: `handleChatSubmit()` 里的 `!tr` / `.tr` 分支删除。
+  - **自由光标(鼠标聚焦)**: 新增 `requestFreeCursor(on)`,打开面板时申请、关闭时还原:优先 `Convars.SetValue("hud_free_cursor", 1|0)`(Deadlock 的 Panorama 实测没有 Convars,走不到),否则派发引擎事件 `HeroTestingToggleFreeCursor`;另对面板调用 `SetDisableFocusOnMouseDown(false)`,让鼠标按下直接给控件焦点。每次尝试都写 `diagLog("cursor", ...)`,桥日志里能看到 `free cursor on/off via convar|event|failed`。
+- **验证方式**: XML `[xml]` 解析通过;`node --check` 通过;离线测试 tests/btipc 五套 + lingua_chat_simtest(58/0)+ overlay_test(13/0)+ test_sender_backfill(11/0)全绿;重新编译 7 个资源打包部署到 addons,`pak22_dir.vpk`(332,700 字节)解包确认含新文案与新 class。
+- **顺带处理**: addons 里出现了一个被改名成 `pak03_dir.vpk` 的旧构建(22:29 那版),与新的 `pak22_dir.vpk` 会争抢同一批覆盖文件,已改名为 `pak03_dir.vpk.bak-old-20261014` 停用。
+- **仍需用户测试**: 重启游戏后:①输入框右侧应是 `set`;②打开面板后**直接点**(不必按住 Tab)看是否可交互 —— 若仍需按住 Tab,说明 `HeroTestingToggleFreeCursor` 未被引擎处理,需要换思路(例如注册 `$.RegisterKeyBind` 让面板可用键盘完全操作);③桥关闭时看底部状态栏左右文字是否还会重叠。

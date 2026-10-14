@@ -26,13 +26,15 @@ Deadlock 游戏聊天翻译 mod = **Panorama(Source 2 原生 UI)模组 + 本地 
   - 脚本内有具名互斥锁 `Local\DeadlockLinguaOverlay`,重复启动会直接退出,不会开出第二个窗口
   - 网页版(回退):`http://127.0.0.1:8791/overlay`(把 `config.json` 的 `overlay.mode` 改成 `"web"`)
 - 配置:`F:\agents\deadlockfanyi\BabelTower-fork\config\config.json`(provider 当前 openai→DeepSeek)
-- 设置界面(两个入口):①游戏内输入 `/tr` 或点输入框右侧「译」按钮 → 弹设置面板(管常用开关,直接读内存 `State.cfg`,秒开);②浏览器 `http://127.0.0.1:8791/settings` → 网页设置页(管服务商 / API Key / 端点 / 全部字段,可折叠分组 + 语言/模式下拉 + 回退服务商复选框)
+- 设置界面(两个入口):①游戏内输入 `/tr` 或点输入框右侧 `set` 按钮 → 弹设置面板(管常用开关,直接读内存 `State.cfg`,秒开);②浏览器 `http://127.0.0.1:8791/settings` → 网页设置页(管服务商 / API Key / 端点 / 全部字段,可折叠分组 + 语言/模式下拉 + 回退服务商复选框)
 - 游戏内面板「打不开 / 改了没反应」的排查顺序(全部有日志埋点,任一步缺失即定位到该层):
   ①`cmd: ... -> toggle settings panel`(命令有没有到达 `handleChatSubmit`)
   → ②`settings toggle: open/close` + `settings: opened vis=.. saveBtn=.. inChat=..`(面板有没有找到/真的可见/保存按钮在不在)
   → ③`toggle: <name>`(开关回调有没有触发)
   → ④`save clicked` → `settings saved` 且桥端出现 `BTIPC TRQ ... op=config`(保存有没有发出)。
-  面板同时支持 `/tr`、`!tr`、`.tr` 与输入框右侧「译」按钮 —— `/` 前缀可能被引擎当控制台命令吃掉,故留了 `!` 等价入口。
+  面板只认 `/tr`(2026-10-14 按用户要求移除 `!tr` / `.tr` 别名),也可点输入框右侧 `set` 按钮。
+  ⚠️ **鼠标指针**: Deadlock 默认不显示指针(要按住 Tab),面板打开时会尝试申请「自由光标」(`requestFreeCursor()`:优先 `Convars.SetValue("hud_free_cursor")`,否则派发 `HeroTestingToggleFreeCursor`),并在关闭时还原;结果写进 bridge.log 的 `free cursor on/off via ...` 一行。
+  ⚠️ **面板视觉规范**: 左侧标签(fill)+ 右侧控件列(176px),控件统一 30px 高 / 4px 圆角 / 13px 字;改样式请沿用 `.LCTFieldCol` / `.LCTSettingsRow` / `.LCTSectionTitle` 这套类,不要单独给某一行加宽高。
   面板改动需重建 VPK 并**重启游戏**才生效。⚠️ 别再加周期性 `op=health` 轮询:一次占 5 帧(≈3s),5 秒一轮会吃掉约六成窄带信道(第六十九轮踩过)。
 - 桥状态(面板里的 `LCTBridgeStatus`):**以真实流量为准** —— BTIPC 的 `settleOk` 标记在线,`settleFail` 仅在通道级失败(`bridge_down`/`crc_dead`/`timeout`/`dispatch_threw`)时标记离线(被抢占/取消/too_long 是本地原因,不算桥离线);另外打开面板时主动探一次 `op=health`。⚠️ `op=health` **必须存在**:曾经没有它,`op=health\n{}` 落进"裸文本"分支被当成待翻译文本,回来的是译文 → `JSON.parse` 必失败 → 桥状态永远显示"不可用"还白烧一次 provider 调用(第六十八轮)。
 - ⚠️ **桥日志时间戳是 UTC**(与北京时间差 8 小时),排查时先换算再对时段。
