@@ -68,20 +68,22 @@
 /* 标题栏 */
 .LCTSettingsHeader {
   width: 100%;
-  height: 50px;
-  background-color: gradient( linear, 0% 0%, 0% 100%, from( #1b2128 ), to( #13181d ) );
+  height: 52px;
+  background-color: gradient( linear, 0% 0%, 0% 100%, from( #1a2027 ), color-stop( 0.6, #141a20 ), to( #10151a ) );
   flow-children: right;
-  padding: 0px 15px;
-  border-bottom: 1px solid rgba(255, 252, 244, 0.06);
+  padding: 0px 18px;
+  border-bottom: 1px solid rgba(201, 164, 78, 0.18);
 }
 
 .LCTPanelTitle {
   font-size: 18px;
-  color: #ffffff;
+  color: #f2f4f8;
   font-weight: bold;
-  letter-spacing: 1px;
+  letter-spacing: 0.5px;
   vertical-align: center;
 }
+
+/* 副标题(与主标题同一行,小字浅灰,视觉分层) */
 
 
 /* 主体与滚动列表
@@ -98,50 +100,66 @@
   height: fill-parent-flow(1.0);
   flow-children: down;
   overflow: squish scroll;
-  padding: 12px 16px;
+  padding: 10px 18px;
 }
 
 /* 设置行:纵向(标签在上,控件在下) */
 .LCTSettingsRow {
   width: 100%;
   flow-children: down;
-  padding: 5px 8px;
-  margin-bottom: 2px;
+  padding: 7px 10px;
+  margin-bottom: 4px;
   border-radius: 6px;
+  border-left: 2px solid transparent;
 }
 
 .LCTSettingsRow:hover {
-  background-color: gradient( linear, -8% 0%, 100% 0%, from( rgba(102, 204, 153, 0.05) ), to( rgba(102, 204, 153, 0.00) ) );
+  background-color: rgba(255, 210, 127, 0.045);
+  border-left: 2px solid rgba(201, 164, 78, 0.55);
 }
 
 .LCTRowLabel {
-  color: #cde5db;
+  color: #a8b0be;
   font-size: 13px;
   font-weight: bold;
-  letter-spacing: 0.3px;
+  letter-spacing: 0.2px;
   margin-bottom: 4px;
 }
+
+/* 分组小标题:浅灰大写字母风格,带左边色条做视觉锚点 */
+.LCTSectionTitle {
+  width: 100%;
+  color: #6b7684;
+  font-size: 11px;
+  font-weight: bold;
+  letter-spacing: 1px;
+  padding: 6px 0px 4px 0px;
+  margin-top: 2px;
+  margin-bottom: 2px;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+
 
 /* 输入框:文字颜色显式设置(否则可能不可见) */
 .LCTInput {
   width: 100%;
   height: 28px;
-  background-color: gradient( linear, 0% 0%, 0% 100%, from( #1c1f24 ), to( #14171b ) );
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background-color: #10151a;
+  border: 1px solid rgba(255, 255, 255, 0.07);
   border-radius: 4px;
-  color: #e8e2d6;
+  color: #f2f4f8;
   font-size: 14px;
   padding: 0px 8px;
 }
 
 .LCTInput:hover {
-  border: 1px solid rgba(255, 210, 127, 0.35);
+  border: 1px solid rgba(201, 164, 78, 0.5);
 }
 
 /* 按钮(共用) */
 .LCTBtn, .LCTToggle {
   padding: 2px 12px;
-  background-color: #20242a;
+  background-color: #1c2127;
   border: 0px solid transparent;
   border-radius: 4px;
   min-width: 68px;
@@ -156,13 +174,12 @@
 }
 
 .LCTBtn:hover, .LCTToggle:hover {
-  brightness: 1.08;
-  background-color: #2a2f36;
+  background-color: #242b33;
   color: #ffffff;
 }
 
 .LCTBtn:active, .LCTToggle:active {
-  brightness: 0.85;
+  background-color: #171c22;
 }
 
 .LCTBtnSave {
@@ -190,9 +207,9 @@
   width: 100%;
   height: 56px;
   flow-children: right;
-  padding: 0px 15px;
-  border-top: 1px solid rgba(255, 252, 244, 0.06);
-  background-color: gradient( linear, 0% 0%, 0% 100%, from( #13181d ), to( #0d1115 ) );
+  padding: 0px 18px;
+  border-top: 1px solid rgba(201, 164, 78, 0.18);
+  background-color: gradient( linear, 0% 0%, 0% 100%, from( #141a20 ), to( #0f1418 ) );
 }
 
 /* 状态栏(独立一行, 避免被 footer 水平流挤压) */
@@ -200,9 +217,9 @@
   width: 100%;
   height: 30px;
   flow-children: none;
-  padding: 0px 15px;
-  border-bottom: 1px solid rgba(255, 252, 244, 0.06);
-  background-color: rgba(13, 17, 21, 0.85);
+  padding: 0px 18px;
+  border-bottom: 1px solid rgba(255, 252, 244, 0.05);
+  background-color: rgba(10, 13, 17, 0.75);
 }
 .LCTStatusLabel {
   vertical-align: center;
@@ -229,10 +246,10 @@
   width: 100%;
   height: 28px;
   padding: 0px;
-  background-color: #20242a;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background-color: #1c2127;
+  border: 1px solid rgba(255, 255, 255, 0.09);
   border-radius: 4px;
-  color: #e8e2d6;
+  color: #f2f4f8;
   font-size: 14px;
   font-weight: bold;
   text-align: center;
@@ -242,13 +259,12 @@
 }
 
 .LCTSelect:hover {
-  brightness: 1.08;
-  background-color: #2a2f36;
-  border: 1px solid rgba(255, 210, 127, 0.4);
+  background-color: #242b33;
+  border: 1px solid rgba(201, 164, 78, 0.45);
 }
 
 .LCTSelect:active {
-  brightness: 0.85;
+  background-color: #171c22;
 }
 
 /* 值文本层。⚠️ 关键:值 Label 必须是**普通 Panel 的子节点**,不能塞进 <Button> 里。
@@ -270,7 +286,7 @@
   height: 28px;
   text-align: center;
   vertical-align: center;
-  color: #e8e2d6;
+  color: #f2f4f8;
   font-size: 14px;
   font-weight: bold;
   white-space: nowrap;
@@ -307,8 +323,8 @@
   flow-children: down;
   width: 100%;
   margin-top: 4px;
-  background-color: #161a1f;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  background-color: #0f141a;
+  border: 1px solid rgba(201, 164, 78, 0.18);
   border-radius: 4px;
   padding: 3px;
 }
@@ -332,7 +348,7 @@
 }
 
 .LCTMenuOption:hover {
-  background-color: rgba(255, 210, 127, 0.14);
+  background-color: rgba(201, 164, 78, 0.16);
   color: #ffffff;
 }
 
@@ -351,14 +367,19 @@
   visibility: collapse;
 }
 
-/* 桥状态标签(状态栏右侧) */
+
+/* 桥状态(状态栏右侧):指示灯 + 文本整体右对齐 */
+.LCTBridgeWrap {
+  align: right center;
+  flow-children: right;
+  height: 100%;
+  margin-right: 4px;
+}
+
 .LCTBridgeStatus {
   vertical-align: center;
-  align: right center;
   color: #7fd8a8;
   font-size: 12px;
-  margin-left: auto;
-  margin-right: 4px;
   white-space: nowrap;
 }
 
@@ -480,4 +501,32 @@
   white-space: normal;
   max-width: 300px;
   text-shadow: 0px 1px 2px rgba(0, 0, 0, 0.95);
+}
+
+.LCTPanelSub {
+  font-size: 13px;
+  color: #8a94a3;
+  letter-spacing: 0.5px;
+  vertical-align: center;
+  margin-left: 10px;
+  font-weight: normal;
+}
+
+/* 高级设置折叠头(与分组分隔线呼应) */
+.LCTAdvancedHead {
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  margin-top: 2px;
+}
+
+/* 高级配置行默认收起,由脚本按「高级设置开关 + 服务商」决定显示 */
+#LCTRowApiKey, #LCTRowFallback, #LCTRowTimeout {
+  visibility: collapse;
+}
+
+/* 桥状态指示灯:灰=未知 / 绿=在线 / 红=离线(颜色由脚本设置) */
+.LCTBridgeDot {
+  vertical-align: center;
+  font-size: 11px;
+  margin-right: 6px;
+  color: #6b7684;
 }

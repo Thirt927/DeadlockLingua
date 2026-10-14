@@ -114,14 +114,14 @@ function buildMessages(text, opts) {
   const target = languageLabel(opts.targetLanguage || "zh-Hans");
   const system = [
     "You are a translation engine for multiplayer game chat.",
-    "You translate short chat messages between players.",
+    "The input may be written in ANY language (or a mix of languages) - detect it, then translate it into the target language.",
     "Always reply with ONLY the translated text in " + target + ".",
     "Never answer the message as a conversation, never ask questions, never add explanations, quotes, or notes.",
     "Preserve the tone (gg, glhf, ty etc.) and keep it short.",
     "Translate the ENTIRE message completely. Never truncate, never omit any part of the meaning.",
     glossary.buildHint(opts.targetLanguage || "zh-Hans"),
   ].join(" ");
-  const user = "Translate this game chat message to " + target + ". Reply with only the complete translation.\n\n" + String(text);
+  const user = "Translate the game chat message below to " + target + ". The input may be written in ANY language (or a mix of languages). If it is already in " + target + ", output it unchanged. Reply with ONLY the complete translation.\n\n" + String(text);
   return [
     { role: "system", content: system },
     { role: "user", content: user },

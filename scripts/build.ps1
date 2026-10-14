@@ -103,11 +103,13 @@ $contentAddon = Join-Path $Csdk12Root "content\citadel_addons\$AddonName"
 $gameAddon = Join-Path $Csdk12Root "game\citadel_addons\$AddonName"
 
 # 1. 同步源码到 CSDK addon 的 content 目录
-if (Test-Path $contentAddon) { Remove-Item $contentAddon -Recurse -Force }
-if (Test-Path $gameAddon) { Remove-Item $gameAddon -Recurse -Force }
+# 逐文件覆写同步(不再递归 Remove-Item 再重建):
+# 旧实现会在文件被编辑器/resourcecompiler 临时占用时直接失败(本次踩过:`Remove-Item` 对 `chat.xml` 报 Access denied)。
+# 逐文件 copy 对单个文件占用更宽容,且不会误删用户手动加进 addon 目录的其他文件。
 New-Item -ItemType Directory -Path $contentAddon -Force | Out-Null
 Copy-Item $ModDir\* $contentAddon -Recurse -Force
 Write-Step "源码已同步到 $contentAddon"
+
 
 # 2. 编译 panorama 资源
 $contentPano = Join-Path $contentAddon "panorama"

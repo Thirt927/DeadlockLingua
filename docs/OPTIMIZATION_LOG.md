@@ -1746,3 +1746,48 @@ ode -e "JSON.parse(...)" 通过)。
     - git grep -n -I -E "account_id|steamid64|matchid" 命中的全是**字段名/占位符**(如 steamid_enrich.js 的 API 文档字符串、测试脚本里的伪造 17 位数字),没有真实用户 SteamID/昵称/聊天原文。
     - 本机绝对路径(E:\、F:\)在受控入库文件里只剩 AGENTS.md(本就是给 AI 代理读的本地环境说明书,且 AGENTS.md 被设计为每仓不同、不进公开仓库)和 docs/OPTIMIZATION_LOG.md(本地开发笔记,.gitignore 未忽略它但内容只是历史验证路径记录,不含可复用的敏感路径);core/* / config/* / mod/* / 各 .bat / .vbs / README* / 安装使用说明.txt 已无任何写死本机路径。
 - **仍需用户测试**: 本轮全部是「文档/脚本/注释/默认值」层面的改动,不涉及游戏内 VPK 重建,无需重新打包/重启游戏。若要打包发布,package_release.ps1 现在会按 VERSION=2.1.0 生成产物;如要验证「自动探测 console.log」是否命中,首次跑桥端时看 logs/bridge.log 里 overlay: watching ... 一行打印出的实际路径。
+## 第七十四轮(2026-10-13): 翻译提示词改为「任意源语言 → 目标语言」
+
+- **背景**: 用户要求「翻译提示词应能设置: 不论别人发什么语言,都翻译成目标语言」。原来 openai.js 的 system 提示词写的是 "You translate short chat messages between players",对源语言没有明确说明;模型对「整句已经是目标语言」「中英混杂」「非目标语言」等边界情况的行为不可靠(可能拒绝、可能当成对话回复)。同时确认: 游戏侧 shouldSkip() 已有 if (!State.cfg.force && isTargetLanguageText(text)) return true; —— ui.force 开关(游戏内 /tr 面板 LCTForce + 网页设置 ui.force「强制翻译所有消息」)端到端已接通(读取 uiTouched("force")、写入 State.cfg.force、面板 setToggleText 显示)。
+- **改动文件**: core/providers/openai.js 的 buildMessages():
+  - system 中 "You translate short chat messages between players." 替换为 "The input may be written in ANY language (or a mix of languages) - detect it, then translate it into the target language."
+  - user 指令改为 "Translate the game chat message below to <target>. The input may be written in ANY language (or a mix of languages). If it is already in <target>, output it unchanged. Reply with ONLY the complete translation.",明确「已是目标语言则原样输出」,减少模型对已正确消息做「再翻译」的漂移。
+  - 其余 provider(deepl / google / microsoft / bing)均使用 sourceLanguage=auto 自动检测源语言,本身无此问题,未改动(已逐一核对 bing.js 的 auto-detect、微软 / 谷歌 / DeepL 的条件分支)。
+- **原因/效果**: 模型现在被明确告知「输入可能是任意语言或混合语言」,对「别人说什么语言」零假设;「已是目标语言则原样输出」让关闭 ui.force 时的本地启发式判断与模型行为一致(双重保险: 启发式漏判时模型也不会画蛇添足)。
+- **验证方式**: node --check core/providers/openai.js 通过;tests/btipc 五套离线测试全绿;scripts/lingua_chat_simtest.js PASS 58/0;scripts/overlay_test.js PASS 13/0;scripts/test_sender_backfill.js PASS 11/0。注: test_bridge_dedup.js 不存在于仓库(历史测试文件,git 历史中亦无,本轮之前已清理)。
+- **仍需用户测试**: 提示词改动需桥端重启(不需要重建 VPK)后生效;建议在目标语言选中文、关闭「强制翻译所有消息」时,发一条纯英文 / 纯中文 / 中英混杂消息,确认中文原文不会被「再翻译」,混杂消息能完整译出。
+
+## 第七十五轮(2026-10-14): 英雄术语表刷新 —— 修复「魔液」类译名不准 + 接入新英雄
+
+- **背景**: 用户反馈聊天日志里英雄名翻译不准(如「魔液」被译成 Viscous sludge 之类)。排查后发现三层原因:①桥端术语表停留在 10/01(46 个英雄),此后游戏连续更新,已上线 Rat King / Solomon / Deadman Danny / Baba 等新英雄,术语表里没有;②社区昵称(格瑞姆、老鼠、象棋…)完全缺失;③官方中文名与英文名的权威来源(游戏本地化文件)此前没人用过,靠手工维护。
+- **新发现的数据源(比 deadlock-api 更权威、可离线)**: 游戏安装目录 `game/citadel/resource/localization/citadel_gc_hero_names/citadel_gc_hero_names_{english,schinese}.txt` —— 里面既有**官方中英译名**(hero_viscous:n = Viscous / 魔液),又有**官方维护的社区搜索别名**(viscous_search = 魔液 moye 球 史莱姆 绿泡泡 滚滚)。这是后续英雄改名的单一事实来源。
+- **新增工具**: `scripts/sync_heroes.js` —— 读本地化文件 + deadlock-api 的 `player_selectable` 名单(`?language=english`),一键刷新三处英雄数据:
+  - `core/glossary.js`(heroNames / heroCnToEn:仅 42 个当前可选英雄 + 白名单昵称)
+  - `core/hero_names.js`(HERO_ZH,供缩写词典;含未上线英雄)
+  - `mod/panorama/scripts/lingua_chat.js`(ZH_HERO_TO_EN / HERO_ID_TO_NAME / HERO_IMAGE_TO_NAME<只补缺,保留 legacy 图片名>,游戏内日志、身份与头像图映射)
+  用法:`node scripts/sync_heroes.js [--write] [--game-root <dir>] [--selectable-json <file>]`(dry-run 默认,不写盘)。
+- **改动文件**: core/glossary.js、core/hero_names.js、mod/panorama/scripts/lingua_chat.js、scripts/sync_heroes.js(新增)。
+- **工程性**: sync_heroes.js 默认 dry-run,写盘时保持原文件 BOM/CRLF,生成的表格自动折行;已验证**幂等**(连续两次 --write 结果字节一致)。
+- **原因/效果**:
+  - heroCnToEn 从 48 条(含大量未上线英雄)更新为 **78 条**(42 个可选英雄的官方中文名 + 36 条白名单昵称),新增「鼠王=Rat King」「所罗门=Solomon」「空骨丹尼=Deadman Danny」「婆婆=Baba」等,聊天日志里 鼠王/所罗门 这类英雄不再以中文原文落档。
+  - 昵称白名单**刻意排除**官方别名里的泛词(球/奶奶/猪/钩子/猎犬等),避免「我奶奶叫我吃饭」被强翻成英雄名。
+  - fixHeroTerms 的兜底纠正(格瑞姆→Graves、牛→Abrams、魔液→Viscous 等)保留,双保险。
+- **验证方式**: node --check 三份文件通过;sync_heroes.js 幂等(dry-run 二次运行输出一致);buildHint 含 鼠王=Rat King;tests/btipc 五套 + lingua_chat_simtest(58/0)+ overlay_test(13/0)+ test_sender_backfill(11/0)全绿。
+- **仍需用户测试**: 属桥端 + VPK 双侧改动,需重启桥 + 重启游戏;建议发一条含「魔液/滚滚/鼠王」的消息验证译名。
+
+## 第七十六轮(2026-10-14): /tr 面板改进 + 「面板打不开」根因排查 + VPK 重建部署
+
+- **背景**: 用户反馈「刚刚在局内 /tr 唤不出设置界面」,并要求对 /tr 面板做一轮改进(高级配置折叠、发送目标语言联动、桥状态灯等)。
+- **根因排查(证据)**:
+  - 检查 `E:\Steam\...\game\citadel\console.log`(10/14 21:27-22:09 整局):`[LCT]` 出现 **0 次**,连开局的玩家 API 诊断都没有 —— 说明该局 mod 脚本**一次都没运行**(不是 /tr 命令没生效,而是整个 mod 没加载)。
+  - 同一时段 bridge.log 只有桥自身的启动行,没有任何 `[diag]`;10/13 的正常会话里这些行都有(说明采集链路本身没坏)。
+  - Deadlock 于 **10/14 07:57** 完成一次更新(pak01_dir.vpk + 全部 DLL 时间戳,新增英雄 Deadman Danny)。旧部署的 `pak22_dir.vpk` 是 **10/09 23:51** 的构建,编译资源与该版本(CSDK12,7/31 编译)在更新后能否被引擎接受未知 —— 因此「更新把旧编译产物/加载路径弄失效」是最可能的解释;需实车复测确认。
+  - 另发现:addons 目录里 `.dmm.json` 记录的 "deadlockfanyi" 条目指向 `pak11_dir.vpk`(该文件并不存在),而实际部署名是 pak22 —— DMM 的登记信息已过时,后续若再走 DMM 安装需要同步。
+- **改动文件**:
+  - `scripts/build.ps1`:已是逐文件覆写同步(避免旧构建的 Remove-Item 权限问题),本轮沿用。
+  - `mod/panorama/layout/chat.xml`:新增「高级设置(Key / 端点 / 回退 / 超时)」折叠开关行(LCTAdvanced/LCTAdvancedLabel)、给回退/超时/发送目标语言三行补 id(LCTRowFallback/LCTRowTimeout/LCTRowOutgoingTarget)、状态栏新增桥状态灯 LCTBridgeDot(与桥状态文本包在 LCTBridgeWrap 内右对齐)。
+  - `mod/panorama/styles/lingua_chat.css`:折叠头样式、高级行默认 `visibility: collapse`、状态灯样式、桥状态右对齐容器。
+  - `mod/panorama/scripts/lingua_chat.js`:新增 `uiAdvancedOpen` 状态与 `LCTOnToggle('advanced')` 分支;`syncProviderRows` 改为「高级折叠 × 服务商」组合显隐,并在「发送前翻译=关」时收起发送目标语言行;`LCTPickOption` 不再整体 `syncPanelFromConfig`(旧实现会清空 Key/端点输入框);`setBridgeStatus` 同步设置状态灯颜色(绿=在线/红=错误/灰=未连上)。
+- **构建/部署**: 用 CSDK12 重新编译 7 个资源 → `dist/pak01_dir.vpk` → 覆盖为 `dist/pak22_dir.vpk` → 部署到 `E:\Steam\...\addons\pak22_dir.vpk`(328,385 字节,2026-10-14 22:24,旧文件已备份为 `pak22_dir.vpk.bak-before-rebuild-20261014`)。VPK 内已验证包含新增文案与 id(高级/收起/已展开/LCTBridgeDot/LCTAdvancedHead 等)。
+- **验证方式**: XML 用 [xml] 解析通过;node --check 通过;离线测试(btipc 五套 + simtest 58/0 + overlay 13/0 + sender_backfill 11/0)全绿;VPK 解包比对新增字符串全部命中。
+- **仍需用户测试**: **必须重启游戏**(VPK 生效需重启),然后:①看聊天输入框右侧是否出现「译」按钮(有 = 布局覆盖生效);②输入 /tr(或 !tr / .tr)打开面板;③面板里点「高级设置」确认展开/收起。若仍无「译」按钮,说明 addon 加载在更新后确实被阻断,下一步排查 addons 加载路径与 DMM 登记(可对比其它 mod 是否也不生效)。

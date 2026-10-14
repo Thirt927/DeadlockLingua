@@ -87,13 +87,15 @@ Copy-Item F:\agents\deadlockfanyi\BabelTower-fork\dist\pak22_dir.vpk "E:\Steam\s
 
 ## 4.5 术语表(glossary.js)与其数据源
 
-- `core/glossary.js` 会把术语表注入**每一次**翻译提示词: `heroNames`(46 个可玩英雄的官方英文名) + `heroCnToEn`(中文昵称→英文) + `itemEnToCn`(**194 条商店装备官方中英对照**) + `termsCnToEn`(战术术语)。`fixHeroTerms()` 另对输出做英雄名纠正。注入后 `buildHint()` 约 5.6k 字符。
-- **权威数据源(2026-10-01 实测可用,需代理)**:`https://api.deadlock-api.com/v1/assets/heroes` 与 `/v1/assets/items`,两者都支持 **`?language=english|schinese`**。注意:
-  - `assets.deadlock-api.com` 这个域名**不存在**,别再用;真正的接口在 `api.deadlock-api.com/v1/assets/` 下。
-  - `openapi.json` 很大(约 443KB)且常被截断,用 `curl.exe -sS -L --compressed --max-time 300 -o <file>` 下载并**校验 JSON 能 parse** 再使用。
+- `core/glossary.js` 会把术语表注入**每一次**翻译提示词: `heroNames`(当前可选英雄的官方英文名,2026-10-14 为 42 个) + `heroCnToEn`(官方中文名 + 社区昵称 → 英文) + `itemEnToCn`(**194 条商店装备官方中英对照**) + `termsCnToEn`(战术术语)。`fixHeroTerms()` 另对输出做英雄名纠正。注入后 `buildHint()` 约 6k 字符。
+- **英雄数据一键刷新(2026-10-14 起)**:`node scripts/sync_heroes.js [--write] [--game-root <Deadlock 目录>]`。默认 dry-run;它会同时刷新 `core/glossary.js`、`core/hero_names.js`、`mod/panorama/scripts/lingua_chat.js` 三处英雄表。
+- **英雄权威数据源(优先级从高到低)**:
+  - **本机游戏文件(推荐,离线可用)**:`<Deadlock>/game/citadel/resource/localization/citadel_gc_hero_names/citadel_gc_hero_names_{english,schinese}.txt`。`hero_xxx:n` 是官方中英译名(`hero_viscous:n` → Viscous / 魔液),`hero_xxx_search:n` 是**官方维护的社区搜索别名**(含拼音与昵称,如 `魔液 moye 球 史莱姆 绿泡泡 滚滚`)。游戏每次更新会自动带上新英雄的译名。
+  - **在线补充**:`https://api.deadlock-api.com/v1/assets/heroes?language=english` 提供 `player_selectable` 标志,用来筛选「当前可选英雄」(2026-10-14 为 42 个,含新上线的 Deadman Danny / Rat King / Solomon / Baba)。`/v1/assets/items` 提供装备数据(`?language=english|schinese`)。
+  - `assets.deadlock-api.com` 这个域名**不存在**,别再用;真正的接口在 `api.deadlock-api.com/v1/assets/` 下。`openapi.json` 约 443KB 且常被截断,用 `curl.exe -sS -L --compressed --max-time 300 -o <file>` 下载并**校验 JSON 能 parse** 再使用。
   - items 返回 729 条,`type` 分 `ability`(395) / `weapon`(84) / `upgrade`(250)。**商店装备就是 `upgrade`**;其中 55 条 `name` 仍是 class_name(未本地化),要过滤掉。
-  - heroes 返回 65 条,但只有 **46 条 `player_selectable=true`**;其余 20 条是未发布的开发中英雄(Kai / Gunslinger / Rat King / Nurse Harrow …),**不要加进术语表**。
-- **刷新流程**:下载两份 items(english + schinese) → 取 `type==='upgrade'` 且 `name` 不是 class_name 的条目 → 生成 `EN: CN` 对象写进 `glossary.js` 的 `itemEnToCn`。英雄同理(只取 `player_selectable=true`)。
+- **昵称白名单纪律**:官方 `_search` 别名里混着泛词(球 / 奶奶 / 猪 / 钩子 …),**只准挑指向明确的收进 `heroCnToEn`**(名单在 `scripts/sync_heroes.js` 的 `EXTRA_CN_ALIASES`)。否则「我奶奶叫我吃饭」会被强翻成英雄名。
+- **装备刷新流程**:下载两份 items(english + schinese) → 取 `type==='upgrade'` 且 `name` 不是 class_name 的条目 → 生成 `EN: CN` 对象写进 `glossary.js` 的 `itemEnToCn`(英雄走 `sync_heroes.js`,不要再手抄)。
 
 ## 5. 当前进行中(matchId / 玩家信息)
 

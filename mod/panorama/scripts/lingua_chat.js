@@ -100,52 +100,46 @@
   // ---- Hero identification data (fallback for chat-row CitadelHeroImage) ----
   // hero image file stem (without .vtex) -> display hero name; legacy/internal stems included
   const HERO_IMAGE_TO_NAME = {
-    "abrams": "abrams", "bebop": "bebop", "calico": "calico", "chrono": "chrono",
-    "dynamo": "dynamo", "fathom": "fathom", "forge": "forge", "ghost": "ghost",
-    "gunslinger": "gunslinger", "haze": "haze", "holliday": "holliday",
-    "ivy": "ivy", "kelvin": "kelvin", "lash": "lash", "mcginnis": "mcginnis",
-    "mirage": "mirage", "paradox": "paradox", "pocket": "pocket", "seven": "seven",
-    "shiv": "shiv", "sinclair": "sinclair", "slork": "slork", "synth": "synth",
-    "viscous": "viscous", "vyper": "vyper", "warden": "warden", "wraith": "wraith",
-    "wrecker": "wrecker", "yamato": "yamato",
-    // legacy/internal image stems -> current display name
-    "bull": "abrams", "nano": "calico", "astro": "holliday", "archer": "grey talon",
-    "digger": "mo & krill", "tengu": "ivy", "engineer": "mcginnis", "hornet": "vindicta",
-    "spectre": "lady geist", "sumo": "dynamo", "gigawatt": "seven", "inferno": "infernus",
-    "geist": "lady geist", "bookworm": "paige", "fencer": "apollo", "familiar": "rem",
-    "magician": "sinclair", "necro": "graves", "operative": "raven", "priest": "venator",
-    "punkgoat": "billy", "unicorn": "celeste", "vampirebat": "mina", "werewolf": "silver",
-    "frank": "victor", "yakuza": "the boss", "kali": "vyper", "viper": "vyper",
-    "doorman": "the doorman", "skyrunner": "skyrunner", "swan": "swan", "trapper": "trapper"
+    "abrams": "abrams", "bebop": "bebop", "calico": "calico", "chrono": "chrono", "dynamo": "dynamo", "fathom": "fathom", "forge": "forge",
+    "ghost": "ghost", "gunslinger": "gunslinger", "haze": "haze", "holliday": "holliday", "ivy": "ivy", "kelvin": "kelvin", "lash": "lash",
+    "mcginnis": "mcginnis", "mirage": "mirage", "paradox": "paradox", "pocket": "pocket", "seven": "seven", "shiv": "shiv", "sinclair": "sinclair",
+    "slork": "slork", "synth": "synth", "viscous": "viscous", "vyper": "vyper", "warden": "warden", "wraith": "wraith", "wrecker": "wrecker",
+    "yamato": "yamato", "bull": "abrams", "nano": "calico", "astro": "holliday", "archer": "grey talon", "digger": "mo & krill", "tengu": "ivy",
+    "engineer": "mcginnis", "hornet": "vindicta", "spectre": "lady geist", "sumo": "dynamo", "gigawatt": "seven", "inferno": "infernus",
+    "geist": "lady geist", "bookworm": "paige", "fencer": "apollo", "familiar": "rem", "magician": "sinclair", "necro": "graves",
+    "operative": "raven", "priest": "venator", "punkgoat": "billy", "unicorn": "celeste", "vampirebat": "mina", "werewolf": "silver",
+    "frank": "victor", "yakuza": "the boss", "kali": "vyper", "viper": "vyper", "doorman": "the doorman", "skyrunner": "skyrunner", "swan": "swan",
+    "trapper": "trapper", "atlas": "abrams", "orion": "grey talon", "krill": "mo & krill", "rutger": "rutger", "thumper": "thumper",
+    "cadence": "cadence", "bomber": "bomber", "shieldguy": "shield guy", "vandal": "vandal", "drifter": "drifter", "boho": "boho", "druid": "druid",
+    "graf": "graf", "fortuna": "fortuna", "deadpack": "deadman danny", "opera": "opera", "ratking": "rat king", "chessmaster": "solomon",
+    "artist": "violet", "nurse": "nurse harrow", "baba": "baba"
   };
   // localized (zh-Hans) hero display name -> English key. Game-rendered labels
   // (topbar HeroName / {g:citadel_hero_name} labels) are localized per client
   // language; reverse mapping keeps chat logs in English hero names.
   const ZH_HERO_TO_EN = {
-    "沃督": "warden", "大和": "yamato", "炽焱": "infernus", "柒": "seven",
-    "薇妲": "vindicta", "灰爪": "grey talon", "盖斯特夫人": "lady geist",
-    "亚伯兰": "abrams", "灵魅": "wraith", "麦金妮": "mcginnis", "悖论": "paradox",
-    "奇能": "dynamo", "开尔文": "kelvin", "魔液": "viscous", "岚梦": "haze",
-    "哈雷黛": "holliday", "比波普": "bebop", "卡厉可": "calico", "莫克双雄": "mo & krill",
-    "希弗": "shiv", "青藤": "ivy", "破坏王": "wrecker", "劳什": "lash",
-    "阿金驳": "akimbo", "口袋": "pocket", "蜃景": "mirage", "海魇": "fathom",
-    "蝰邪": "vyper", "无双魔术师": "sinclair", "陷阱师": "trapper", "渡鸦": "raven",
-    "维克多": "victor", "米娜": "mina", "孤猎": "drifter", "诛邪者": "venator",
-    "佩吉": "paige", "波米": "boho", "门侍": "the doorman", "天鹅舞伶": "swan",
-    "御空行者": "skyrunner", "比利": "billy", "雷姆": "rem", "赛凌": "celeste",
-    "阿波罗": "apollo", "格瑞墓": "graves", "西尔芙": "silver"
+    "亚伯兰": "abrams", "阿波罗": "apollo", "婆婆": "baba", "比波普": "bebop", "比利": "billy", "卡厉可": "calico", "赛凌": "celeste", "空骨丹尼": "deadman danny",
+    "孤猎": "drifter", "奇能": "dynamo", "格瑞墓": "graves", "灰爪": "grey talon", "岚梦": "haze", "哈雷黛": "holliday", "炽焱": "infernus", "青藤": "ivy",
+    "开尔文": "kelvin", "盖斯特夫人": "lady geist", "劳什": "lash", "麦金妮": "mcginnis", "米娜": "mina", "蜃景": "mirage", "莫克双雄": "mo & krill", "佩吉": "paige",
+    "悖论": "paradox", "口袋": "pocket", "鼠王": "rat king", "雷姆": "rem", "柒": "seven", "希弗": "shiv", "西尔芙": "silver", "无双魔术师": "sinclair",
+    "所罗门": "solomon", "门侍": "the doorman", "诛邪者": "venator", "维克多": "victor", "薇妲": "vindicta", "魔液": "viscous", "蝰邪": "vyper", "沃督": "warden",
+    "灵魅": "wraith", "大和": "yamato", "老七": "seven", "女巫": "vindicta", "女鬼": "vindicta", "刀姐": "yamato", "火男": "infernus", "电男": "seven",
+    "滚滚": "viscous", "史莱姆": "viscous", "绿泡泡": "viscous", "猫女": "calico", "帕吉": "bebop", "斧王": "shiv", "蛇女": "vyper", "骷髅王": "victor", "哈基米": "mina",
+    "书虫": "paige", "门童": "the doorman", "悠米": "rem", "独角兽": "celeste", "剑客": "apollo", "鼠鼠": "rat king", "老鼠": "rat king", "象棋": "solomon",
+    "神父": "venator", "冰男": "kelvin", "牌女": "wraith", "提箱客": "pocket", "灯神": "mirage", "石像鬼": "ivy", "血妈": "lady geist", "盖斯特": "lady geist",
+    "一枪超人": "paradox", "牛仔": "holliday", "辛克莱": "sinclair", "格瑞姆": "graves", "牛": "abrams"
   };
 
   // best-effort hero id -> display name (ids from game hero prefab data; may grow)
   const HERO_ID_TO_NAME = {
-    "1": "infernus", "2": "seven", "3": "vindicta", "4": "lady geist", "6": "abrams",
-    "7": "wraith", "8": "mcginnis", "10": "paradox", "11": "dynamo", "12": "kelvin",
-    "13": "haze", "14": "holliday", "15": "bebop", "16": "calico", "17": "grey talon",
-    "18": "mo & krill", "19": "shiv", "20": "ivy", "25": "warden", "27": "yamato",
-    "31": "lash", "35": "viscous", "50": "pocket", "52": "mirage", "58": "vyper",
-    "60": "sinclair", "63": "mina", "64": "drifter", "65": "venator", "66": "victor",
-    "67": "paige", "69": "the doorman", "72": "billy", "76": "graves", "77": "apollo",
-    "79": "rem", "80": "silver", "81": "celeste"
+    "1": "infernus", "2": "seven", "3": "vindicta", "4": "lady geist", "6": "abrams", "7": "wraith", "8": "mcginnis", "10": "paradox", "11": "dynamo",
+    "12": "kelvin", "13": "haze", "14": "holliday", "15": "bebop", "16": "calico", "17": "grey talon", "18": "mo & krill", "19": "shiv", "20": "ivy",
+    "21": "kali", "25": "warden", "27": "yamato", "31": "lash", "35": "viscous", "38": "gunslinger", "39": "the boss", "48": "wrecker",
+    "49": "rutger", "50": "pocket", "51": "thumper", "52": "mirage", "53": "fathom", "54": "cadence", "56": "bomber", "57": "shield guy",
+    "58": "vyper", "59": "vandal", "60": "sinclair", "61": "trapper", "62": "raven", "63": "mina", "64": "drifter", "65": "venator", "66": "victor",
+    "67": "paige", "68": "boho", "69": "the doorman", "70": "skyrunner", "71": "swan", "72": "billy", "73": "druid", "74": "graf", "75": "fortuna",
+    "76": "graves", "77": "apollo", "78": "deadman danny", "79": "rem", "80": "silver", "81": "celeste", "82": "opera", "84": "rat king",
+    "85": "solomon", "86": "violet", "87": "nurse harrow", "88": "baba"
   };
   const HERO_NAME_TO_ID = {};
   (function () {
@@ -5109,6 +5103,14 @@ function injectTranslation(row, sig, text) {
         label.text = "桥状态: " + String(text || "");
       } catch (e) {}
     }
+    // 状态灯:绿=在线 / 红=已知错误 / 灰=尚未连上
+    const dot = findChild(getRoot(), "LCTBridgeDot");
+    if (dot) {
+      let color = "#6b7684";
+      if (State.bridgeUp) color = "#7fd8a8";
+      else if (State.bridgeLastError) color = "#e0755f";
+      try { dot.style.color = color; } catch (e) {}
+    }
   }
 
   // ================= 聊天扫描 =================
@@ -5807,6 +5809,8 @@ function injectTranslation(row, sig, text) {
   let lastSettingsToggleAt = 0;
   // 开合状态**由 JS 记**,不用 hasClass 反查 —— 实测 hasClass(panel,"LCTVisible") 恒为 false
   // (日志里 toggle 每次都报 open),导致面板永远关不掉。以本地状态位为准更可靠。
+  // 高级设置折叠状态(纯 UI 状态,不落盘;默认收起)
+  let uiAdvancedOpen = false;
   let settingsOpen = false;
   function LCTToggleSettings() {
     const now = nowMs();
@@ -6020,6 +6024,9 @@ function injectTranslation(row, sig, text) {
     } else if (which === "force") {
       State.cfg.force = !State.cfg.force;
       setToggleText("LCTForce", State.cfg.force);
+    } else if (which === "advanced") {
+      uiAdvancedOpen = !uiAdvancedOpen;
+      syncProviderRows();
     } else if (which === "chatLog") {
       State.cfg.chatLog = State.cfg.chatLog === false;
       setToggleText("LCTChatLog", State.cfg.chatLog);
@@ -6045,11 +6052,20 @@ function injectTranslation(row, sig, text) {
         row.style.visibility = show ? "visible" : "collapse";
       } catch (e) {}
     };
-    setRow("LCTRowApiKey", p === "microsoft" || p === "openai" || p === "deepl" || p === "google");
-    setRow("LCTRowRegion", p === "microsoft");
-    setRow("LCTRowOpenaiBase", p === "openai");
-    setRow("LCTRowOpenaiModel", p === "openai");
-    setRow("LCTRowDeeplEndpoint", p === "deepl");
+    // 高级设置整体折叠:收起时连服务商专属行一起隐藏,展开后才按服务商显示
+    setRow("LCTRowApiKey", uiAdvancedOpen && (p === "microsoft" || p === "openai" || p === "deepl" || p === "google"));
+    setRow("LCTRowRegion", uiAdvancedOpen && p === "microsoft");
+    setRow("LCTRowOpenaiBase", uiAdvancedOpen && p === "openai");
+    setRow("LCTRowOpenaiModel", uiAdvancedOpen && p === "openai");
+    setRow("LCTRowDeeplEndpoint", uiAdvancedOpen && p === "deepl");
+    setRow("LCTRowFallback", uiAdvancedOpen);
+    setRow("LCTRowTimeout", uiAdvancedOpen);
+    // 发送前翻译=关 时,发送目标语言没有意义,一并收起(避免"发原文为什么要选语言"的困惑)
+    setRow("LCTRowOutgoingTarget", (State.cfg.outgoing || "off") !== "off");
+    const advLabel = findChild(getRoot(), "LCTAdvancedLabel");
+    if (advLabel) {
+      try { advLabel.text = uiAdvancedOpen ? "已展开" : "已收起"; } catch (e) {}
+    }
     let hint = "";
     if (p === "bing") hint = "免 Key 公共接口,可能有隐形限流;失败可配置自动回退";
     else if (p === "microsoft") hint = "Azure Translator Key(可留空则跳过该服务商)";
@@ -6141,10 +6157,16 @@ function injectTranslation(row, sig, text) {
 
   function LCTPickOption(field, value) {
     markUiTouched(field);
-    if (field === "displayMode") State.cfg.displayMode = value;
-    else if (field === "outgoing") State.cfg.outgoing = value;
-    else return;
-    syncPanelFromConfig();
+    if (field === "displayMode") {
+      State.cfg.displayMode = value;
+      setSelectText("LCTDisplayModeSelect", labelFor(DISPLAY_MODES, value));
+    } else if (field === "outgoing") {
+      State.cfg.outgoing = value;
+      setSelectText("LCTOutgoingSelect", labelFor(OUTGOING_MODES, value));
+    } else return;
+    // 只刷新行显隐,不再整体 syncPanelFromConfig —— 后者会清空 Key/端点输入框,
+    // 用户在面板里改选项后再点保存会静默丢输入。
+    syncProviderRows();
     saveUiConfig();
     closeSelectMenus();
     diagLog("pickopt", "PANORAMA: pickOption: " + field + " -> " + value);
