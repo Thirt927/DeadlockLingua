@@ -70,20 +70,27 @@
   visibility: visible;
 }
 
-/* 标题栏:flow-children none + 显式 align —— 左右各自定位,叉号一定贴右上角 */
+/* 标题栏:横向流式 + 中间弹簧 —— 标题贴左、叉号贴右,不依赖 align 简写 */
 .LCTSettingsHeader {
   width: 100%;
   height: 48px;
   background-color: rgba(255, 255, 255, 0.03);
-  flow-children: none;
+  flow-children: right;
   border-bottom: 1px solid rgba(255, 255, 255, 0.07);
 }
 
 .LCTHeaderTitleGroup {
   flow-children: right;
+  width: fit-children;
   height: 100%;
-  align: left center;
+  vertical-align: center;
   margin-left: 16px;
+}
+
+/* 弹簧:吃掉中间所有剩余宽度,把叉号顶到最右 */
+.LCTHeaderSpacer {
+  width: fill-parent-flow( 1 );
+  height: 1px;
 }
 
 .LCTPanelTitle {
@@ -106,8 +113,8 @@
   height: 28px;
   min-width: 0px;
   padding: 0px;
-  align: right center;
-  margin-right: 12px;
+  vertical-align: center;
+  margin-right: 14px;
   background-color: transparent;
   border: 0px solid transparent;
   border-radius: 4px;
@@ -202,7 +209,7 @@
 .LCTSettingsRow {
   width: 100%;
   flow-children: right;
-  padding: 4px 2px;
+  padding: 2px 2px;
   margin-bottom: 2px;
   border-radius: 4px;
   transition-property: background-color;
@@ -215,9 +222,8 @@
 
 .LCTRowLabel {
   width: fill-parent-flow( 1 );
-  height: 30px;
-  color: #b8c0cc;
-  font-size: 13px;
+  color: #c3cbd6;
+  font-size: 14px;
   vertical-align: center;
   margin-right: 12px;
 }
@@ -295,6 +301,12 @@
   color: #ffffff;
 }
 
+/* 按钮/菜单里的 Label:文字在按钮内居中(Valve 的写法是 vertical-align: middle) */
+.LCTBtn Label, .LCTHeaderClose Label, .LCTMenuOption Label {
+  vertical-align: middle;
+  horizontal-align: center;
+}
+
 /* 底部操作栏 */
 .LCTSettingsFooter {
   width: 100%;
@@ -351,7 +363,8 @@
 }
 
 .LCTSelectValue {
-  align: center center;
+  horizontal-align: center;
+  vertical-align: center;
   width: 100%;
   height: 30px;
   text-align: center;
@@ -377,7 +390,8 @@
 }
 
 .LCTToggleValue {
-  align: center center;
+  horizontal-align: center;
+  vertical-align: center;
   width: 72px;
   height: 30px;
   text-align: center;

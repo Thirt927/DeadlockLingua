@@ -1819,3 +1819,15 @@ ode -e "JSON.parse(...)" 通过)。
   - 底部提示文案改成 `Tab 切换 · Enter 确认 · ESC 关闭`(指针拿不到时也说明怎么用键盘操作)。
 - **验证方式**: `[xml]` 解析通过;`node --check` 通过;离线测试 tests/btipc 五套 + lingua_chat_simtest(58/0)+ overlay_test(13/0)+ test_sender_backfill(11/0)全绿;重新编译打包部署 `pak22_dir.vpk`(334,094 字节,2026-10-15 23:18),解包确认 `99998` / `LCTHeaderTitleGroup` / `keepCursorFocus` / `Tab 切换` 等新内容都在。
 - **仍需用户测试**: 重启游戏后:①叉号应在面板**右上角**;②行内文字应与右侧控件**同一条中线**;③点开面板后**不按 Tab** 看指针是否可用(焦点回到聊天输入框的做法是否让引擎保持指针)——若仍不可用,下一步方案是把面板移出 Tab 装备界面覆盖的区域(例如贴左上角),或改为完全键盘操作(方向键 + Enter)。
+
+## 第七十九轮(2026-10-15): 撤掉拿不到的自由光标 + 叉号改用弹簧撑右 + 行文字收紧
+
+- **背景(用户实机反馈)**: ①叉号仍然不在右上角;②上一轮「保持聊天输入框焦点以保住指针」的做法**没有效果**,用户要求**取消**;③行内文字下方仍有空白,希望文字填满行或换更好的方案;④面板始终在 Tab 图层下面,按住 Tab 弹出内容会把面板盖住。
+- **结论(架构限制,写死别再试)**: 设置面板挂在 **chat 布局**里,而游戏按住 Tab 弹出的装备/计分界面属于 **HUD 布局**,渲染顺序在 chat 之上 —— Panorama 脚本只能访问自己所在布局的上下文,`z-index` 跨布局无效,**没有任何办法让面板盖住 Tab 界面**;引擎侧也拿不到 free cursor(`Convars` 不存在、`HeroTestingToggleFreeCursor` 派发无反应)。因此**面板按纯键盘操作设计**:打开即聚焦第一个控件,方向键/Tab 切换、Enter 确认、ESC 关闭。
+- **改动文件**: `mod/panorama/layout/chat.xml`、`mod/panorama/styles/lingua_chat.css`、`mod/panorama/scripts/lingua_chat.js`。
+- **改动内容**:
+  - **撤掉自由光标相关逻辑**: 删除 `requestFreeCursor()` / `keepCursorFocus()` / `SetDisableFocusOnMouseDown` 调用与 `free cursor ...` 诊断日志;`openSettingsPanel()` 恢复「聚焦面板第一个控件(回退到面板)」并保留 `settings focus -> panel-first|panel` 诊断。底部提示从 `Tab 切换…` 改成 **`方向键 切换 · Enter 确认 · ESC 关闭`**(Tab 在游戏里是装备界面键,按它反而会盖住面板)。
+  - **叉号贴右上角**: 标题栏回到 `flow-children: right`,结构改成「标题组 + `.LCTHeaderSpacer`(fill-parent-flow 弹簧)+ 叉号」,靠弹簧吃掉剩余宽度把叉号顶到最右——不再依赖 `align` 简写(该简写在 Button 上疑似被忽略,这也是上一版叉号没靠右的原因之一)。叉号本身只留 `vertical-align: center; margin-right: 14px`。
+  - **行文字收紧**: `.LCTRowLabel` 去掉固定 `height: 30px`(固定高度+文字顶对齐正是"下面留白"的来源),改成不设高度 + `vertical-align: center` 让文字盒在行内居中;字号 13 → 14px、颜色提亮到 `#c3cbd6`;行内边距 4px → **2px**,让文字/控件填满行。选择框与开关的值 Label 也把 `align: center center` 换成显式 `horizontal-align/vertical-align: center`,并给按钮内 Label 加 `vertical-align: middle`(Valve 自己按钮文字的写法)。
+- **验证方式**: XML `[xml]` 解析通过;`node --check` 通过;离线测试 tests/btipc 五套 + lingua_chat_simtest(58/0)+ overlay_test(13/0)+ test_sender_backfill(11/0)全绿;重新编译打包部署 `pak22_dir.vpk`(332,101 字节,2026-10-15 23:41),解包确认 `requestFreeCursor` / `keepCursorFocus` 已不在产物里、`LCTHeaderSpacer` 与 `方向键` 提示都在。
+- **仍需用户测试**: 重启游戏后:①叉号应贴面板**右上角**;②行内文字应上下居中、贴满行高;③**不要再按 Tab**(会弹出装备界面盖住面板),打开 `/tr` 后直接用 **方向键 + Enter** 操作;若方向键不可用,可尝试 Tab…(但会弹装备界面)——需要用户反馈哪种按键能移动焦点,必要时用 `$.RegisterKeyBind` 自定义按键。**建议顺手截一张面板图**,视觉细节(间距/字号/叉号位置)按图一次调到位,比盲改快得多。

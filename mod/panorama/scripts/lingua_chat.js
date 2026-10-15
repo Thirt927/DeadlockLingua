@@ -5037,32 +5037,6 @@ function injectTranslation(row, sig, text) {
     // 那些字段 [LCT-CHAT] 带不了,且频率很低。
   }
 
-  // ---- 鼠标指针:面板打开期间申请「自由光标」 ----
-  // Deadlock 平时不显示鼠标指针(默认按住 Tab 才出现),而 /tr 面板要靠鼠标点。
-  // Panorama 里没有 Convars / 控制台通道(实测 globalThis 只有 $、panorama 与几个声音
-  // 函数),所以这里 best-effort:能走 Convars 就走,不能就派发引擎的
-  // HeroTestingToggleFreeCursor 事件(未注册的 unhandled 事件派发是安全的哑操作)。
-  // 结果写进 diagLog,桥日志里能看到实际走了哪条路径。
-  let freeCursorHeld = false;
-  function requestFreeCursor(on) {
-    if (on === freeCursorHeld) return;
-    let how = "none";
-    try {
-      if (typeof Convars !== "undefined" && Convars && Convars.SetValue) {
-        Convars.SetValue("hud_free_cursor", on ? "1" : "0");
-        how = "convar";
-      }
-    } catch (e) {}
-    if (how === "none") {
-      try {
-        $.DispatchEvent("HeroTestingToggleFreeCursor");
-        how = "event";
-      } catch (e) { how = "failed"; }
-    }
-    freeCursorHeld = on;
-    diagLog("cursor", "PANORAMA: free cursor " + (on ? "on" : "off") + " via " + how);
-  }
-
   // ---- 桥健康探测 + 状态渲染 ----
   // 起因(实测): healthCheck 只在启动时跑过一次,而当时 `op=health` 在桥端**并不存在** ——
   // 那行 `op=health\n{}` 落进了"裸文本"分支,被当成待翻译文本发出去;回来的是一段译文,
@@ -5807,32 +5781,21 @@ function injectTranslation(row, sig, text) {
     // 桥状态:先用已知值渲染(可能已是当前值),再主动探一次拿最新
     refreshBridgeStatus();
     try { healthCheck(); } catch (e) {}
-    // 打开面板期间申请自由光标,并允许鼠标按下直接给控件焦点
-    try { if (typeof panel.SetDisableFocusOnMouseDown === "function") panel.SetDisableFocusOnMouseDown(false); } catch (e) {}
-    try { requestFreeCursor(true); } catch (e) {}
-    // 焦点策略(2026-10-15 实机反馈后调整):
-    // ①优先把焦点交回聊天输入框 —— 聊天处于激活态时引擎保持鼠标指针可见,
-    //    这样不必按住 Tab 也能点面板(之前聚焦面板按钮会让输入框 blur、指针消失);
-    // ②输入框不可用时退回面板内第一个控件,保证 Tab/Enter 仍可用。
+    // 焦点策略(2026-10-15 定稿):面板拿不到鼠标指针(聊天布局在 Tab 界面下层,
+    // 引擎里也拿不到 free cursor),所以面板按**纯键盘**设计:打开即聚焦第一个控件,
+    // 用 Tab / 方向键切换、Enter 确认、ESC 关闭 —— 全程不需要鼠标指针。
     try {
       if (hasClass(panel, SETTINGS_VISIBLE_CLASS)) {
         let focused = "";
-        const chatInput = State.input || findChild(getRoot(), CHAT_INPUT_ID);
-        if (chatInput && chatInput.SetFocus) {
-          try { chatInput.SetFocus(); focused = "chat"; } catch (e) {}
-        }
-        if (!focused) {
-          const first = findChild(panel, "LCTEnabled");
-          if (first && first.SetFocus) { first.SetFocus(); focused = "panel-first"; }
-          else if (panel.SetFocus) { panel.SetFocus(); focused = "panel"; }
-        }
+        const first = findChild(panel, "LCTEnabled");
+        if (first && first.SetFocus) { first.SetFocus(); focused = "panel-first"; }
+        else if (panel.SetFocus) { panel.SetFocus(); focused = "panel"; }
         diagLog("focus", "PANORAMA: settings focus -> " + (focused || "none"));
       }
     } catch (e) {}
   }
 
   function closeSettingsPanel() {
-    try { requestFreeCursor(false); } catch (e) {}
     const panel = findChild(getRoot(), SETTINGS_PANEL_ID);
     if (panel) {
       try {
@@ -5851,17 +5814,6 @@ function injectTranslation(row, sig, text) {
   // 高级设置折叠状态(纯 UI 状态,不落盘;默认收起)
   let uiAdvancedOpen = false;
   let settingsOpen = false;
-
-  // 面板打开期间尽量让「聊天输入框」保持焦点:引擎在聊天激活时保持鼠标指针可见,
-  // 这样玩家不用按住 Tab 就能点面板;每次点完控件再补一次,避免点一下指针就消失
-  // (2026-10-15 实机反馈:面板抢焦点后指针消失,只剩按住 Tab 才有)。
-  function keepCursorFocus() {
-    try {
-      if (!settingsOpen) return;
-      const input = State.input || findChild(getRoot(), CHAT_INPUT_ID);
-      if (input && input.SetFocus) input.SetFocus();
-    } catch (e) {}
-  }
   function LCTToggleSettings() {
     const now = nowMs();
     if (lastSettingsToggleAt && now - lastSettingsToggleAt < 300) return;
@@ -6093,7 +6045,6 @@ function injectTranslation(row, sig, text) {
     }
     saveUiConfig();
     diagLog("toggle_" + which, "PANORAMA: toggle: " + which);
-    keepCursorFocus();
   }
 
   // 循环切换(服务商/显示模式/发送模式)
@@ -6142,7 +6093,6 @@ function injectTranslation(row, sig, text) {
     closeSelectMenus();
     // 走 diagLog:log() 是 `[LCT]` 前缀,桥不采集 —— 之前下拉选择在 bridge.log 里完全看不到
     diagLog("pickprov", "PANORAMA: pickProvider: " + value);
-    keepCursorFocus();
   }
 
   function LCTCycle(which) {
@@ -6201,7 +6151,6 @@ function injectTranslation(row, sig, text) {
     saveUiConfig();
     closeSelectMenus();
     diagLog("picklang", "PANORAMA: pickLang: " + field + " -> " + value);
-    keepCursorFocus();
     if (value === "custom") {
       const customId = field === "targetLanguage" ? "LCTTargetLangCustom" : "LCTOutgoingTargetCustom";
       const custom = findChild(getRoot(), customId);
@@ -6228,7 +6177,6 @@ function injectTranslation(row, sig, text) {
     saveUiConfig();
     closeSelectMenus();
     diagLog("pickopt", "PANORAMA: pickOption: " + field + " -> " + value);
-    keepCursorFocus();
   }
 
   function collectPanelConfig() {
