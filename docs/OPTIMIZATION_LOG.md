@@ -1874,3 +1874,14 @@ ode -e "JSON.parse(...)" 通过)。
   - 输入框文字 13 → 14px;按钮/选择框字重 bold → semi-bold。
 - **验证方式**: 重新编译打包部署 pak22_dir.vpk(331,167 字节,2026-10-16 00:08);node --check 与离线测试(btipc 五套 / simtest / overlay / sender_backfill)全绿;另生成 dist/panel_mock.html + dist/panel_mock.png 的 1:1 HTML 参考图(浏览器字体与游戏内字体不同,仅供参考整体比例/字重/间距)。
 - **仍需用户测试**: 重启游戏看行内文字是否顺眼;若仍不满意,说明是游戏内 sans 字体的中文回退渲染问题,需要一张截图才能按实际字形继续定(换字体族或微调内边距)。
+
+## 第八十三轮(2026-10-16): 修设置面板值文本偏上/下留白
+
+- **背景(用户实机反馈)**: dist/panel_mock.html 里控件文字是居中的,但游戏内字体与控件框之间有明显下留白,像字被顶到框上方。问题集中在选择框/开关这类「底板按钮 + 上层值 Label」结构。
+- **根因**: `.LCTSelectValue` / `.LCTToggleValue` 仍是固定 `height: 30px` 的 Label。Panorama 的 `vertical-align` 只决定 Label 在父容器里的位置,不会把 Label 内部文字往下压;Label 高度被撑到 30px 后,文字按默认顶部排版,于是文字下方留下空白。浏览器 mock 用 flex align-items:center,所以没有这个问题。
+- **改动文件**: `mod/panorama/styles/lingua_chat.css`。
+- **改动内容**:
+  - 删除 `.LCTSelectValue` 的固定 `height: 30px` 与重复的 `vertical-align: center`,保留 `width: 100%` + `vertical-align: center`,让 Label 高度随文字行高收缩,再由父容器垂直居中。
+  - 删除 `.LCTToggleValue` 的固定 `height: 30px`,同样改为自适应高度 + 父容器垂直居中。
+- **验证方式**: `scripts/build.ps1` 编译 7 个资源成功;产物复制为 `dist/pak22_dir.vpk` 并部署到 Deadlock 的 `game/citadel/addons/pak22_dir.vpk`(331,033 字节,2026-10-16 00:20);用 vpkeditcli 从 VPK 解包 `panorama/styles/lingua_chat.vcss_c`,确认 `.LCTSelectValue` / `.LCTToggleValue` 已不再含 `height: 30px`。
+- **仍需用户测试**: 重启 Deadlock 后打开设置面板,检查下拉值、开关值文字是否已在 30px 控件框内上下居中;若仍有少量偏差,需要一张游戏内截图再针对游戏 sans 中文字体的具体 ascent/descent 微调。
