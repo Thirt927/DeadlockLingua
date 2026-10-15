@@ -26,15 +26,15 @@ Deadlock 游戏聊天翻译 mod = **Panorama(Source 2 原生 UI)模组 + 本地 
   - 脚本内有具名互斥锁 `Local\DeadlockLinguaOverlay`,重复启动会直接退出,不会开出第二个窗口
   - 网页版(回退):`http://127.0.0.1:8791/overlay`(把 `config.json` 的 `overlay.mode` 改成 `"web"`)
 - 配置:`F:\agents\deadlockfanyi\BabelTower-fork\config\config.json`(provider 当前 openai→DeepSeek)
-- 设置界面(三个入口):①**游戏内聊天命令 `/tr <子命令>`**(推荐,面板点不到——见下)**:** `/tr help` 列全部命令,`/tr status` 看当前状态,`/tr on|off`、`/tr force`、`/tr lang <代码>`、`/tr mode 双语|仅译文`、`/tr out off|译文|双语`、`/tr outlang <代码>`、`/tr provider <名字>`、`/tr test`、`/tr log`、`/tr own`;结果以黄色提示行插在聊天列表里(12 秒后自动消失,实现见 `noticeChat()`/`applyTrCfg()`);②输入 `/tr`(不带参数)或点输入框右侧 `set` 按钮 → 开合设置面板(**只在有鼠标指针的场景可用**,如主菜单/藏身处);③浏览器 `http://127.0.0.1:8791/settings` → 网页设置页(管服务商 / API Key / 端点 / 全部字段)
+- 设置界面(两个入口):①游戏内输入 `/tr` 或点输入框右侧 `set` 按钮 → 开合设置面板(管常用开关,直接读内存 `State.cfg`,秒开);**注意:游戏内要先按住 Tab 出鼠标指针才点得动**,面板关闭按钮在**右下角**(那一片不会被 Tab 装备界面挡住);②浏览器 `http://127.0.0.1:8791/settings` → 网页设置页(管服务商 / API Key / 端点 / 全部字段,可折叠分组 + 语言/模式下拉 + 回退服务商复选框)
 - 游戏内面板「打不开 / 改了没反应」的排查顺序(全部有日志埋点,任一步缺失即定位到该层):
   ①`cmd: ... -> toggle settings panel`(命令有没有到达 `handleChatSubmit`)
   → ②`settings toggle: open/close` + `settings: opened vis=.. saveBtn=.. inChat=..`(面板有没有找到/真的可见/保存按钮在不在)
   → ③`toggle: <name>`(开关回调有没有触发)
   → ④`save clicked` → `settings saved` 且桥端出现 `BTIPC TRQ ... op=config`(保存有没有发出)。
-  聊天命令只认 `/tr`(2026-10-14 移除 `!tr` / `.tr` 别名);面板同理,也可点输入框右侧 `set` 按钮。
-  ⚠️ **游戏内输入通道(2026-10-15 实机定论,别再试)**: ①默认没有鼠标指针;②按住 Tab 才有指针,但 Tab 是**全屏**装备界面(`CitadelHudActivePlayerStats` = width/height 100%),面板在 chat 布局里永远压不过去(`z-index` 跨布局无效);③方向键 / Enter / ESC 全被游戏消费,面板收不到;④引擎侧也没有 free cursor(`Convars` 不存在、`HeroTestingToggleFreeCursor` 无反应)。**结论:游戏内只有聊天输入框能输入 → 设置走 `/tr <子命令>`,面板留给主菜单/藏身处等有指针的场景。**
-  ⚠️ **面板视觉规范**: 左侧标签(fill)+ 右侧控件列(176px),控件统一 30px 高 / 4px 圆角;行标签**不要设固定高度**,用 `vertical-align: center` 让文字盒在行内居中(设 `height` 会让文字顶对齐 → 下方留白,2026-10-15 实机反馈);行内边距 2px 让文字填满行。标题栏 = `flow-children: right` + 「标题组 + `.LCTHeaderSpacer`(fill-parent-flow 弹簧)+ 叉号」,靠弹簧把叉号顶到最右;**别用 `align` 简写**(Button 上会被忽略,叉号会跑到中间)。按钮内文字用 `vertical-align: middle`(Valve 自己的写法)。
+  只认 `/tr`(2026-10-14 移除 `!tr` / `.tr` 别名);也可点输入框右侧 `set` 按钮。聊天子命令(第八十轮加、第八十一轮按要求撤掉)**不要再加**——用户明确不需要。
+  ⚠️ **游戏内输入通道(2026-10-15 实机定论,别再试)**: ①默认没有鼠标指针;②按住 Tab 才有指针,但 Tab 是**全屏**装备界面(`CitadelHudActivePlayerStats` = width/height 100%),面板在 chat 布局里永远压不过去(`z-index` 跨布局无效);③方向键 / Enter / ESC 全被游戏消费,面板收不到;④引擎侧也没有 free cursor(`Convars` 不存在、`HeroTestingToggleFreeCursor` 无反应)。**结论:面板只能「按住 Tab 出指针 + 点右下角那片没被盖住的区域」来操作**(用户实测 X 放右下角可点);不要再为指针/键盘导航折腾。**
+  ⚠️ **面板视觉规范(2026-10-15 定稿)**: 行布局沿用**第 76 版**「标签在上 + 控件在下(全宽)」的堆叠式(`.LCTSettingsRow { flow-children: down; padding: 7px 10px; }`、`.LCTRowLabel` 无固定高度、`.LCTFieldCol { width: 100% }`)。⚠️ 别再把行改成「左标签 + 右固定宽控件列」的两栏(第七十七~七十九轮反复踩坑:文字垂直居中在这个引擎里很难配对,用户明确说两栏版更丑)。关闭按钮 `LCTCloseBtn` 放在**页脚最右**(`[保存][测试][LCTFooterSpacer 弹簧][X]`),用户实测右下角不会被按住 Tab 弹出的全屏界面挡住。别用 `align` 简写,用 `horizontal-align` / `vertical-align`;按钮内文字用 `vertical-align: middle`。
   面板改动需重建 VPK 并**重启游戏**才生效。⚠️ 别再加周期性 `op=health` 轮询:一次占 5 帧(≈3s),5 秒一轮会吃掉约六成窄带信道(第六十九轮踩过)。
 - 桥状态(面板里的 `LCTBridgeStatus`):**以真实流量为准** —— BTIPC 的 `settleOk` 标记在线,`settleFail` 仅在通道级失败(`bridge_down`/`crc_dead`/`timeout`/`dispatch_threw`)时标记离线(被抢占/取消/too_long 是本地原因,不算桥离线);另外打开面板时主动探一次 `op=health`。⚠️ `op=health` **必须存在**:曾经没有它,`op=health\n{}` 落进"裸文本"分支被当成待翻译文本,回来的是译文 → `JSON.parse` 必失败 → 桥状态永远显示"不可用"还白烧一次 provider 调用(第六十八轮)。
 - ⚠️ **桥日志时间戳是 UTC**(与北京时间差 8 小时),排查时先换算再对时段。

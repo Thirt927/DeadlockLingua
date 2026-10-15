@@ -87,11 +87,6 @@
   margin-left: 16px;
 }
 
-/* 弹簧:吃掉中间所有剩余宽度,把叉号顶到最右 */
-.LCTHeaderSpacer {
-  width: fill-parent-flow( 1 );
-  height: 1px;
-}
 
 .LCTPanelTitle {
   font-size: 17px;
@@ -108,28 +103,6 @@
   margin-left: 8px;
 }
 
-.LCTHeaderClose {
-  width: 28px;
-  height: 28px;
-  min-width: 0px;
-  padding: 0px;
-  vertical-align: center;
-  margin-right: 14px;
-  background-color: transparent;
-  border: 0px solid transparent;
-  border-radius: 4px;
-  color: #8a94a3;
-  font-size: 13px;
-  font-weight: bold;
-  text-align: center;
-  transition-property: background-color, color;
-  transition-duration: 0.15s;
-}
-
-.LCTHeaderClose:hover {
-  background-color: rgba(217, 112, 95, 0.2);
-  color: #ffffff;
-}
 
 /* 状态栏:左侧提示占满剩余宽度,右侧桥状态固定,两者不会重叠 */
 .LCTStatusBar {
@@ -205,32 +178,32 @@
   padding-top: 2px;
 }
 
-/* 设置行:左标签 + 右控件列 */
+/* 设置行:标签在上、控件在下(全宽)—— 第 76 版布局,实机反馈这版最好看 */
 .LCTSettingsRow {
   width: 100%;
-  flow-children: right;
-  padding: 2px 2px;
-  margin-bottom: 2px;
-  border-radius: 4px;
-  transition-property: background-color;
-  transition-duration: 0.12s;
+  flow-children: down;
+  padding: 7px 10px;
+  margin-bottom: 4px;
+  border-radius: 6px;
+  border-left: 2px solid transparent;
 }
 
 .LCTSettingsRow:hover {
-  background-color: rgba(255, 255, 255, 0.035);
+  background-color: rgba(255, 210, 127, 0.045);
+  border-left: 2px solid rgba(201, 164, 78, 0.55);
 }
 
 .LCTRowLabel {
-  width: fill-parent-flow( 1 );
-  color: #c3cbd6;
-  font-size: 14px;
-  vertical-align: center;
-  margin-right: 12px;
+  color: #a8b0be;
+  font-size: 13px;
+  font-weight: bold;
+  letter-spacing: 0.2px;
+  margin-bottom: 4px;
 }
 
-/* 右控件列:固定宽度,保证所有控件左右对齐 */
+/* 控件列:纵向占满整行宽度 */
 .LCTFieldCol {
-  width: 176px;
+  width: 100%;
   flow-children: down;
 }
 
@@ -302,9 +275,24 @@
 }
 
 /* 按钮/菜单里的 Label:文字在按钮内居中(Valve 的写法是 vertical-align: middle) */
-.LCTBtn Label, .LCTHeaderClose Label, .LCTMenuOption Label {
+.LCTBtn Label, .LCTMenuOption Label {
   vertical-align: middle;
   horizontal-align: center;
+}
+
+/* 页脚关闭按钮(面板右下角) */
+.LCTCloseBtn {
+  min-width: 40px;
+  width: 40px;
+  padding: 0px;
+  vertical-align: center;
+  color: #b9c2ce;
+}
+
+/* 页脚弹簧:把关闭按钮顶到最右 */
+.LCTFooterSpacer {
+  width: fill-parent-flow( 1 );
+  height: 1px;
 }
 
 /* 底部操作栏 */
@@ -377,27 +365,25 @@
 
 /* 开关:按钮作底板 + 上层状态 Label(是/否),开启时文字变绿 */
 .LCTToggleWrap {
-  width: 72px;
+  width: 100%;
   height: 30px;
   flow-children: none;
-  align: right center;
 }
 
 .LCTToggle {
-  width: 72px;
+  width: 76px;
   min-width: 0px;
   padding: 0px;
 }
 
 .LCTToggleValue {
-  horizontal-align: center;
+  horizontal-align: left;
   vertical-align: center;
-  width: 72px;
+  width: 76px;
   height: 30px;
   text-align: center;
-  vertical-align: center;
-  color: #9aa4b2;
-  font-size: 13px;
+  color: #c9c2b4;
+  font-size: 14px;
   font-weight: bold;
 }
 
@@ -461,18 +447,6 @@
 #LCTRowApiKey, #LCTRowRegion, #LCTRowOpenaiBase, #LCTRowOpenaiModel, #LCTRowDeeplEndpoint, #LCTRowFallback, #LCTRowTimeout {
   visibility: collapse;
 }
-/* /tr 命令回显(插进聊天列表的一行系统提示,12 秒后自动删) */
-.LCTNotice {
-  width: 100%;
-  padding: 1px 4px;
-}
-
-.LCTNoticeText {
-  color: #ffd27f;
-  font-size: 13px;
-  text-shadow: 0px 1px 2px rgba(0, 0, 0, 0.95);
-}
-
 /* ---- 译文标签(追加在原文下方,蓝色气泡:浅蓝斜体 + 深色半透明底) ---- */
 .LCTTranslation {
   color: #8fd8ff;

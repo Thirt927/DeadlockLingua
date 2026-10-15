@@ -1846,3 +1846,19 @@ ode -e "JSON.parse(...)" 通过)。
   - 面板底部提示改为 **「聊天框输入 /tr help 可用命令改全部设置」**(不再误导玩家去按 Tab / 方向键)。
 - **验证方式**: `node --check` 通过;`lingua_chat_simtest`(58/0)+ tests/btipc 五套 + overlay_test(13/0)+ test_sender_backfill(11/0)全绿;重新编译打包部署 `pak22_dir.vpk`(339,040 字节,2026-10-15 23:47),解包确认 `runTrCommand` / `TR_HELP` / `noticeChat` / `LCTNotice` / `/tr help` 提示都在产物里,且 `mod/` 与 CSDK 编译副本 MD5 一致。
 - **仍需用户测试**: 重启游戏后,在聊天框输入 `/tr help` 看是否收到黄色提示行;再试 `/tr status`、`/tr off`、`/tr lang en`。提示行会插在当前聊天列表里(12 秒后消失);若看不到说明 `ChatMessages` 容器没找到,需要看 `logs/bridge.log` 里的 `notice:` 行确认命令已经执行。
+
+## 第八十一轮(2026-10-15): 撤掉 /tr 聊天命令 + 叉号挪到面板右下角 + 行布局回到第 76 版
+
+- **背景(用户实机反馈)**: ①`/tr` 聊天命令**完全没必要**(用户表示其余都能手动操作),要求删掉;②叉号放到**右下角**就能点到(理由同之前某轮:面板右下角不会被按住 Tab 弹出的界面挡住);③「行内文字」还是丑,用户记得**更早那版好看**,要求回看以前的实现;并指出第七十九轮那次修改**没有改善**。
+- **改动文件**: `mod/panorama/scripts/lingua_chat.js`、`mod/panorama/styles/lingua_chat.css`、`mod/panorama/layout/chat.xml`。
+- **改动内容**:
+  - **撤掉聊天命令**: 删除 `TR_HELP` / `trStatusText()` / `noticeChat()` / `applyTrCfg()` / `runTrCommand()` 与 `/tr <子命令>` 分发,`/tr` 恢复为「开合设置面板」;同时删掉 `.LCTNotice` 提示行样式与 `processRow()` 里的 `LCTNotice` 守卫。
+  - **叉号挪到右下角**: 标题栏只留「标题 + 副标题」(去掉右侧叉号);页脚结构改成 `[保存][测试桥][LCTFooterSpacer 弹簧][X]`,叉号贴面板**右下角**——右下角不在 Tab 装备界面覆盖范围内,按住 Tab 时有指针就能点到。`LCTCloseBtn` 用 `.LCTCloseBtn`(40px 宽的小按钮)样式。
+  - **行布局回退到第 76 版(a484a58)**: 撤销第 77 轮的「左标签 + 右 176px 控件列」两栏设计 —— 回到 **标签在上、控件在下(全宽)** 的堆叠式:
+    - `.LCTSettingsRow { flow-children: down; padding: 7px 10px; margin-bottom: 4px; border-radius: 6px; border-left: 2px solid transparent }` + hover 左侧金色条;
+    - `.LCTRowLabel { color: #a8b0be; font-size: 13px; font-weight: bold; margin-bottom: 4px }`(不再有 height / vertical-align 折腾);
+    - `.LCTFieldCol { width: 100% }`(控件占满整行);
+    - 开关恢复「按钮在左 + 值 Label 覆盖在按钮上(`horizontal-align: left; vertical-align: center`)」的第 76 版写法。
+    这样文字与控件各占一行、天然没有"行内垂直居中"问题 —— 前两轮反复调的正是两栏布局才有的毛病。
+- **验证方式**: `node --check` 通过;`lingua_chat_simtest`(58/0)+ tests/btipc 五套 + overlay_test(13/0)+ test_sender_backfill(11/0)全绿;重新编译打包部署 `pak22_dir.vpk`(331,155 字节,2026-10-15 23:56),解包确认 `runTrCommand` / `noticeChat` 已不在产物、`LCTFooterSpacer` 与新的行布局样式都在。
+- **仍需用户测试**: 重启游戏后:①按住 Tab 出指针,点面板**右下角的 X** 看能不能关掉面板;②看行内文字是否回到之前顺眼的样子。若右下角仍被挡,可考虑把面板整体挪到屏幕角落(需要用户告知 Tab 界面具体覆盖范围,或给一张截图)。
