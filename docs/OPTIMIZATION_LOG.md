@@ -1806,3 +1806,16 @@ ode -e "JSON.parse(...)" 通过)。
 - **验证方式**: XML `[xml]` 解析通过;`node --check` 通过;离线测试 tests/btipc 五套 + lingua_chat_simtest(58/0)+ overlay_test(13/0)+ test_sender_backfill(11/0)全绿;重新编译 7 个资源打包部署到 addons,`pak22_dir.vpk`(332,700 字节)解包确认含新文案与新 class。
 - **顺带处理**: addons 里出现了一个被改名成 `pak03_dir.vpk` 的旧构建(22:29 那版),与新的 `pak22_dir.vpk` 会争抢同一批覆盖文件,已改名为 `pak03_dir.vpk.bak-old-20261014` 停用。
 - **仍需用户测试**: 重启游戏后:①输入框右侧应是 `set`;②打开面板后**直接点**(不必按住 Tab)看是否可交互 —— 若仍需按住 Tab,说明 `HeroTestingToggleFreeCursor` 未被引擎处理,需要换思路(例如注册 `$.RegisterKeyBind` 让面板可用键盘完全操作);③桥关闭时看底部状态栏左右文字是否还会重叠。
+
+## 第七十八轮(2026-10-15): 修「叉号没在右上角 / 文字偏上 / 鼠标指针仍要按 Tab」三项实机反馈
+
+- **背景(用户实机反馈)**: ①上一轮的「自由光标」尝试**没生效**;②按住 Tab 虽然出指针,但游戏同时弹出装备界面盖住面板,导致叉号点不到;③面板里的文字**在行内偏上**(没有垂直居中)。
+- **改动文件**: `mod/panorama/layout/chat.xml`、`mod/panorama/styles/lingua_chat.css`、`mod/panorama/scripts/lingua_chat.js`。
+- **改动内容**:
+  - **叉号(关闭按钮)真正贴右上角**: 标题栏从 `flow-children: right` 改成 `flow-children: none` + 显式定位 —— 标题/副标题包进 `.LCTHeaderTitleGroup`(`align: left center`),关闭按钮用 `align: right center; margin-right: 12px`。流式布局里 `align` 会被忽略,所以上一版叉号跟着副标题排在中间;现在右侧定位不再依赖流。
+  - **文字垂直居中**: `.LCTRowLabel` 从 `vertical-align: top + padding-top: 8px` 改成 **固定 `height: 30px` + `vertical-align: center`**,与右侧 30px 高的控件同高同心中线(官方 CSS 里 Label 也走 `vertical-align: center` 这套写法,已对照 `citadel_base_styles.vcss_c`)。
+  - **面板层级抬高**: `.LCTSettingsPanel` 的 `z-index` 从 5000 提到 **99998**(游戏自己的 CSS 里最高用到 99999/10001),尽量盖在按住 Tab 才出现的装备/计分界面之上。
+  - **鼠标指针换思路**: 上一轮派发的 `HeroTestingToggleFreeCursor` 实测无效。这一轮改为**保持「聊天输入框」焦点** —— 引擎在聊天激活时保持鼠标指针可见;`openSettingsPanel()` 现在优先把焦点交回 `ChatInput`(并写 `diagLog("focus", "PANORAMA: settings focus -> chat|panel-first|panel")`),并且新增 `keepCursorFocus()`,在每次开关/选服务商/选语言/选模式之后补一次焦点,避免点一下指针就消失。输入框不可用时退回原来的「聚焦面板第一个控件」。
+  - 底部提示文案改成 `Tab 切换 · Enter 确认 · ESC 关闭`(指针拿不到时也说明怎么用键盘操作)。
+- **验证方式**: `[xml]` 解析通过;`node --check` 通过;离线测试 tests/btipc 五套 + lingua_chat_simtest(58/0)+ overlay_test(13/0)+ test_sender_backfill(11/0)全绿;重新编译打包部署 `pak22_dir.vpk`(334,094 字节,2026-10-15 23:18),解包确认 `99998` / `LCTHeaderTitleGroup` / `keepCursorFocus` / `Tab 切换` 等新内容都在。
+- **仍需用户测试**: 重启游戏后:①叉号应在面板**右上角**;②行内文字应与右侧控件**同一条中线**;③点开面板后**不按 Tab** 看指针是否可用(焦点回到聊天输入框的做法是否让引擎保持指针)——若仍不可用,下一步方案是把面板移出 Tab 装备界面覆盖的区域(例如贴左上角),或改为完全键盘操作(方向键 + Enter)。

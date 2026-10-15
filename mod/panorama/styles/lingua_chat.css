@@ -62,7 +62,7 @@
   border-radius: 8px;
   box-shadow: rgba(0, 0, 0, 0.55) 0px 18px 40px 0px;
   flow-children: down;
-  z-index: 5000;
+  z-index: 99998;
   visibility: collapse;
 }
 
@@ -70,14 +70,20 @@
   visibility: visible;
 }
 
-/* 标题栏:标题 + 副标题 + 右侧关闭 */
+/* 标题栏:flow-children none + 显式 align —— 左右各自定位,叉号一定贴右上角 */
 .LCTSettingsHeader {
   width: 100%;
   height: 48px;
   background-color: rgba(255, 255, 255, 0.03);
-  flow-children: right;
-  padding: 0px 16px;
+  flow-children: none;
   border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.LCTHeaderTitleGroup {
+  flow-children: right;
+  height: 100%;
+  align: left center;
+  margin-left: 16px;
 }
 
 .LCTPanelTitle {
@@ -101,6 +107,7 @@
   min-width: 0px;
   padding: 0px;
   align: right center;
+  margin-right: 12px;
   background-color: transparent;
   border: 0px solid transparent;
   border-radius: 4px;
@@ -208,10 +215,10 @@
 
 .LCTRowLabel {
   width: fill-parent-flow( 1 );
+  height: 30px;
   color: #b8c0cc;
   font-size: 13px;
-  vertical-align: top;
-  padding-top: 8px;
+  vertical-align: center;
   margin-right: 12px;
 }
 

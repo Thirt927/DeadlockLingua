@@ -80,8 +80,10 @@
 		<!-- Babel Tower 设置面板(默认隐藏,居中弹窗;ESC 关闭) -->
 		<Panel id="LCTSettingsPanel" class="LCTSettingsPanel" oncancel="LCTCloseSettings();">
 			<Panel class="LCTSettingsHeader">
-				<Label class="LCTPanelTitle" text="DeadlockLingua" />
-				<Label class="LCTPanelSub" text="聊天翻译设置" />
+				<Panel class="LCTHeaderTitleGroup">
+					<Label class="LCTPanelTitle" text="DeadlockLingua" />
+					<Label class="LCTPanelSub" text="聊天翻译设置" />
+				</Panel>
 				<Button id="LCTCloseBtn" class="LCTHeaderClose" onactivate="LCTCloseSettings();">
 					<Label text="X" />
 				</Button>
@@ -281,7 +283,7 @@
 				<Button id="LCTTestBtn" class="LCTBtn LCTBtnTest" onactivate="LCTTest();">
 					<Label text="测试桥" />
 				</Button>
-				<Label class="LCTKeyHint" text="点击选项切换 · 保存后生效 · ESC 关闭" />
+				<Label class="LCTKeyHint" text="Tab 切换 · Enter 确认 · ESC 关闭" />
 			</Panel>
 		</Panel>
 		<!-- Babel Tower 隐藏 HTML 桥面板(必须用 <HTML> 标签在 XML 声明,运行时 CreatePanel 不生效) -->

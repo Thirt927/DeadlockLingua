@@ -5810,13 +5810,23 @@ function injectTranslation(row, sig, text) {
     // 打开面板期间申请自由光标,并允许鼠标按下直接给控件焦点
     try { if (typeof panel.SetDisableFocusOnMouseDown === "function") panel.SetDisableFocusOnMouseDown(false); } catch (e) {}
     try { requestFreeCursor(true); } catch (e) {}
-    // 聚焦面板本身(与 DLCT 一致:优先控件,失败则面板;面板持焦后 Tab/Enter 可用)
-    // 仅在面板仍可见时聚焦,否则异步回调会在用户已关闭设置后把焦点抢回隐藏面板
+    // 焦点策略(2026-10-15 实机反馈后调整):
+    // ①优先把焦点交回聊天输入框 —— 聊天处于激活态时引擎保持鼠标指针可见,
+    //    这样不必按住 Tab 也能点面板(之前聚焦面板按钮会让输入框 blur、指针消失);
+    // ②输入框不可用时退回面板内第一个控件,保证 Tab/Enter 仍可用。
     try {
       if (hasClass(panel, SETTINGS_VISIBLE_CLASS)) {
-        const first = findChild(panel, "LCTEnabled");
-        if (first && first.SetFocus) first.SetFocus();
-        else if (panel.SetFocus) panel.SetFocus();
+        let focused = "";
+        const chatInput = State.input || findChild(getRoot(), CHAT_INPUT_ID);
+        if (chatInput && chatInput.SetFocus) {
+          try { chatInput.SetFocus(); focused = "chat"; } catch (e) {}
+        }
+        if (!focused) {
+          const first = findChild(panel, "LCTEnabled");
+          if (first && first.SetFocus) { first.SetFocus(); focused = "panel-first"; }
+          else if (panel.SetFocus) { panel.SetFocus(); focused = "panel"; }
+        }
+        diagLog("focus", "PANORAMA: settings focus -> " + (focused || "none"));
       }
     } catch (e) {}
   }
@@ -5841,6 +5851,17 @@ function injectTranslation(row, sig, text) {
   // 高级设置折叠状态(纯 UI 状态,不落盘;默认收起)
   let uiAdvancedOpen = false;
   let settingsOpen = false;
+
+  // 面板打开期间尽量让「聊天输入框」保持焦点:引擎在聊天激活时保持鼠标指针可见,
+  // 这样玩家不用按住 Tab 就能点面板;每次点完控件再补一次,避免点一下指针就消失
+  // (2026-10-15 实机反馈:面板抢焦点后指针消失,只剩按住 Tab 才有)。
+  function keepCursorFocus() {
+    try {
+      if (!settingsOpen) return;
+      const input = State.input || findChild(getRoot(), CHAT_INPUT_ID);
+      if (input && input.SetFocus) input.SetFocus();
+    } catch (e) {}
+  }
   function LCTToggleSettings() {
     const now = nowMs();
     if (lastSettingsToggleAt && now - lastSettingsToggleAt < 300) return;
@@ -6072,6 +6093,7 @@ function injectTranslation(row, sig, text) {
     }
     saveUiConfig();
     diagLog("toggle_" + which, "PANORAMA: toggle: " + which);
+    keepCursorFocus();
   }
 
   // 循环切换(服务商/显示模式/发送模式)
@@ -6120,6 +6142,7 @@ function injectTranslation(row, sig, text) {
     closeSelectMenus();
     // 走 diagLog:log() 是 `[LCT]` 前缀,桥不采集 —— 之前下拉选择在 bridge.log 里完全看不到
     diagLog("pickprov", "PANORAMA: pickProvider: " + value);
+    keepCursorFocus();
   }
 
   function LCTCycle(which) {
@@ -6178,6 +6201,7 @@ function injectTranslation(row, sig, text) {
     saveUiConfig();
     closeSelectMenus();
     diagLog("picklang", "PANORAMA: pickLang: " + field + " -> " + value);
+    keepCursorFocus();
     if (value === "custom") {
       const customId = field === "targetLanguage" ? "LCTTargetLangCustom" : "LCTOutgoingTargetCustom";
       const custom = findChild(getRoot(), customId);
@@ -6204,6 +6228,7 @@ function injectTranslation(row, sig, text) {
     saveUiConfig();
     closeSelectMenus();
     diagLog("pickopt", "PANORAMA: pickOption: " + field + " -> " + value);
+    keepCursorFocus();
   }
 
   function collectPanelConfig() {
