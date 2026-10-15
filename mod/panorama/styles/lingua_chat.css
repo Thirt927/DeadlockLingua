@@ -164,12 +164,12 @@
 /* 分组标题 */
 .LCTSectionTitle {
   width: 100%;
-  color: #7f8b99;
-  font-size: 11px;
-  font-weight: bold;
-  letter-spacing: 1px;
-  padding: 10px 2px 4px 2px;
-  margin-bottom: 2px;
+  color: #93a0b0;
+  font-size: 12px;
+  font-weight: semi-bold;
+  letter-spacing: 0.5px;
+  padding: 10px 2px 5px 2px;
+  margin-bottom: 1px;
   border-top: 1px solid rgba(255, 255, 255, 0.06);
 }
 
@@ -194,11 +194,11 @@
 }
 
 .LCTRowLabel {
-  color: #a8b0be;
-  font-size: 13px;
-  font-weight: bold;
-  letter-spacing: 0.2px;
-  margin-bottom: 4px;
+  color: #c6cfda;
+  font-size: 14px;
+  font-weight: normal;
+  letter-spacing: 0px;
+  margin-bottom: 5px;
 }
 
 /* 控件列:纵向占满整行宽度 */
@@ -214,8 +214,8 @@
   background-color: #0d1218;
   border: 1px solid rgba(255, 255, 255, 0.10);
   border-radius: 4px;
-  color: #eef2f7;
-  font-size: 13px;
+  color: #f0f4f8;
+  font-size: 14px;
   padding: 0px 9px;
 }
 
@@ -233,7 +233,7 @@
   border-radius: 4px;
   color: #d7dce3;
   font-size: 13px;
-  font-weight: bold;
+  font-weight: semi-bold;
   text-align: center;
   transition-property: background-color, border-color, color;
   transition-duration: 0.15s;
@@ -358,8 +358,8 @@
   text-align: center;
   vertical-align: center;
   color: #eef2f7;
-  font-size: 13px;
-  font-weight: bold;
+  font-size: 14px;
+  font-weight: normal;
   white-space: nowrap;
 }
 
@@ -382,9 +382,9 @@
   width: 76px;
   height: 30px;
   text-align: center;
-  color: #c9c2b4;
+  color: #d5dbe3;
   font-size: 14px;
-  font-weight: bold;
+  font-weight: normal;
 }
 
 .LCTToggleValue.LCTOn {

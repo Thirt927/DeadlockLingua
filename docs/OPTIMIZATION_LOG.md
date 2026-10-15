@@ -1862,3 +1862,15 @@ ode -e "JSON.parse(...)" 通过)。
     这样文字与控件各占一行、天然没有"行内垂直居中"问题 —— 前两轮反复调的正是两栏布局才有的毛病。
 - **验证方式**: `node --check` 通过;`lingua_chat_simtest`(58/0)+ tests/btipc 五套 + overlay_test(13/0)+ test_sender_backfill(11/0)全绿;重新编译打包部署 `pak22_dir.vpk`(331,155 字节,2026-10-15 23:56),解包确认 `runTrCommand` / `noticeChat` 已不在产物、`LCTFooterSpacer` 与新的行布局样式都在。
 - **仍需用户测试**: 重启游戏后:①按住 Tab 出指针,点面板**右下角的 X** 看能不能关掉面板;②看行内文字是否回到之前顺眼的样子。若右下角仍被挡,可考虑把面板整体挪到屏幕角落(需要用户告知 Tab 界面具体覆盖范围,或给一张截图)。
+
+## 第八十二轮(2026-10-16): 面板字体排版润色
+
+- **背景(用户实机反馈)**: 每行字体还是不好看,要求「变好看一些」。前三轮都在和引擎的垂直居中较劲,这轮回到排版本身:字号偏小、标签全加粗、分组标题 letter-spacing 过大,整体偏挤偏重。
+- **改动文件**: mod/panorama/styles/lingua_chat.css。
+- **改动内容**:
+  - 行标签: 13px bold #a8b0be → 14px normal #c6cfda,letter-spacing 0,与控件间距 4 → 5px —— 更大、更亮、去加粗。
+  - 分组标题: 11px bold + 1px 字距 → 12px semi-bold + 0.5px 字距 #93a0b0。
+  - 下拉值/开关值文本从 bold 改为 normal(值不需要强调),开关值颜色提亮到 #d5dbe3。
+  - 输入框文字 13 → 14px;按钮/选择框字重 bold → semi-bold。
+- **验证方式**: 重新编译打包部署 pak22_dir.vpk(331,167 字节,2026-10-16 00:08);node --check 与离线测试(btipc 五套 / simtest / overlay / sender_backfill)全绿;另生成 dist/panel_mock.html + dist/panel_mock.png 的 1:1 HTML 参考图(浏览器字体与游戏内字体不同,仅供参考整体比例/字重/间距)。
+- **仍需用户测试**: 重启游戏看行内文字是否顺眼;若仍不满意,说明是游戏内 sans 字体的中文回退渲染问题,需要一张截图才能按实际字形继续定(换字体族或微调内边距)。
