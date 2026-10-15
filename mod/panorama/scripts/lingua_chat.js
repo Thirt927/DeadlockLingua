@@ -5169,6 +5169,8 @@ function injectTranslation(row, sig, text) {
 
   function processRow(row) {
     if (!isValid(row)) return false;
+    // /tr 命令回显行不是聊天,别被扫描器当消息翻译
+    if (hasClass(row, "LCTNotice")) return false;
     const record = readMessageRow(row);
     if (!record) return false;
     if (record.isOwn && record.sender && record.sender !== UNKNOWN_NAME) State.selfName = String(record.sender).trim();
@@ -5484,12 +5486,13 @@ function injectTranslation(row, sig, text) {
     const trimmed = String(raw).trim();
     if (!trimmed) return;
 
-    // 设置面板开关:只认 /tr(用户要求去掉 !tr / .tr 等冗余别名)。
+    // /tr 命令族:面板点不到(游戏内无鼠标指针),所以设置也能用聊天命令改。
     const cmd = trimmed.toLowerCase();
-    // 只保留 /tr 一个入口(!tr / .tr 已按用户要求移除)
-    if (cmd === "/tr") {
-      log("cmd: " + cmd + " -> toggle settings panel");
-      LCTToggleSettings();
+    if (cmd === "/tr" || cmd.indexOf("/tr ") === 0) {
+      const rest = trimmed.slice(3).trim();
+      log("cmd: " + cmd + " -> /tr " + rest);
+      diagLog("trcmd_raw", "PANORAMA: /tr " + rest);
+      runTrCommand(rest);
       clearInput();
       return;
     }
@@ -5814,6 +5817,132 @@ function injectTranslation(row, sig, text) {
   // 高级设置折叠状态(纯 UI 状态,不落盘;默认收起)
   let uiAdvancedOpen = false;
   let settingsOpen = false;
+
+  // ================= /tr 聊天命令(2026-10-15) ===================
+  // 实机结论:面板在 chat 布局里,Tab 装备界面是全屏 HUD 层,盖不过去;游戏内也没
+  // 有鼠标指针,方向键/Enter 又都被游戏捕获 —— 游戏内唯一能输入的通道就是聊天框。
+  // 所以常用设置全部支持用 /tr 子命令修改,并在聊天里回一行结果提示。
+  const TR_HELP = "/tr 面板 · /tr help · /tr status · /tr on|off · /tr force · /tr log · /tr own · /tr lang <代码> · /tr mode 双语|仅译文 · /tr out off|译文|双语 · /tr outlang <代码> · /tr provider <名字> · /tr test";
+
+  function trStatusText() {
+    return "翻译=" + (State.cfg.enabled ? "开" : "关") +
+      " · 目标=" + (State.cfg.targetLanguage || "zh-Hans") +
+      " · 显示=" + ((State.cfg.displayMode || "bilingual") === "bilingual" ? "双语" : "仅译文") +
+      " · 发送前=" + (State.cfg.outgoing || "off") +
+      " · 服务商=" + (State.cfg.provider || "bing");
+  }
+
+  // 往聊天列表里塞一行系统提示(12 秒后自动删)。
+  function noticeChat(text) {
+    log("notice: " + text);
+    try {
+      const container = (isValid(State.messages) ? State.messages : null) || findChild(getRoot(), CHAT_MESSAGES_ID);
+      if (!container) return;
+      const row = $.CreatePanel("Panel", container, "LCTNotice" + nowMs());
+      if (!row) return;
+      row.AddClass("LCTNotice");
+      const label = $.CreatePanel("Label", row, "");
+      if (label) { label.AddClass("LCTNoticeText"); label.text = String(text); }
+      $.Schedule(12.0, function () { try { if (isValid(row)) row.DeleteAsync(0); } catch (e) {} });
+    } catch (e) {}
+  }
+
+  // 改内存配置 + 下发桥 + 回显
+  function applyTrCfg(patch, note) {
+    try {
+      for (const k in patch) {
+        if (Object.prototype.hasOwnProperty.call(patch, k)) State.cfg[k] = patch[k];
+      }
+      const ui = {
+        enabled: !!State.cfg.enabled,
+        provider: State.cfg.provider || "bing",
+        displayMode: State.cfg.displayMode || "bilingual",
+        outgoing: State.cfg.outgoing || "off",
+        outgoingTarget: resolveOutgoingTarget(),
+        targetLanguage: State.cfg.targetLanguage || "zh-Hans",
+        force: !!State.cfg.force,
+        timeoutMs: Number(State.cfg.timeoutMs) || 15000
+      };
+      bridgePost("config", { config: Object.assign({}, patch, { ui: ui }) }, function (res) {
+        if (res && res.ok) { if (note) noticeChat(note); }
+        else noticeChat("保存失败: " + ((res && res.error) || "unknown"));
+      });
+      saveUiConfig();
+      if (settingsOpen) syncPanelFromConfig();
+      diagLog("trcmd", "PANORAMA: /tr cmd -> " + JSON.stringify(patch));
+    } catch (e) {
+      noticeChat("命令执行失败: " + ((e && e.message) || e));
+    }
+  }
+
+  function runTrCommand(rest) {
+    const parts = String(rest || "").split(/\s+/).filter(function (x) { return x.length > 0; });
+    const sub = String(parts[0] || "").toLowerCase();
+    const arg = String(parts[1] || "");
+    const lowArg = arg.toLowerCase();
+    if (!sub || sub === "panel") { LCTToggleSettings(); return; }
+    if (sub === "help" || sub === "?") { noticeChat(TR_HELP); return; }
+    if (sub === "status") { noticeChat(trStatusText()); return; }
+    if (sub === "on") { applyTrCfg({ enabled: true }, "翻译已开启 · " + trStatusText()); return; }
+    if (sub === "off") { applyTrCfg({ enabled: false }, "翻译已关闭"); return; }
+    if (sub === "force") {
+      const next = !State.cfg.force;
+      applyTrCfg({ force: next }, "强制翻译=" + (next ? "开" : "关"));
+      return;
+    }
+    if (sub === "log") {
+      const next = State.cfg.chatLog === false;
+      applyTrCfg({ chatLog: next }, "聊天日志=" + (next ? "开" : "关"));
+      return;
+    }
+    if (sub === "own") {
+      const next = State.cfg.translateOwn === false;
+      applyTrCfg({ translateOwn: next }, "翻译自己的消息=" + (next ? "开" : "关"));
+      return;
+    }
+    if (sub === "lang") {
+      if (!arg) { noticeChat("用法: /tr lang zh-Hans|zh-Hant|en|ja|ko|fr|de|es 或任意语言代码"); return; }
+      applyTrCfg({ targetLanguage: arg }, "目标语言=" + arg);
+      return;
+    }
+    if (sub === "outlang") {
+      if (!arg) { noticeChat("用法: /tr outlang en"); return; }
+      applyTrCfg({ outgoingTarget: arg }, "发送目标语言=" + arg);
+      return;
+    }
+    if (sub === "mode") {
+      let mode = "";
+      if (lowArg === "bilingual" || arg === "双语") mode = "bilingual";
+      else if (lowArg === "translation_only" || lowArg === "translation" || lowArg === "only" || arg === "仅译文" || arg === "译文") mode = "translation_only";
+      if (!mode) { noticeChat("用法: /tr mode 双语|仅译文"); return; }
+      applyTrCfg({ displayMode: mode }, "显示模式=" + (mode === "bilingual" ? "双语" : "仅译文"));
+      return;
+    }
+    if (sub === "out") {
+      let mode = "";
+      if (lowArg === "off" || arg === "关") mode = "off";
+      else if (lowArg === "translation" || lowArg === "only" || arg === "仅译文" || arg === "译文") mode = "translation";
+      else if (lowArg === "bilingual" || lowArg === "bi" || arg === "双语") mode = "bilingual";
+      if (!mode) { noticeChat("用法: /tr out off|译文|双语"); return; }
+      applyTrCfg({ outgoing: mode }, "发送前翻译=" + (mode === "off" ? "关" : (mode === "translation" ? "仅译文" : "双语")));
+      return;
+    }
+    if (sub === "provider") {
+      const known = { bing: 1, microsoft: 1, openai: 1, deepl: 1, google: 1 };
+      if (!known[lowArg]) { noticeChat("用法: /tr provider bing|microsoft|openai|deepl|google"); return; }
+      applyTrCfg({ provider: lowArg }, "服务商=" + lowArg + "(Key / 端点请在设置面板或网页设置里填)");
+      return;
+    }
+    if (sub === "test") {
+      noticeChat("正在测试翻译通道…");
+      bridgePost("test", {}, function (res) {
+        if (res && res.ok) noticeChat("测试成功: " + String(res.translation || "").slice(0, 40));
+        else noticeChat("测试失败: " + ((res && res.error) || "unknown"));
+      });
+      return;
+    }
+    noticeChat("未知子命令: " + sub + " · " + TR_HELP);
+  }
   function LCTToggleSettings() {
     const now = nowMs();
     if (lastSettingsToggleAt && now - lastSettingsToggleAt < 300) return;

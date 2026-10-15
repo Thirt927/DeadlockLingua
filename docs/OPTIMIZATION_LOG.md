@@ -1831,3 +1831,18 @@ ode -e "JSON.parse(...)" 通过)。
   - **行文字收紧**: `.LCTRowLabel` 去掉固定 `height: 30px`(固定高度+文字顶对齐正是"下面留白"的来源),改成不设高度 + `vertical-align: center` 让文字盒在行内居中;字号 13 → 14px、颜色提亮到 `#c3cbd6`;行内边距 4px → **2px**,让文字/控件填满行。选择框与开关的值 Label 也把 `align: center center` 换成显式 `horizontal-align/vertical-align: center`,并给按钮内 Label 加 `vertical-align: middle`(Valve 自己按钮文字的写法)。
 - **验证方式**: XML `[xml]` 解析通过;`node --check` 通过;离线测试 tests/btipc 五套 + lingua_chat_simtest(58/0)+ overlay_test(13/0)+ test_sender_backfill(11/0)全绿;重新编译打包部署 `pak22_dir.vpk`(332,101 字节,2026-10-15 23:41),解包确认 `requestFreeCursor` / `keepCursorFocus` 已不在产物里、`LCTHeaderSpacer` 与 `方向键` 提示都在。
 - **仍需用户测试**: 重启游戏后:①叉号应贴面板**右上角**;②行内文字应上下居中、贴满行高;③**不要再按 Tab**(会弹出装备界面盖住面板),打开 `/tr` 后直接用 **方向键 + Enter** 操作;若方向键不可用,可尝试 Tab…(但会弹装备界面)——需要用户反馈哪种按键能移动焦点,必要时用 `$.RegisterKeyBind` 自定义按键。**建议顺手截一张面板图**,视觉细节(间距/字号/叉号位置)按图一次调到位,比盲改快得多。
+
+## 第八十轮(2026-10-15): 设置改用 /tr 聊天命令(In-game 无可用鼠标/键盘通道)
+
+- **背景(用户实机反馈)**: 「方向键 切换 · Enter 确认 · ESC 关闭」这套提示**全部被游戏抓走**,根本到不了面板。结合前几轮结论:①游戏内默认没有鼠标指针;②按住 Tab 才有指针,但 Tab 是**全屏**装备界面(已从 `citadel_hud_active_player_stats.vcss_c` 确认根节点 `CitadelHudActivePlayerStats { width: 100%; height: 100% }`),面板在 chat 布局里永远压不过去;③方向键/Enter/ESC 都由游戏消费。
+- **结论**: 游戏内唯一能输入的通道就是**聊天输入框**。因此把设置能力搬到聊天命令上,面板保留给"有指针的场景"(主菜单 / 藏身处 / 手柄 UI 模式)。
+- **改动文件**: `mod/panorama/scripts/lingua_chat.js`、`mod/panorama/styles/lingua_chat.css`、`mod/panorama/layout/chat.xml`。
+- **改动内容**:
+  - `handleChatSubmit()` 里 `/tr` 改为命令分发: `cmd === "/tr" || cmd.startsWith("/tr ")` → `runTrCommand(rest)`,并写 `diagLog("trcmd_raw", "PANORAMA: /tr " + rest)` 便于排查。
+  - 支持子命令(全部即时生效、写内存 `State.cfg`、`bridgePost("config")` 下发给桥、并在聊天里回一行提示):
+    `/tr`(开合面板)、`/tr help`、`/tr status`、`/tr on|off`、`/tr force`(切换强制翻译)、`/tr log`(聊天日志)、`/tr own`(翻译自己的消息)、`/tr lang <代码>`、`/tr mode 双语|仅译文`、`/tr out off|译文|双语`、`/tr outlang <代码>`、`/tr provider bing|microsoft|openai|deepl|google`、`/tr test`。
+  - 新增 `noticeChat(text)`:往聊天列表插一行 `.LCTNotice`(黄色小字,12 秒后自动删除);`processRow()` 开头加了 `hasClass(row, "LCTNotice") → return false` 守卫,避免回显行被当成聊天内容翻译。
+  - 新增 `applyTrCfg(patch, note)`:改 `State.cfg` → 组 `ui` 镜像 → `bridgePost("config", { config: {...patch, ui} })` → `saveUiConfig()`;若设置面板正开着,顺便 `syncPanelFromConfig()` 刷新面板。
+  - 面板底部提示改为 **「聊天框输入 /tr help 可用命令改全部设置」**(不再误导玩家去按 Tab / 方向键)。
+- **验证方式**: `node --check` 通过;`lingua_chat_simtest`(58/0)+ tests/btipc 五套 + overlay_test(13/0)+ test_sender_backfill(11/0)全绿;重新编译打包部署 `pak22_dir.vpk`(339,040 字节,2026-10-15 23:47),解包确认 `runTrCommand` / `TR_HELP` / `noticeChat` / `LCTNotice` / `/tr help` 提示都在产物里,且 `mod/` 与 CSDK 编译副本 MD5 一致。
+- **仍需用户测试**: 重启游戏后,在聊天框输入 `/tr help` 看是否收到黄色提示行;再试 `/tr status`、`/tr off`、`/tr lang en`。提示行会插在当前聊天列表里(12 秒后消失);若看不到说明 `ChatMessages` 容器没找到,需要看 `logs/bridge.log` 里的 `notice:` 行确认命令已经执行。

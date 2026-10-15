@@ -284,7 +284,7 @@
 				<Button id="LCTTestBtn" class="LCTBtn LCTBtnTest" onactivate="LCTTest();">
 					<Label text="测试桥" />
 				</Button>
-				<Label class="LCTKeyHint" text="方向键 切换 · Enter 确认 · ESC 关闭" />
+				<Label class="LCTKeyHint" text="聊天框输入 /tr help 可用命令改全部设置" />
 			</Panel>
 		</Panel>
 		<!-- Babel Tower 隐藏 HTML 桥面板(必须用 <HTML> 标签在 XML 声明,运行时 CreatePanel 不生效) -->
