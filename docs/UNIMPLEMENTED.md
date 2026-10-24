@@ -49,12 +49,13 @@
   桥端窗口 GC 必须晚于客户端最长重试跨度;同轮位到达乱序,须按面板 id 定位位值而非到达序;
   存在迟到整轮重放,须按 `(id, round)` 幂等去重。
 
-### 6. https 面板通道(低延迟下行)未移植(2026-10-24,待决策)
+### 6. https 面板通道 —— **已于 2026-10-24 落地**(待实车验收)
 - **事实更正**:本仓库此前把"面板对 http/data/file 不加载"写成"引擎不再为 HTML 面板创建浏览器实例 / 面板已死",**不成立**。上游 BabelTower 2026-10-15 实车证实:引擎在 LoadPage 之前按**证书链**拒绝(`error:-202` = `ERR_CERT_AUTHORITY_INVALID`);本机自签证书(CN=BabelTower-localhost,SAN=`DNS:localhost` + `IP:127.0.0.1` + `IP:::1`)加入 `CurrentUser\Root` 并**完全退出重启 Steam** 后,隐藏面板可加载 `https://localhost:8792`,页面同源 fetch 取整条译文写 `document.title`,下行 **<1s**(位泵 3~27s)。证据/步骤见 https://github.com/c1375rick/BabelTower/blob/main/docs/btipc-https-v1.md。
-- **本仓库现状**:2.1.0 **未实现**——`core/` 无 `bridge_https.js`、`scripts/` 无 `gen_bridge_cert.ps1`、mod 无 https 探针。当前延迟仍是 2~6 秒,但**这不是引擎上限**。
-- **移植清单**:①桥侧独立 TLS 终结进程(8792 → 转发 8791;证书缺失 `exit(3)`,不得连带 BTIPC);②证书脚本(生成/信任/撤销,`certutil -user`,SAN 必须带 IP);③mod 侧开机探针(1.2s 一次,判死整局退 BTIPC)+ 三级降级;④自启脚本拉起第二个进程;⑤护栏测试(Origin 白名单含 https 回环源、证书缺失降级、桥只允许一处 listen)。
-- **安全边界**:需往**当前用户**根证书库写一张自签证书(SAN 仅 localhost/127.0.0.1/::1,冒充不了公网域名);安装时必须显式征求同意,并提供 `-SkipCert` / `-Untrust`。
-- **前置**:移植前先在本机做一次两臂探针复核(同进程 http + https、记录 `tlsClientError`、先确认监听成立再采信否定)——上游结论早于当前游戏版本。
+- **本仓库现状**:已实现。`core/bridge_https.js`(8792 TLS 终结,独立进程)、`scripts/gen_bridge_cert.ps1`(生成/信任/撤销)、`config.https`、桥端 `op=ui` 的 `httpsPanel` 能力位、游戏侧探针与降级(`lingua_chat.js` 的 `HTTPS_PANEL_*`)。
+- **设计/排障/安全边界**:见 [`docs/https-panel.md`](https-panel.md);用户侧启用三步见 README「安装」。
+- **仍未验证**:真机端到端(本机没有游戏)、`document.title` 长度上限、WebKit 页面加载耗时、`HTMLChangedTitle` 与 `panel.title` 属性的一致性。
+- **兜底不变**:证书没装 / Steam 没重启 / 探针判死 / 连续 3 次硬失败 → 自动整局退回 BTIPC,无需用户切换。
+- **安全边界**:证书只写**当前用户**根证书库(SAN 仅 localhost/127.0.0.1/::1,冒充不了公网域名);`-Trust` 需显式执行,`-Untrust` 可撤销(两者都要完全重启 Steam 才生效)。
 
 ## 二、已实现优化(摘要)
 

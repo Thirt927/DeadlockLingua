@@ -16,6 +16,25 @@
 - **`/tr` 面板改为三标签页**：常用 / 服务商 / 高级；面板 600×640，常用 5 项一屏放下，
   服务商字段不再折叠；行结构仍是「标签在上 + 控件在下」，底部保存/测试/右下角 X 不变。
 
+### 新增（https 面板通道，2026-10-24）
+
+- **下行回到「一个 RTT」**：隐藏 HTML 面板加载受信任的 `https://localhost:8792/bridge`，
+  页面同源 `fetch('/api/v1/*')` 拿到整条结果写入 `document.title`，游戏侧导航 + 读 title。
+  参考上游 BabelTower [`docs/btipc-https-v1.md`](https://github.com/c1375rick/BabelTower/blob/main/docs/btipc-https-v1.md)
+  的语义自行实现；详细说明见 [`docs/https-panel.md`](docs/https-panel.md)。
+  - `core/bridge_https.js`：8792 TLS 终结（独立进程），把 `/bridge` 与 `/api/v1/*` 原样代理回 8791；
+    证书缺失/口令错 → 退出码 3（不视为故障），上游不通 → 502 不退出。
+  - `scripts/gen_bridge_cert.ps1`：自签证书（CN=BabelTower-localhost，SAN 含 `localhost` /
+    `127.0.0.1` / `::1`，EKU serverAuth）+ `-Trust` 写 `CurrentUser\Root`（certutil）+ `-Untrust`。
+  - 游戏侧探针：开机 `op=ui` 拿桥声明的 `httpsPanel` 能力，1.2s 后导航一次 `op=health`；
+    判活 → 本会话走 https；判死 → **整局留在 BTIPC**（不发死请求）。
+  - 降级：硬失败（页面没加载 / 面板不可用 / 超长 payload 截断）把 job 原样交回 BTIPC 重做；
+    软失败（页面活了但慢）按原语义结算；连续 3 次硬失败 → 本会话放弃 https。
+  - 桥端 `op=ui` 增加 `httpsPanel` / `httpsPort`；`config.https`（enabled/port/pfx/passFile）
+    默认开启；证书不存在时桥只记一条 info，不启动子进程。
+- **BTIPC 位泵保留为兜底**：证书没装、Steam 没重启、探针判死、连续硬失败，任何一条都自动回到
+  BTIPC，不需要用户切换。
+
 ### 性能（BTIPC 提速 Phase 1，2026-10-24）
 
 - **桥端尾随改为 `fs.watch`**：`core/overlay.js` 不再用 800ms 固定轮询，改为 watch + 40ms 去抖，

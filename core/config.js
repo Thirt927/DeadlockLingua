@@ -36,6 +36,19 @@ const DEFAULTS = {
     enabled: true,
     dir: "logs/chat",
   },
+  // 本机 https 面板通道(2026-10-24 起):
+  //   游戏内隐藏 HTML 面板加载 https://localhost:<port>/bridge,页面同源 fetch /api/v1/*
+  //   后把整条结果写进 document.title,下行 ≈ 一个 RTT(参考上游 BabelTower
+  //   docs/btipc-https-v1.md;本仓库独立实现)。证书由 scripts/gen_bridge_cert.ps1
+  //   生成并信任;证书缺失时桥不启动 https 子进程,游戏侧整局留在 BTIPC。
+  https: {
+    enabled: true,
+    port: 8792,
+    pfx: "config/certs/bridge.pfx",
+    passFile: "config/certs/bridge.pass",
+    // 代理硬超时:必须大于 provider 超时(默认 15s),否则长翻译会被截成 502
+    timeoutMs: 30000,
+  },
   // 使用 Deadlock 公开数据 API 回填聊天日志里缺失的 SteamID。
   // 说明: 当前游戏版本 Panorama 不再暴露 Game/Players API, 其他玩家的 SteamID
   // 无法从聊天行/顶栏稳定采集; 此功能按“昵称 -> Steam 搜索 -> 精确匹配”补全。
@@ -243,6 +256,8 @@ function mask(cfg) {
     },
     fallbackProviders: Array.isArray(cfg.fallbackProviders) ? cfg.fallbackProviders : [],
     chatLog: Object.assign({ enabled: true, dir: "logs/chat" }, cfg.chatLog || {}),
+    // https 面板通道(无敏感信息:只有开关/端口/证书路径)
+    https: Object.assign({}, DEFAULTS.https, cfg.https || {}),
     defaults: {
       sourceLanguage: (cfg.defaults && cfg.defaults.sourceLanguage) || "auto",
       targetLanguage: (cfg.defaults && cfg.defaults.targetLanguage) || "zh-Hans",

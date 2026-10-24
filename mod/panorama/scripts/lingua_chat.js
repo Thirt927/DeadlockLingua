@@ -243,6 +243,12 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
     panelFailStreak: 0, // 面板通道连续失败次数
     panelResetLevel: 0, // 自愈升级级别(通道恢复后归零)
     panelResetAt: 0, // 上次自愈时间(节流用)
+    // ---- https 面板通道状态(2026-10-24,见 docs/btipc-https-v1.md 参考实现) ----
+    httpsCapable: false, // 桥端声明 https 已就绪(证书存在且 https.enabled)
+    httpsPanelOk: false, // 本会话探针判活 → 走 https 面板
+    httpsProbeDone: false, // 探针只跑一次(未通过就整局留在 BTIPC)
+    httpsHardFails: 0, // 连续硬失败次数,达阈值后本会话放弃 https
+    httpsPort: 8792,
     cfg: null, // 游戏侧 UI 配置
     bridgeUp: false, // 桥在线标记(health 探测维护)
     bridgeOfflineSince: 0,
@@ -3597,12 +3603,13 @@ function injectTranslation(row, sig, text) {
     }
   }
 
-  function buildBridgeUrl(job) {
+  function buildBridgeUrl(job, origin) {
     const id = "r" + (++State.requestSeq).toString(36);
     job.id = id;
+    const base = origin || ("http://" + BRIDGE_HOST + ":" + BRIDGE_PORT);
     if (job.kind === "bridge") {
       return (
-        "http://" + BRIDGE_HOST + ":" + BRIDGE_PORT +
+        base +
         "/bridge?id=" + id +
         "&op=" + job.op +
         "&d=" + job.data
@@ -3613,7 +3620,7 @@ function injectTranslation(row, sig, text) {
     const target = encodeURIComponent(job.kind === "outgoing" ? resolveOutgoingTarget() : targetLanguage());
     const tm = job.kind === "outgoing" ? outgoingTimeoutMs() : (State.cfg.timeoutMs || 15000);
     return (
-      "http://" + BRIDGE_HOST + ":" + BRIDGE_PORT +
+      base +
       "/bridge?id=" + id +
       "&op=translate&text=" + text +
       "&source=" + source +
@@ -3631,13 +3638,29 @@ function injectTranslation(row, sig, text) {
   //     (上游 BabelTower 2026-10-15 实车,下行 <1s;本版未实现,见 architecture.md §10);
   //   - 桥端 logs/bridge.log 里面板导航请求 /bridge 的历史计数为 0;
   //   - 同版本 $.AsyncWebRequest 调用即抛 "AsyncWebRequest has been removed."
-  // 本版因此直接禁用面板通道,让"发消息"不再空等超时,而是立刻按原文发送;
-  // 若要实现 https 面板通道,不能只把开关改回 true —— 还需桥侧 TLS 终结 + 证书信任,
-  // 见 docs/UNIMPLEMENTED.md「一、6」。
+  // 本版因此直接禁用 http 面板通道(让"发消息"不再空等超时);
+  // https 面板通道是另一条独立通道(见下),两者共用同一个 <HTML id="LCTBridgePanel">。
   const PANEL_CHANNEL_ENABLED = false;
 
+  // ---- https 面板通道(2026-10-24) ----
+  // 原理(参考上游 BabelTower docs/btipc-https-v1.md,本仓库独立实现):
+  //   隐藏 HTML 面板加载 https://localhost:<port>/bridge?id=..&op=..
+  //   → 页面同源 fetch /api/v1/* 拿到整条结果 → 一次写进 document.title
+  //   → 游戏侧轮询 title(0.1s)读回。下行 = 一个 RTT + 翻译耗时,替代位信道的
+  //     N 帧 × 600ms。
+  // 前提:本机自签证书被信任(scripts/gen_bridge_cert.ps1 -Trust + 完全重启 Steam),
+  //       桥端 core/bridge_https.js 在 8792 做 TLS 终结。任一不满足 → 探针判死 → BTIPC。
+  // 开关:HTTPS_PANEL_ENABLED=false 可一键全量退回 BTIPC(现场排障用)。
+  const HTTPS_PANEL_ENABLED = true;
+  const HTTPS_PANEL_SCHEME = "https://localhost:";
+  const HTTPS_PROBE_TIMEOUT_MS = 3000; // 首次导航 + 页面加载 + fetch 的判活窗口
+  const HTTPS_PROBE_DELAY_MS = 1200; // 等 boot 的扫描循环先跑起来
+  const HTTPS_HARD_DEAD_STREAK = 3; // 连续硬失败多少次后本会话放弃 https
+
+
   function ensurePanel() {
-    if (!PANEL_CHANNEL_ENABLED) return null;
+    // 两种面板通道共用同一个声明式 HTML 面板:http(已死)或 https(受信任证书)。
+    if (!PANEL_CHANNEL_ENABLED && !HTTPS_PANEL_ENABLED) return null;
     if (isValid(State.panel) && typeof State.panel.SetURL === "function") return State.panel;
     const root = getRoot();
     if (!root) return null;
@@ -3656,6 +3679,100 @@ function injectTranslation(row, sig, text) {
       log("bridge panel NOT found (id=" + BRIDGE_PANEL_ID + "); check chat.xml");
     }
     return null;
+  }
+
+  // ---- https 面板通道(参考上游 BabelTower docs/btipc-https-v1.md 的语义,独立实现) ----
+  function httpsOrigin() {
+    return HTTPS_PANEL_SCHEME + (Number(State.httpsPort) || 8792);
+  }
+
+  // 探针:导航一次 ?op=health,拿到 ok 才把本会话切到 https。
+  // 必须"探一次定生死":证书没被信任时每条请求都先撞一次超时,比 BTIPC 还慢。
+  function probeHttpsPanel() {
+    if (!HTTPS_PANEL_ENABLED) return;
+    if (!State.httpsCapable) { log("https panel: bridge says not ready, stay on BTIPC"); return; }
+    if (State.httpsProbeDone) return;
+    State.httpsProbeDone = true;
+    const panel = ensurePanel();
+    if (!panel) { State.httpsProbeDone = false; return; } // 面板还没挂上:留给下一次
+    const id = "p" + (++State.requestSeq).toString(36);
+    const url = httpsOrigin() + "/bridge?id=" + id + "&op=health";
+    setPending(id, function (payload) {
+      if (payload && payload.ok) {
+        State.httpsPanelOk = true;
+        State.httpsHardFails = 0;
+        markBridgeUp();
+        if (payload.provider) State.bridgeProvider = payload.provider;
+        if (payload.version) State.bridgeVersion = payload.version;
+        log("https panel: ALIVE (" + httpsOrigin() + ") — one RTT downlink");
+      } else {
+        State.httpsPanelOk = false;
+        log("https panel: not usable (" + ((payload && payload.error) || "unknown") +
+          ") — stay on BTIPC; run scripts/gen_bridge_cert.ps1 -Trust then FULLY restart Steam");
+      }
+      refreshBridgeStatus();
+    }, HTTPS_PROBE_TIMEOUT_MS, { probe: true });
+    try { panel.SetURL(url); } catch (e) {
+      log("https panel: probe SetURL failed: " + ((e && e.message) || String(e)));
+    }
+  }
+
+  function scheduleHttpsProbe() {
+    if (!HTTPS_PANEL_ENABLED || State.httpsProbeDone || !State.httpsCapable) return;
+    try { $.Schedule(HTTPS_PROBE_DELAY_MS / 1000, probeHttpsPanel); } catch (e) {}
+  }
+
+  // 硬失败 = 请求从未到达桥(页面没加载 / 面板不可用) → 交回 BTIPC 重做,不消耗 attempts;
+  // 软失败 = 页面活了但慢 → 按既有语义结算(出站发原文),不再拖 3~27s。
+  // bad_bridge_payload 也按硬失败处理:document.title 有长度上限,超长译文会被截断,
+  // 交回 BTIPC 至少能把整条送回来(慢一点,但不丢)。
+  function isHttpsHardFail(err) {
+    const s = String(err || "");
+    return s === "bridge_nav_failed" || s === "bridge_offline" || s === "bridge_load_failed" ||
+      s === "bridge_panel_unavailable" || s === "superseded" || s === "panel_reset" ||
+      s === "bad_bridge_payload";
+  }
+
+  function demoteHttps(job, reason) {
+    if (job._httpsDemoted) return;
+    job._httpsDemoted = true;
+    // 交接前必须撤掉出站超时句柄:否则它稍后触发会二次 done/finishJob,击穿单槽
+    if (job._timeout) { try { clearTimeout(job._timeout); } catch (e) {} job._timeout = null; }
+    if (job._timedOut) return;
+    log("https panel -> BTIPC demote (" + reason + ")");
+    dispatchViaBtipc(job);
+  }
+
+  function dispatchViaHttpsPanel(job) {
+    const panel = ensurePanel();
+    if (!panel) { demoteHttps(job, "bridge_panel_unavailable"); return; }
+    const url = buildBridgeUrl(job, httpsOrigin());
+    const tm = job.kind === "outgoing" ? outgoingTimeoutMs() : (State.cfg.timeoutMs || 15000);
+    let settled = false;
+    const onResult = function (payload) {
+      if (settled) return;
+      settled = true;
+      const err = payload && !payload.ok ? String(payload.error || "") : "";
+      if (isHttpsHardFail(err)) {
+        State.httpsHardFails += 1;
+        log("https panel: hard fail #" + State.httpsHardFails + "/" + HTTPS_HARD_DEAD_STREAK + " (" + err + ")");
+        if (State.httpsPanelOk && State.httpsHardFails >= HTTPS_HARD_DEAD_STREAK) {
+          State.httpsPanelOk = false;
+          log("https panel: dead (" + HTTPS_HARD_DEAD_STREAK + " consecutive hard fails) — BTIPC only this session");
+          setStatus("https 面板通道不可用,已退回 BTIPC(较慢)");
+          refreshBridgeStatus();
+        }
+        demoteHttps(job, err);
+        return;
+      }
+      if (!err) State.httpsHardFails = 0;
+      handleBridgePayload(job, payload || { ok: false, error: "bad_bridge_payload" });
+    };
+    try { panel.SetURL(url); } catch (e) {
+      demoteHttps(job, "bridge_nav_failed");
+      return;
+    }
+    setPending(job.id, onResult, Math.min(tm + 1000, 12000));
   }
 
   // 直连桥(GET /api/v1/*,经 $.AsyncWebRequest)。
@@ -4477,10 +4594,12 @@ function injectTranslation(row, sig, text) {
         } catch (e) {}
       }
     }
-    // 唯一通道:BTIPC。
-    // 2026/10/01 之后 AsyncWebRequest 调用即抛;面板导航对 http/data/file 不加载
-    // (2026-10-24 更正:真因是证书链,受信任 https 可加载,本版未实现——见 docs/architecture.md §10);
-    // ② 直连与 ③ 面板导航两条老通道在本版都不可用(实现仍留在文件里,但不再参与分发)。
+    // 通道选择:https 面板(快,<1s)→ BTIPC 位泵(兜底,零摩擦可用)。
+    // http 面板与 $.AsyncWebRequest 两条老通道在本版不可用(实现仍在文件里,不参与分发)。
+    if (HTTPS_PANEL_ENABLED && State.httpsPanelOk) {
+      dispatchViaHttpsPanel(job);
+      return;
+    }
     dispatchViaBtipc(job);
   }
 
@@ -4495,7 +4614,7 @@ function injectTranslation(row, sig, text) {
     "HTMLURLChanged", "HTMLChangedTitle", "HTMLTitle",
   ];
 
-  function setPending(id, onResult, timeoutMs) {
+  function setPending(id, onResult, timeoutMs, opts) {
     if (State.pending) {
       const old = State.pending;
       State.pending = null;
@@ -4508,6 +4627,7 @@ function injectTranslation(row, sig, text) {
       onResult: onResult,
       deadline: nowMs() + (timeoutMs || 15000),
       sawAlive: false,
+      probe: !!(opts && opts.probe),
     };
     startTitlePolling();
   }
@@ -4644,13 +4764,19 @@ function injectTranslation(row, sig, text) {
     if (nowMs() >= pending.deadline) {
       State.pending = null;
       let err = "timeout";
-      if (!State.bridgeUp && !pending.sawAlive) {
+      if (pending.probe) {
+        // 探针:页面连 alive 都没回 → 通道不可用(证书未信任 / https 进程没起来)
+        err = pending.sawAlive ? "bad_bridge_payload" : "bridge_nav_failed";
+      } else if (State.httpsPanelOk) {
+        // https:页面没加载 = 硬失败(交回 BTIPC);页面活了但慢 = 软失败(按原语义结算)
+        err = pending.sawAlive ? "bridge_timeout" : "bridge_nav_failed";
+      } else if (!State.bridgeUp && !pending.sawAlive) {
         warnBridgeOffline();
         err = "bridge_offline";
       }
       pending.onResult({ ok: false, error: err });
       // 面板僵死检测:页面连 lct-alive 都没回 => 这次导航根本没发生,连续失败后自动重置面板
-      if (!pending.sawAlive) notePanelFailure(err);
+      if (!pending.probe && !pending.sawAlive) notePanelFailure(err);
       return;
     }
     $.Schedule(TITLE_POLL_SECONDS, pollTitle);
@@ -5787,6 +5913,10 @@ function injectTranslation(row, sig, text) {
       deepl: !!(k.deepl || (c.deepl && c.deepl.hasApiKey)),
       google: !!(k.google || (c.google && c.google.hasApiKey)),
     };
+    // https 面板通道能力由桥声明(证书存在 && https.enabled)。没声明就不探,
+    // 保证"证书没装"的用户一条死请求都不发。
+    if (typeof c.httpsPanel === "boolean") State.httpsCapable = c.httpsPanel;
+    if (typeof c.httpsPort === "number" && c.httpsPort > 0) State.httpsPort = c.httpsPort;
     return changed;
   }
 
@@ -5799,6 +5929,8 @@ function injectTranslation(row, sig, text) {
       if (res && res.ok && res.ui) {
         const changed = applyBridgeUiConfig(res);
         if (changed) saveUiConfig();
+        // 桥声明 https 就绪 → 探一次定生死(判死则整局留在 BTIPC)
+        scheduleHttpsProbe();
       } else if (attempt < 3) {
         $.Schedule(5.0, function () { syncUiFromBridge(attempt + 1); });
       }

@@ -60,3 +60,9 @@ _readme_screen.*
 
 # 编辑器/Agent 工具配置(第三方设计 skill 约 5MB,属本机工具,不入库)
 .trae/
+
+# 本机自签证书与本机口令(scripts/gen_bridge_cert.ps1 生成;含私钥,绝不入库)
+config/certs/
+*.pfx
+*.pass
+*.cer

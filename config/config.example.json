@@ -17,6 +17,13 @@
   "watchGameExe": "deadlock.exe",
   "deadlockConsoleLog": "",
   "logFile": "logs/bridge.log",
+  "https": {
+    "enabled": true,
+    "port": 8792,
+    "pfx": "config/certs/bridge.pfx",
+    "passFile": "config/certs/bridge.pass",
+    "timeoutMs": 30000
+  },
   "openai": {
     "apiKey": "",
     "baseUrl": "https://api.openai.com/v1",

@@ -1,17 +1,17 @@
 # 架构文档
 
-> **本文描述 v2.1.0（2026-10-09）起的现状:译文重新显示在游戏内。**
+> **本文描述 v2.1.0（2026-10-09）起、并在 2026-10-24 加入 https 面板通道后的现状。**
 >
-> 数据是**双向**的,靠自研的 **BTIPC 双向信道**:
-> - 上行:游戏把请求打成结构化单行写进 `console.log`(`[LCT] BTIPC REQ ...`),桥增量 tail 读回
-> - 下行:桥把译文切成 16 字节帧,按位用 HTTP 状态码回答(200 = 位 1 / 404 = 位 0),
->   游戏侧 128 个隐藏 Image 面板逐轮读回
+> 下行有两级：**https 面板（主，≈一个 RTT）** → **BTIPC 位泵（兜底，16 B/s）**。
+> - https 面板：隐藏 HTML 面板加载 `https://localhost:8792/bridge`，页面同源 fetch `/api/v1/*`
+>   后把整条结果写 `document.title`；游戏侧导航 + 读 title。见 [https-panel.md](https-panel.md)。
+> - BTIPC：上行 `console.log` 单行，下行 128 个 Image 面板按位读 HTTP 状态码（200/404）。
 >
-> **协议以 [btipc-v1.md](btipc-v1.md) 为唯一契约**(帧格式 / 轮次状态机 / CRC / 重试 / 参数表),
-> 本文只讲整体结构与接线。⚠️ 上行硬依赖游戏带 **`-condebug`** 启动,否则不写 `console.log`。
+> 上行始终是 `console.log`（`[LCT] BTIPC REQ` / `[LCT-CHAT]`），**硬依赖 `-condebug`**。
+> BTIPC 协议以 [btipc-v1.md](btipc-v1.md) 为唯一契约（帧格式 / 轮次 / CRC / 重试 / 参数表）。
 >
-> **游戏外悬浮窗自 v2.0.1 起归档为 legacy**(代码保留、不再演进),其管道见第 8 节。
-> v2.0.0 那个「游戏内不可能显示译文」的结论已被更正,见第 9 节。
+> **游戏外悬浮窗自 v2.0.1 起归档为 legacy**（代码保留、不再演进），其管道见第 8 节。
+> v2.0.0「游戏内不可能显示译文」与「面板已死」两个结论都已更正，见第 9、10 节。
 
 ## 1. 总览
 
@@ -194,7 +194,11 @@ Steam** 后,隐藏 HTML 面板可加载 `https://localhost:8792`,由页面同源
 桥侧为此需要:独立 TLS 终结进程(8792 → 转发 8791;证书缺失 `exit(3)`,不得连带 BTIPC)、
 证书生成/信任/撤销脚本、mod 侧开机探针(1.2s 一次,判死整局退 BTIPC)与三级降级。
 
-**本仓库(2.1.0)未移植**;移植前请按上游 `docs/btipc-https-v1.md` §4 的步骤在本机复核
-(建议先做同进程 http/https 两臂探针,记录 `tlsClientError`,并确认监听成立再采信否定),
-不要只凭本文档宣布可用。上游证据链:该文档 §2.4(结论修正史)、§4.1(Steam 信任缓存双向
-实测)、§8.1(同局 1 秒闭环)。https://github.com/c1375rick/BabelTower/blob/main/docs/btipc-https-v1.md
+**本仓库 2026-10-24 起已实现**(待实车验收):`core/bridge_https.js`(8792 TLS 终结,独立进程;
+证书缺失 `exit(3)`,上游不通 502 不退出)、`scripts/gen_bridge_cert.ps1`(生成/信任/撤销)、
+`config.https`(enabled/port/pfx/passFile)、桥端 `op=ui` 的 `httpsPanel`/`httpsPort` 能力位、
+游戏侧 `lingua_chat.js` 的 `HTTPS_PANEL_*`(开机探针一次定生死、硬失败交回 BTIPC、
+连续 3 次硬失败整局退位泵)。设计与排障见 [https-panel.md](https-panel.md)。
+
+上游证据链:该文档 §2.4(结论修正史)、§4.1(Steam 信任缓存双向实测)、§8.1(同局 1 秒闭环)。
+https://github.com/c1375rick/BabelTower/blob/main/docs/btipc-https-v1.md

@@ -80,6 +80,17 @@ v2.1.0 起译文重新显示在游戏内，设置面板也回到游戏内（ESC 
 5. **重启 Deadlock**
 
 > [!TIP]
+> **可选但强烈推荐：把下行提速到 <1 秒。** 默认走 BTIPC 位信道（3~6 秒）；跑一次证书脚本、
+> 完全退出并重启 Steam 后，译文改走 https 面板通道（一个 RTT）：
+>
+> ```powershell
+> powershell -ExecutionPolicy Bypass -File scripts\gen_bridge_cert.ps1 -Trust
+> ```
+>
+> 然后**完全退出 Steam（托盘图标也要退）再重开**。没做这一步也不影响使用——桥检测不到证书，
+> 整局自动留在 BTIPC。原理、排障与撤销见 [docs/https-panel.md](docs/https-panel.md)。
+
+> [!TIP]
 > `StartDeadlock.bat` 可以在启动桥的同时用 Steam 拉起游戏（`StartDeadlock.bat -game`）；`-condebug` 仍以游戏的启动选项为准。
 
 ## 使用
@@ -88,7 +99,8 @@ v2.1.0 起译文重新显示在游戏内，设置面板也回到游戏内（ESC 
 
 进对局即可。别人说外语时，译文会出现在那条消息下方（浅蓝底、斜体）。
 
-- 单条约 **2～6 秒**（位信道有效带宽约 16 字节/秒，是当前通道的上限）
+- 装了 https 面板通道（见安装第 5 步）时通常 **<1 秒**；退回 BTIPC 位信道时单条 **2～6 秒**
+  （位信道有效带宽约 16 字节/秒）
 - 聊天滚动回收后，译文会从缓存自动重建
 
 一直不出现译文时，按顺序检查：

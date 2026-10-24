@@ -1976,3 +1976,34 @@ ode -e "JSON.parse(...)" 通过)。
   `tests/btipc/*` 六套全 PASS; `scripts/lingua_chat_simtest.js` PASS 58/0
   (模拟器需本机桥在 8791, 已用 `--no-watch --no-overlay` 启动)。
 - **是否需用户测试**: 是 —— 实车一局, 对比 `logs/bridge.log` 的 `BTIPC RSP ... +Nms`、
+
+## 2026-10-24: https 面板通道 —— 下行从位泵的 3~27s 回到一个 RTT
+
+- **优化主题**: 参考上游 BabelTower `docs/btipc-https-v1.md`(https://github.com/c1375rick/BabelTower/blob/main/docs/btipc-https-v1.md)
+  的语义, 本仓库独立实现「受信任本机 https + 隐藏 HTML 面板 + document.title」下行通道;
+  BTIPC 位泵保留为兜底。方案最初的实机先例来自上游文档转述的 DeadlockTranslate 0.6.19
+  (自签证书 + 写入 CurrentUser\\Root + 完全重启 Steam)。
+- **改动文件**:
+  - `core/bridge_https.js`(新): 8792 TLS 终结独立进程, 把 `/bridge` 与 `/api/v1/*` 原样代理回 8791;
+    证书缺失/口令错 exit(3), 上游不通 502 不退出, 日志写 `logs/bridge_https.log`(本地时间)。
+  - `scripts/gen_bridge_cert.ps1`(新): 自签证书 CN=BabelTower-localhost,
+    SAN=DNS:localhost + IP:127.0.0.1 + IP:::1, EKU serverAuth; `-Trust`(certutil -user -addstore Root)/
+    `-Untrust`/`-NoTrust`/`-Force`。
+  - `tests/https_panel_server.test.js`(新): 离线验证 TLS 握手/SAN、代理、404、上游断开 502、证书缺失退出码 3。
+  - `core/bridge_server.js`: 启动时拉 https 子进程(证书存在且 https.enabled); `op=ui` 增加
+    `httpsPanel`/`httpsPort` 能力位。
+  - `core/config.js` + `config/config.example.json`: 新增 `https` 段(enabled/port/pfx/passFile)。
+  - `mod/panorama/scripts/lingua_chat.js`: `HTTPS_PANEL_*` 区块 —— 开机探针一次定生死、
+    硬失败交回 BTIPC(不消耗 attempts)、软失败按原语义结算、连续 3 次硬失败整局退位泵;
+    `dispatchJob` 改为 https → BTIPC 两级。
+  - `scripts/package_release.ps1`: 打包补 `core/bridge_https.js` 与 `scripts/gen_bridge_cert.ps1`。
+  - 文档: `docs/https-panel.md`(新)、`docs/architecture.md`、`docs/UNIMPLEMENTED.md`、`AGENTS.md`、
+    `README.md`、`安装使用说明.txt`、`CHANGELOG.md`。
+- **原因/效果**: 位泵 60B 译文 6 帧 × 600ms; https 把整条结果一次写进 title, 下行 ≈ 一个 RTT
+  (上游同局实测 <1s)。证书没装时桥 `httpsPanel:false`, 游戏侧连探针都不发, 体感与之前一致。
+- **验证方式**: `node --check`(bridge_https/bridge_server/config/lingua_chat)通过;
+  `node tests/https_panel_server.test.js` 离线全绿(见该次输出); `scripts/overlay_test.js` 14/0、
+  `tests/btipc/*` 六套、`lingua_chat_simtest.js` 58/0 回归通过(未装证书时走 BTIPC, 行为不变)。
+- **是否需用户测试**: 是 —— 按 README 安装第 5 步跑 `-Trust` 并**完全重启 Steam**, 进对局看
+  `console.log` 是否出现 `https panel: ALIVE`; 若出现 `not usable` / `bridge_https.log` 里
+  `TLS_ALERT_CERTIFICATE_UNKNOWN`, 说明证书没被信任或 Steam 没完全重启。
