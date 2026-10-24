@@ -1,7 +1,8 @@
 // Babel Tower - core/overlay.js 单测
 //
-// 背景:2026/10/01 的 Deadlock 更新移除了 Panorama 的全部 HTTP 能力,游戏内不再可能
-// 收发文;唯一活着的通道是「游戏 -> console.log -> 桥」。core/overlay.js 负责增量 tail
+// 背景:2026/10/01 的 Deadlock 更新移除了 $.AsyncWebRequest、面板对 http 不加载
+// (2026-10-24 更正:真因是证书链,受信任 https 可加载,但本仓库尚未移植该通道,见
+// docs/architecture.md §10);当前唯一活着的通道是「游戏 -> console.log -> 桥」。
 // 游戏 console.log 里的 [LCT-CHAT] 行、翻译、并在环形缓冲里供悬浮窗页面轮询。
 // 这里用一个临时日志文件把整条链路跑一遍,不依赖真实游戏与真实桥。
 //

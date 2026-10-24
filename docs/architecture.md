@@ -1,17 +1,17 @@
 # 架构文档
 
-> **本文描述 v2.1.0（2026-10-09）起的现状:译文重新显示在游戏内。**
+> **本文描述 v2.1.0（2026-10-09）起、并在 2026-10-24 加入 https 面板通道后的现状。**
 >
-> 数据是**双向**的,靠自研的 **BTIPC 双向信道**:
-> - 上行:游戏把请求打成结构化单行写进 `console.log`(`[LCT] BTIPC REQ ...`),桥增量 tail 读回
-> - 下行:桥把译文切成 16 字节帧,按位用 HTTP 状态码回答(200 = 位 1 / 404 = 位 0),
->   游戏侧 128 个隐藏 Image 面板逐轮读回
+> 下行有两级：**https 面板（主，≈一个 RTT）** → **BTIPC 位泵（兜底，16 B/s）**。
+> - https 面板：隐藏 HTML 面板加载 `https://localhost:8792/bridge`，页面同源 fetch `/api/v1/*`
+>   后把整条结果写 `document.title`；游戏侧导航 + 读 title。见 [https-panel.md](https-panel.md)。
+> - BTIPC：上行 `console.log` 单行，下行 128 个 Image 面板按位读 HTTP 状态码（200/404）。
 >
-> **协议以 [btipc-v1.md](btipc-v1.md) 为唯一契约**(帧格式 / 轮次状态机 / CRC / 重试 / 参数表),
-> 本文只讲整体结构与接线。⚠️ 上行硬依赖游戏带 **`-condebug`** 启动,否则不写 `console.log`。
+> 上行始终是 `console.log`（`[LCT] BTIPC REQ` / `[LCT-CHAT]`），**硬依赖 `-condebug`**。
+> BTIPC 协议以 [btipc-v1.md](btipc-v1.md) 为唯一契约（帧格式 / 轮次 / CRC / 重试 / 参数表）。
 >
-> **游戏外悬浮窗自 v2.0.1 起归档为 legacy**(代码保留、不再演进),其管道见第 8 节。
-> v2.0.0 那个「游戏内不可能显示译文」的结论已被更正,见第 9 节。
+> **游戏外悬浮窗自 v2.0.1 起归档为 legacy**（代码保留、不再演进），其管道见第 8 节。
+> v2.0.0「游戏内不可能显示译文」与「面板已死」两个结论都已更正，见第 9、10 节。
 
 ## 1. 总览
 
@@ -137,7 +137,8 @@
 
 - **隐藏 HTML 面板 + 轮询 `panel.title`**:用隐藏 HTML 面板加载 `/bridge` 页面,页面内 JS
   同源调用受限 API,再把结果写回 `document.title`,Panorama 轮询读回。2026-10-01 更新后
-  彻底失效(面板不再创建浏览器实例,桥端 `/bridge` 请求计数为 0)。
+  对 `http://` / `data:` / `file://` 均不加载(桥端 `/bridge` 请求计数为 0)。
+  ⚠️ 旧表述"面板不再创建浏览器实例"已于 2026-10-24 更正,见第 10 节。
 - **`$.AsyncWebRequest` 直连**:同版本调用即同步抛错,已移除。
 
 ### 8.2 游戏外悬浮窗(v2.0.x 主路径,自 v2.0.1 起 legacy)
@@ -180,3 +181,24 @@ v2.0.0 写下的结论「游戏内不存在任何可用的入站通道,在游戏
 
 - 上行仍复用现成通道:`console.log` 结构化单行,**硬依赖 `-condebug`**。
 - 完整规格(帧格式 / 轮次状态机 / CRC / 重试 / 风暴模式 / 参数表)见 **[btipc-v1.md](btipc-v1.md)**。
+
+## 10. 更正(2026-10-24):面板通道"彻底失效"只对 http/data/file 成立
+
+§8.1 与 §9 的旧口径("引擎不再为 HTML 面板创建浏览器实例")**不成立**。上游 BabelTower
+2026-10-15 实车证实:引擎在 LoadPage 之前按**证书链**拒绝未受信任的页面(实机 neterror
+`error:-202` = `ERR_CERT_AUTHORITY_INVALID`);把本机自签证书(CN=BabelTower-localhost,
+SAN=`DNS:localhost` + `IP:127.0.0.1` + `IP:::1`)写入 `CurrentUser\Root` 并**完全退出重启
+Steam** 后,隐藏 HTML 面板可加载 `https://localhost:8792`,由页面同源 fetch 取整条译文再写
+`document.title` 回读 —— 下行 **<1s**(位泵 3.0–27.4s)。
+
+桥侧为此需要:独立 TLS 终结进程(8792 → 转发 8791;证书缺失 `exit(3)`,不得连带 BTIPC)、
+证书生成/信任/撤销脚本、mod 侧开机探针(1.2s 一次,判死整局退 BTIPC)与三级降级。
+
+**本仓库 2026-10-24 起已实现**(待实车验收):`core/bridge_https.js`(8792 TLS 终结,独立进程;
+证书缺失 `exit(3)`,上游不通 502 不退出)、`scripts/gen_bridge_cert.ps1`(生成/信任/撤销)、
+`config.https`(enabled/port/pfx/passFile)、桥端 `op=ui` 的 `httpsPanel`/`httpsPort` 能力位、
+游戏侧 `lingua_chat.js` 的 `HTTPS_PANEL_*`(开机探针一次定生死、硬失败交回 BTIPC、
+连续 3 次硬失败整局退位泵)。设计与排障见 [https-panel.md](https-panel.md)。
+
+上游证据链:该文档 §2.4(结论修正史)、§4.1(Steam 信任缓存双向实测)、§8.1(同局 1 秒闭环)。
+https://github.com/c1375rick/BabelTower/blob/main/docs/btipc-https-v1.md

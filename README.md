@@ -1,111 +1,77 @@
 # DeadlockLingua
 
-<p align="center">
-  <img src="./assets/readme/hero.svg" width="100%" alt="DeadlockLingua：把 Deadlock 游戏内聊天实时翻译成中文，译文直接追加在原消息下方；右侧示意 BTIPC 位信道把译文送回游戏" />
-</p>
+> 《Deadlock》聊天实时翻译：队友和对手的外语聊天自动译成中文，**译文直接显示在原消息下面**，不用切出游戏，也不用第二个窗口。装了本机证书后下行 **<1 秒**；没装则自动退回位信道（2～6 秒），不需要任何切换。
 
-<div align="center"><img alt="License: GPL-3.0" src="./assets/readme/badge-license.svg" height="26" /><img alt="Version 2.1.0" src="./assets/readme/badge-version.svg" height="26" /><img alt="Platform: Windows 10/11" src="./assets/readme/badge-platform.svg" height="26" /><img alt="Runtime: Node.js" src="./assets/readme/badge-runtime.svg" height="26" /><img alt="Providers: 5 services" src="./assets/readme/badge-providers.svg" height="26" /></div>
+`GPL-3.0` · `v2.1.0 + https 通道` · Windows 10/11 · Node.js 18+ · 基于 [BabelTower](https://github.com/c1375rick/BabelTower) 二次开发，由 [Thirt927](https://github.com/Thirt927) 维护
 
-<p align="center">
-🇨🇳 <a href="./README.md">简体中文</a> | 🇺🇸 <a href="./README_EN.md">English</a>
-</p>
+[简体中文](README.md) · [English](README_EN.md)
 
-> 《Deadlock》聊天实时翻译工具，基于 [BabelTower](https://github.com/c1375rick/BabelTower) 二次开发，由 [Thirt927](https://github.com/Thirt927) 维护。
-
-把《Deadlock》里队友和对手的外语聊天实时翻译成中文，**译文直接显示在原消息下面**——不用切出游戏、不用看第二个窗口。
-
-<details>
-<summary>v2.0.x 的悬浮窗方案还在吗？</summary>
-
-在。v2.0.0（游戏移除 Panorama HTTP 能力后）曾把译文整体搬到**游戏外悬浮窗**，那是当时的过渡方案；从 **v2.1.0** 起译文重新回到游戏内，悬浮窗代码保留在仓库中作为备选（`core/overlay.js`、`scripts/overlay_window.ps1`）。
-
-</details>
-
----
+> [!NOTE]
+> 仓库当前状态：v2.1.0 之后又落了 **https 面板通道**（2026-10-24，尚未打 tag）。
+> 装了证书 → 下行 ≈ 一个 RTT；没装 → 整局自动留在 BTIPC 位信道，功能与之前完全一致。
 
 ## 目录
 
-- [它是怎么做到游戏内显示的](#它是怎么做到游戏内显示的)
+- [简介](#简介)
 - [功能](#功能)
 - [安装](#安装)
 - [使用](#使用)
-- [API 参考](#api-参考)
-- [配置](#配置)
-- [术语表](#术语表)
-- [聊天日志与 SteamID](#聊天日志与-steamid)
-- [从源码构建](#从源码构建)
-- [测试](#测试)
-- [发布打包](#发布打包)
-- [目录结构](#目录结构)
-- [工作原理](#工作原理)
+- [配置与接口](#配置与接口)
+- [技术说明](#技术说明)
 - [常见问题](#常见问题)
-- [贡献](#贡献)
-- [许可证](#许可证)
+- [开发](#开发)
+- [许可证与来源](#许可证与来源)
 
----
+## 简介
 
-<p align="center">
-  <img src="./assets/readme/section-01-features.svg" width="100%" alt="章节 01 · 功能 / Features" />
-</p>
+DeadlockLingua 由两部分组成：
 
-## 它是怎么做到游戏内显示的
+- **游戏内模组**（Panorama）：扫描聊天、把请求写进 `console.log`，并把译文插回原消息下方。
+- **本地桥**（Node.js，只监听 `127.0.0.1`）：调用翻译服务商，再把译文送回游戏。
 
-《Deadlock》2026-10-01 的更新移除了 Panorama 的 HTTP 能力（`$.AsyncWebRequest` 调用即抛，隐藏 HTML 面板也不再创建浏览器实例），所以「游戏里发不出请求」是真的。
+下行有两条通道，按可用性自动选：
 
-但**入站仍然可能**——引擎会为「它自己要去渲染的东西」主动取网络，而游戏并没有移除图片加载：
-
-| 桥返回 | 游戏侧观察到的现象 | 记作 |
+| 通道 | 条件 | 延迟 |
 |---|---|---|
-| `200` + PNG | `ImageLoaded` 事件触发 | **位 1** |
-| `404` 空体 | 事件静默 | **位 0** |
+| **https 面板**（主） | 本机自签证书被信任 + 桥的 `core/bridge_https.js` 在 8792 做 TLS 终结 | ≈ 一个 RTT（<1 秒） |
+| **BTIPC 位信道**（兜底） | 只需游戏带 `-condebug`，零配置 | 2～6 秒（≈16 B/s） |
 
-游戏侧建 **128 个隐藏 2×2 Image 面板**，每轮把 128 个位一次性问一遍，就是 16 字节一帧；带上 CRC + 重投，端到端约 2～6 秒拿到一条译文。这套双向信道叫 **BTIPC**，规格见 [`docs/btipc-v1.md`](docs/btipc-v1.md)。
-
-> [!NOTE]
-> 这条路成立的关键是：图片加载由**引擎在渲染管线里**自行发起，不走 Panorama 的 JS HTTP API，所以 `AsyncWebRequest` 被移除并不影响它。
-
----
+选择逻辑：开机时桥通过 `op=ui` 告诉游戏"https 就绪没有"；就绪才探一次针，判活走 https，判死整局留在 BTIPC。证书后来失效、页面加载失败、连续 3 次硬失败，都会自动退回，不需要用户操作。
 
 ## 功能
 
 **看别人说什么**
 
-- **译文直接显示在原消息下面**（游戏内聊天行），不需要第二个窗口
-- HUD 顶栏气泡与大厅聊天记录同样支持
-- 已是中文的消息不重复翻译；纯数字/符号、`/` 开头的指令跳过
+- 译文直接显示在原消息下面；HUD 顶栏气泡、大厅聊天记录同样支持
+- 已是中文的消息、纯数字/符号、`/` 开头的指令自动跳过
+- 聊天滚动回收后，译文从缓存自动重建
 
 **说你想说的话**
 
-- **发送前翻译**：输入中文 → 回车 → 先译成英文，再走原版发送链路发出（译文 / 原文|译文 双语模式可选）
+- 发送前翻译：输入中文回车，先译成英文再走原版发送链路
+- 显示模式可选「仅译文」或「原文 + 译文」
 
-**翻译服务**
+**翻译能力**
 
-- 多服务商：Bing（免 Key）、Microsoft、OpenAI 兼容（如 DeepSeek）、DeepL、Google Cloud
-- 主服务商超时或失败时**自动回退**到备用服务商
-- 内置**游戏术语表**：46 个可玩英雄、194 件商店装备、常用战术术语，译名统一
-- **自适应词典**：高频短句自动固化，秒回不再走服务商
+- 5 个服务商：Bing（免 Key）、Microsoft、OpenAI 兼容（DeepSeek 等）、DeepL、Google Cloud
+- 主服务商超时或失败时自动回退到备用服务商
+- 内置术语表：42 个可玩英雄、194 件商店装备、常用战术术语
+- 自适应词典：高频短句自动固化，秒回不再请求服务商
 
 **其他**
 
-- 聊天日志按对局 ID 写入 JSONL，便于赛后复盘
-- SteamID 回填：聊天昵称自动补全 SteamID64
-- 游戏外悬浮窗（v2.0.x 的显示方式）仍保留可用，可在设置里切换
-
----
-
-<p align="center">
-  <img src="./assets/readme/section-02-install.svg" width="100%" alt="章节 02 · 安装 / Installation" />
-</p>
+- 聊天日志按对局写入 JSONL，便于赛后复盘
+- SteamID 被动回填（昵称 → SteamID64）
+- 游戏外悬浮窗（v2.0.x 方案）代码保留、可切换
 
 ## 安装
 
-下载最新版：`https://github.com/Thirt927/DeadlockLingua/releases/latest`
+1. 下载最新版，解压到**无空格、无中文**的路径（如 `D:\DeadlockLingua`）：
+   <https://github.com/Thirt927/DeadlockLingua/releases/latest>
+   （https 面板通道是仓库里**尚未发版**的新功能：在下次发版前，请直接使用源码仓库的
+   `scripts/gen_bridge_cert.ps1` 与 `core/bridge_https.js`）
 
-1. 解压 `DeadlockLingua-<版本>-win64.zip` 到**无空格、无中文**的路径，例如 `D:\DeadlockLingua`。
-
-2. **给 Deadlock 加 `-condebug` 启动参数**（**必做**，只需设置一次）
-
-   游戏不带它就不会写 `game/citadel/console.log`，而那是游戏把请求送出来、也是桥把日志读回去的**唯一上行通路**。缺了它，mod 会表现为「装了完全没反应」。
+2. **给 Deadlock 加 `-condebug` 启动参数（必做，只需设置一次）**
 
    Steam 库 → Deadlock 右键 → 属性 → 常规 → **启动选项**，填：
 
@@ -113,213 +79,270 @@
    -condebug
    ```
 
-3. **把 Mod 放进游戏**
-   - 压缩包内的 VPK 叫 `pak01_dir.vpk`，**先给它改个名字**：只要在 addons 里不重名就行，推荐 `pak22_dir.vpk`（数字随意，22 只是本项目用的空位号）。
-   - ⚠️ **不要直接用 `pak01_dir.vpk` 这个名字**：`pak01` 是游戏本体占用的，同名会冲突；另外**千万不要放到 `citadel\` 目录下**（那会覆盖游戏本体资源），只能放 `citadel\addons\`。
-   - 推荐用 **Deadlock Mod Manager** 导入；或手动复制到：
+   游戏不带它就不会写 `game/citadel/console.log`，而那是**请求送出**的唯一通路（两条下行都靠它）。
+
+3. **把 VPK 放进 addons**
+
+   - 包里的 `pak01_dir.vpk` 先改名（不与 addons 内已有文件重名即可），推荐 `pak22_dir.vpk`
+   - 只能放 `game/citadel/addons/`；不要用 `pak01` 这个名字（与游戏本体冲突），也不要放到 `citadel/` 根目录（会覆盖游戏资源）
+   - 推荐用 Deadlock Mod Manager 导入，或手动复制到：
      `<Steam 库>\steamapps\common\Deadlock\game\citadel\addons\`
-4. **启动本地桥**（二选一）
-   - 双击 `install-autostart.bat` 装成开机自启（推荐）
-   - 或双击 `StartBridgeSilent.vbs` 临时后台启动
+
+4. **启动本地桥（二选一）**
+
+   - `install-autostart.bat`：装成开机自启（推荐）
+   - `StartBridgeSilent.vbs`：临时后台启动
+
 5. **重启 Deadlock**
 
+6. **【推荐】把下行提速到 <1 秒（可选，但强烈建议）**
+
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File scripts\gen_bridge_cert.ps1 -Trust
+   ```
+
+   然后**完全退出 Steam（托盘图标也要退）再重开**，进对局看 `console.log` 里有没有 `https panel: ALIVE`。
+
+   - 命令会生成一张只签给 `localhost` / `127.0.0.1` / `::1` 的自签证书，写进**当前用户**的根证书库，不需要管理员
+   - 执行时 Windows 会弹一次「安全警告」，需要点「是」（不要在隐藏窗口里跑，否则会一直等 UI）
+   - 信任决定缓存在 Steam 进程里：**只重启游戏无效，必须完全重启 Steam**
+   - 不放心随时撤销：`powershell -ExecutionPolicy Bypass -File scripts\gen_bridge_cert.ps1 -Untrust`（同样要完全重启 Steam）
+   - 不装也完全能用 —— 桥检测不到证书就不启动 https 子进程，整局留在 BTIPC
+
 > [!TIP]
-> 用 `StartDeadlock.bat` 启动会自动带上 `-condebug`（`steam://run/.../-condebug`），可以省掉第 2 步。
-
----
-
-<p align="center">
-  <img src="./assets/readme/section-03-usage.svg" width="100%" alt="章节 03 · 使用 / Usage" />
-</p>
+> `StartDeadlock.bat` 可以在启动桥的同时用 Steam 拉起游戏（`StartDeadlock.bat -game`）；`-condebug` 仍以游戏的启动选项为准。
 
 ## 使用
 
 ### 看译文
 
-进对局就行——别人说外语，译文会**直接出现在那条消息下面**（浅蓝底、斜体）。
+进对局即可。别人说外语时，译文会出现在那条消息下方（浅蓝底、斜体）。
 
-- 译一条约 **2～6 秒**（位信道有效带宽约 16 字节/秒，这是目前通道的物理上限）
-- 聊天滚动回收后，译文会从缓存自动重建
+| 当前通道 | 单条延迟 | 怎么判断 |
+|---|---|---|
+| https 面板 | 通常 **<1 秒** | `console.log` 有 `https panel: ALIVE` |
+| BTIPC 位信道 | **2～6 秒**（约 16 B/s） | 出现 `https panel: not usable (...)` 或没装证书 |
 
-如果游戏内一直不出现译文，按顺序检查：
+一直不出现译文时，按顺序检查：
 
 1. 启动选项里有没有 `-condebug`（最常见的原因）
-2. 桥在不在跑：浏览器打开 `http://127.0.0.1:8791/api/v1/health`，能看到 JSON 即正常
-3. `logs/bridge.log` 里有没有 `BTIPC TRQ` / `BTIPC: r=.. seq=.. OK` 这类行
+2. 桥是否在跑：`http://127.0.0.1:8791/api/v1/health` 能返回 JSON 即正常
+3. `logs/bridge.log` 里有没有 `BTIPC TRQ` / `BTIPC: r=.. seq=.. OK`
 
 ### 发消息
 
-输入框里打中文，按回车即可——发送前会自动译成英文再发出。想关掉或改成双语，见[设置](#设置)。
+聊天框输入中文，回车即可——发送前会先译成英文，再走原版发送链路。开关和显示模式见[设置](#设置)。
 
 ### 设置
 
-设置有三个入口：
-
-| 入口 | 怎么用 | 管什么 |
+| 入口 | 用法 | 说明 |
 |---|---|---|
-| **ESC 菜单** | ESC →「翻译设置」 | 打开与 `/tr` 相同的游戏内面板。ESC 菜单自带鼠标指针，**可以直接点**（推荐） |
-| **游戏内快捷** | 输入 `/tr`，或点聊天输入框右侧的 `set` 按钮 | 同一面板；聊天布局下要先按住 `Tab` 出指针 |
-| **网页设置页** | 浏览器打开 `http://127.0.0.1:8791/settings` | 服务商、API Key、端点、回退链、聊天日志、悬浮窗、端口等全部字段 |
+| **ESC 菜单** | ESC →「翻译设置」 | 游戏内面板；ESC 菜单自带鼠标指针，可以直接点（推荐） |
+| **游戏内快捷** | 输入 `/tr`，或点聊天框右侧 `set` | 同一个面板；聊天布局下要先按住 `Tab` 出指针 |
+| **网页设置页** | 打开 `http://127.0.0.1:8791/settings` | 服务商、API Key、端点、回退链等全部字段 |
 
 > [!NOTE]
-> 为什么还要网页页：游戏内的双向信道是**窄带**的（一帧只有 10 字节载荷，协议上限 128 帧 ≈ 1280 字节），整份配置约 1.3 KB —— 读不回来。所以游戏内面板打开是秒开的（读内存），保存走 `op=config` 只回执；想一次性看全 / 改服务商与 Key，用网页页更稳。
+> 游戏内信道是窄带：位信道一帧 10 字节载荷、协议上限 128 帧；整份配置约 1.3 KB 读不回来。
+> 所以游戏内面板秒开常用开关、保存只回执；完整配置请用网页页。走 https 时虽然更快，但为兼容仍保持同一套约定。
 
-配置保存在 `config/config.json`，首次运行自动生成。该文件含 API Key，已被 `.gitignore` 忽略，**不要提交到 Git**。
-
-> [!IMPORTANT]
-> 设置改完点「保存」后，**下一条消息**即按新设置执行；出站翻译的改动立即生效。
+配置保存在 `config/config.json`（首次运行自动生成）。该文件含 API Key，已被 `.gitignore` 忽略，**不要提交到 Git**。设置保存后，**下一条消息**即按新配置执行。
 
 ### 启动 / 停止桥
 
 | 操作 | 方式 |
 |---|---|
-| 后台启动 | `StartBridgeSilent.vbs` |
-| 终端启动（可看日志） | `StartDeadlock.bat` |
-| 停止 | `StopBridge.bat` |
-| 重启 | `RestartBridge.bat` |
-| 安装/卸载开机自启 | `install-autostart.bat` / `remove-autostart.bat` |
+| 后台启动桥 | `StartBridgeSilent.vbs`（或 `StartDeadlock.bat`） |
+| 启动桥并拉起游戏 | `StartDeadlock.bat -game` |
+| 停止 / 重启 | `StopBridge.bat` / `RestartBridge.bat` |
+| 开机自启 | `install-autostart.bat` / `remove-autostart.bat` |
+| 手动打开悬浮窗（不必开游戏） | `ShowOverlay.bat` |
 
----
+## 配置与接口
 
-## API 参考
+### 配置文件
 
-本地桥只监听 `127.0.0.1:8791`，不对外暴露，也不提供任意 URL 代理。请求体上限 64 KB，单条文本上限 4000 字符。
-
-| 方法 | 端点 | 说明 |
-|---|---|---|
-| `GET` | `/btipc/dl` | **游戏侧位信道下行**。按 `w`(窗口) + `r`(轮号) 取帧：位=1 返回 `200` + PNG，位=0 返回 `404`。游戏侧 128 个 Image 面板各自读回自己那一位 |
-| `POST` / `GET` | `/api/v1/translate` | 翻译一段文本，返回 `{ ok, translation, detectedLanguage }` |
-| `POST` / `GET` | `/api/v1/test` | 用当前配置测试服务商连通性 |
-| `GET` | `/api/v1/health` | 健康检查，返回版本、当前服务商与回退链 |
-| `GET` / `POST` | `/api/v1/config` | 读取配置（API Key 打码）/ 保存配置 |
-| `GET` | `/api/v1/quickchat` | 快捷语音模板语料 |
-| `GET` | `/api/v1/gamenames` | 英雄/装备名保护名单 |
-| `POST` / `GET` | `/api/v1/log` | 写入一条聊天日志（现由 `console.log` 通道主导，见[工作原理](#工作原理)） |
-| `POST` / `GET` | `/api/v1/diag` | 游戏侧诊断信息写入桥日志 |
-| `GET` | `/api/v1/overlay/messages` | 悬浮窗轮询：返回最近聊天、会话标识与目标语言 |
-| `POST` / `GET` | `/api/v1/overlay/translate` | 悬浮窗发消息：把中文译成英文供复制 |
-| `GET` | `/bridge` | 旧游戏内面板页面（已废弃，仅诊断用） |
-| `GET` | `/overlay` | 网页版悬浮窗页面（`overlay.mode = "web"` 时的回退） |
-
-<details>
-<summary>查看调用示例</summary>
-
-```bash
-# 健康检查
-curl.exe http://127.0.0.1:8791/api/v1/health
-
-# 翻译（POST）
-curl.exe -X POST http://127.0.0.1:8791/api/v1/translate ^
-  -H "Content-Type: application/json" ^
-  -d "{\"text\":\"gg wp\",\"targetLanguage\":\"zh-Hans\"}"
-
-# 位信道：未知窗口应为 404（路由是否生效可据此区分通用 404）
-curl.exe -i "http://127.0.0.1:8791/btipc/dl?w=abcdef&r=1&p=0&t=x"
-```
-
-```json
-{ "ok": true, "translation": "打得好", "detectedLanguage": "en" }
-```
-
-</details>
-
----
-
-## 配置
-
-配置文件为 `config/config.json`（首次运行从 `config/config.example.json` 生成）。主要字段：
+配置文件为 `config/config.json`，主要字段：
 
 | 字段 | 默认值 | 说明 |
 |---|---|---|
 | `port` | `8791` | 桥监听端口 |
-| `provider` | `"bing"` | 主翻译服务商：`bing` / `microsoft` / `openai` / `deepl` / `google` |
-| `fallbackProviders` | `[]` | 主服务商失败时的回退顺序（仅尝试已配置 Key 的服务商） |
+| `provider` | `"bing"` | 主服务商：`bing` / `microsoft` / `openai` / `deepl` / `google` |
+| `fallbackProviders` | `[]` | 主服务商失败后的回退顺序（只尝试已配置 Key 的服务商） |
 | `defaults.sourceLanguage` | `"auto"` | 源语言 |
 | `defaults.targetLanguage` | `"zh-Hans"` | 目标语言 |
-| `timeoutMs` | `15000` | 翻译超时预算 |
+| `timeoutMs` | `15000` | 翻译超时预算（毫秒） |
 | `chatLog.enabled` | `true` | 是否写聊天日志 |
 | `chatLog.dir` | `"logs/chat"` | 聊天日志目录 |
-| `deadlockConsoleLog` | 自动探测 | 游戏 `console.log` 路径（`-condebug` 才会生成） |
+| `deadlockConsoleLog` | 自动探测 | 游戏 `console.log` 路径（只在带 `-condebug` 时存在） |
 | `steamIdEnrichment.enabled` | `false` | 是否启用 SteamID 回填 |
-| `overlay.enabled` | `true` | 是否启用悬浮窗 |
-| `overlay.autoOpen` | `true` | 检测到游戏启动时自动开窗 |
-| `overlay.mode` | `"native"` | `native` = 原生 WPF 窗口；`web` = 浏览器小窗回退 |
-| `overlay.view` | `"panel"` | `panel` = 面板窗；`subtitle` = 字幕浮层 |
+| `https.enabled` | `true` | 有证书时是否启动 https 面板通道子进程 |
+| `https.port` | `8792` | https 监听端口（只绑 `127.0.0.1` + `::1`） |
+| `https.pfx` / `https.passFile` | `config/certs/bridge.pfx` / `.pass` | 证书与口令文件（已 gitignore） |
+| `https.timeoutMs` | `30000` | 反代硬超时；必须大于翻译超时，否则长句会被截成 502 |
+| `overlay.enabled` | `false` | 是否启用悬浮窗（v2.1.0 起默认关闭） |
+| `overlay.mode` / `overlay.view` | `"native"` / `"panel"` | `native` 原生 WPF / `web` 浏览器；`panel` 面板 / `subtitle` 字幕浮层 |
 | `overlay.edge` | `"right"` | 收起时贴哪条屏边：`left` / `right` / `top` / `bottom` / `float` |
 
 > [!CAUTION]
-> `config/config.json` 含服务商 API Key。日志输出**绝不包含** apiKey，该文件也被 `.gitignore` 忽略，**任何情况下都不要提交**。
+> `config/config.json` 含服务商 API Key。日志输出**绝不包含** apiKey，该文件也被 `.gitignore` 忽略，任何情况下都不要提交。
 
----
+### HTTP / TLS 接口
 
-## 术语表
+桥只监听回环，不对外暴露，也不做任意 URL 代理。请求体上限 64 KB，单条文本上限 4000 字符。
+
+| 方法 | 端点 | 说明 |
+|---|---|---|
+| `GET` | `https://localhost:8792/bridge` | https 面板页面（游戏内隐藏面板加载；同源 fetch 后写 `document.title`） |
+| `*` | `https://localhost:8792/api/v1/*` | 原样代理到 8791（方法/头/体/状态码保留） |
+| `GET` | `/btipc/dl` | 位信道下行：按 `w` / `r` 取帧，位=1 返回 `200` + PNG，位=0 返回 `404` |
+| `POST` / `GET` | `/api/v1/translate` | 翻译文本，返回 `{ ok, translation, detectedLanguage }` |
+| `POST` / `GET` | `/api/v1/test` | 用当前配置测试服务商连通性 |
+| `GET` | `/api/v1/health` | 健康检查：版本、当前服务商与回退链 |
+| `GET` / `POST` | `/api/v1/config` | 读取（Key 打码）/ 保存配置 |
+| `POST` / `GET` | `/api/v1/log` | 写入聊天日志条目（现由 `console.log` 通道主导） |
+| `POST` / `GET` | `/api/v1/diag` | 游戏侧诊断信息写入桥日志 |
+| `GET` | `/api/v1/overlay/messages` | 悬浮窗轮询：最近聊天、会话标识与目标语言 |
+| `POST` / `GET` | `/api/v1/overlay/translate` | 悬浮窗发消息：中文 → 英文 |
+| `GET` | `/settings` | 网页设置页 |
+| `GET` | `/overlay` | 网页版悬浮窗（`overlay.mode = "web"` 时用） |
+| `GET` | `/bridge` | 旧游戏内面板页（http 通道已废，仅诊断与 https 代理的源站） |
+
+示例：
+
+```powershell
+curl.exe http://127.0.0.1:8791/api/v1/health
+curl.exe -k https://localhost:8792/api/v1/health   # 未信任证书时用 -k
+```
+
+## 技术说明
+
+### 上行（游戏 → 桥，两条下行共用）
+
+游戏把每条请求写成 `console.log` 里的一行结构化文本，桥增量 tail 这个文件（`-condebug` 是前提）：
+
+```text
+[LCT] BTIPC REQ w=<窗口> id=<请求> len=<字节数> crc=<校验> b64=<原文>
+```
+
+### 下行 A：https 面板（主，<1 秒）
+
+隐藏 HTML 面板导航到 `https://localhost:8792/bridge?...` → 页面在**同源**下 `fetch('/api/v1/translate')` → 把整条结果一次写进 `document.title` → 游戏侧读回（事件 + 0.1s 轮询兜底）。
+
+- TLS 终结在**独立进程** `core/bridge_https.js`：证书坏了/握手失败不会连带 BTIPC 一起死；桥本体仍只有一处 `listen`。
+- 证书由 `scripts/gen_bridge_cert.ps1` 生成：`CN=BabelTower-localhost`，SAN = `DNS:localhost` + **IP** `127.0.0.1` + **IP** `::1`，EKU serverAuth。
+- 引擎在加载页面**之前**校验证书链；未受信任时表现为 `panel.title` 永不更新（上游实测 `error:-202` = `ERR_CERT_AUTHORITY_INVALID`），信任后需**完全重启 Steam** 才生效。
+- 游戏侧策略：探一次定生死；硬失败（页面没加载/面板不可用/超长 payload 被 title 上限截断）把任务原样交回 BTIPC；软失败（页面活了但慢）按原语义结算；连续 3 次硬失败整局退位泵。
+
+细节、排障与安全边界见 [`docs/https-panel.md`](docs/https-panel.md)。
+
+### 下行 B：BTIPC 位信道（兜底，2～6 秒）
+
+桥把译文编码成 16 字节帧，游戏侧用 128 个隐藏的 2×2 `Image` 面板逐轮读取 `GET /btipc/dl?w=&r=&p=&t=` 的**状态码**——`200` = 位 1，`404` = 位 0。帧里带 `seq` / `VALID` / `LEN` 与 CRC-16，轮号 `r` 前进即隐式确认；校验失败就同轮重投，桥端幂等重发。
+
+> [!NOTE]
+> 图片加载由引擎渲染管线自行发起，不走 Panorama 的 JS HTTP API，所以游戏移除 `AsyncWebRequest` 不影响这条下行。
+
+近期提速（Phase 1）：桥端 `console.log` 尾随改为 `fs.watch`（约 50ms 读到，替代 800ms 轮询）、首拍 1.2s → 0.3s、BUSY 退避 500ms → 180ms、翻译服务商复用连接。完整规格见 [`docs/btipc-v1.md`](docs/btipc-v1.md)，架构见 [`docs/architecture.md`](docs/architecture.md)。
+
+### 术语表
 
 [`core/glossary.js`](core/glossary.js) 会把术语表注入**每一次**翻译提示词，并对输出做英雄名纠正：
 
-- `heroNames` — 46 个可玩英雄的官方英文名
-- `heroCnToEn` — 中文昵称 → 英文英雄名
-- `itemEnToCn` — 194 条商店装备的官方中英对照
-- `termsCnToEn` — 战术术语（兵线、推塔、回城……）
+- `heroNames`：42 个可玩英雄的官方英文名
+- `heroCnToEn`：中文昵称 → 英文英雄名
+- `itemEnToCn`：194 条商店装备的官方中英对照
+- `termsCnToEn`：战术术语（兵线、推塔、回城……）
 
-权威数据源为 `https://api.deadlock-api.com/v1/assets/heroes` 与 `/v1/assets/items`，均支持 `?language=english|schinese`。
+英雄与装备数据可一键刷新：`node scripts/sync_heroes.js`（默认 dry-run，加 `--write` 落盘）；权威数据源是 `https://api.deadlock-api.com/v1/assets/heroes` 与 `/v1/assets/items`。
 
----
+### 聊天日志与 SteamID
 
-## 聊天日志与 SteamID
+- 聊天日志：`logs/chat/<matchId>.jsonl`；身份缓存：`logs/chat/identity_cache.json`
+- 日志由**桥**写入：游戏侧把已去重、sender 已解析的消息写成 `[LCT-CHAT]{json}` 一行进 `console.log`，桥增量 tail 后落盘
+- 缓存按昵称与 `account:<account_id>` 两类键存放；昵称回填在文件写入 3 分钟后尝试，整局 12 人名单在 6 小时后首次请求公开 API，失败每小时重试
 
-聊天日志默认写入 `logs/chat/<matchId>.jsonl`，身份缓存写入 `logs/chat/identity_cache.json`。
+### 目录结构
 
-> [!NOTE]
-> 日志的写入方是**桥**：游戏侧把每条已去重、sender 已解析的聊天打成一行 `[LCT-CHAT]{json}` 写进 `console.log`，桥增量 tail 后落盘。这也是为什么 `-condebug` 是必做项。
+```text
+DeadlockLingua/
+├── mod/panorama/            Panorama 模组（layout / scripts / styles）
+├── core/                    本地 Node.js 桥
+│   ├── bridge_server.js     HTTP 服务、/btipc/dl 路由、https 子进程管理
+│   ├── bridge_https.js      https 面板通道：8792 TLS 终结 + 反代（独立进程）
+│   ├── btipc/               BTIPC 帧 / 窗口 / 传输实现
+│   ├── providers/           翻译服务商实现
+│   ├── glossary.js          英雄 / 装备 / 战术术语表
+│   ├── dictionary.js        自适应词典
+│   ├── overlay.js           悬浮窗数据源（legacy）
+│   ├── steamid_enrich.js    SteamID 回填
+│   └── settings_page.html   网页设置页
+├── tests/btipc/             BTIPC 协议测试（离线）
+├── tests/https_panel_server.test.js   https 通道测试（离线）
+├── scripts/                 构建 / 打包 / 模拟测试 / 证书 / 悬浮窗
+├── config/                  配置与词典（config/certs/ 为本地证书，已忽略）
+├── docs/                    架构、https/BTIPC 规格、优化日志
+├── *.bat / *.vbs            启动、停止、自启、悬浮窗脚本
+└── LICENSE / LICENSE_NOTICE.md
+```
 
-缓存包含两类键：
+运行时目录不进 Git：`config/config.json`（密钥）、`config/certs/`（私钥）、`logs/`、`dist/`、`portable-node/`、`tools/`。
 
-- **昵称键**：用于聊天消息回填 SteamID
-- **`account:<account_id>` 键**：整局玩家权威记录，避免重名和改名冲突
+### 实验分支：原生 mod
 
-处理策略：
+仓库的 `feat/native-mod` 分支有一份**原生 DLL 实验骨架**（进程内 DXGI 覆盖层 + WinHTTP），不依赖 Panorama/CEF，也不需要装证书。它**未编译、未实机验证**，且向游戏进程注入 DLL 有反作弊/封号风险，仅供实验，不是本 mod 的一部分。
 
-- 聊天消息中的具名玩家，在文件写入 3 分钟后尝试按昵称回填
-- 整局 12 人名单在比赛文件写入 6 小时后首次请求公开 API
-- 首次请求失败后每小时自动重试
-- 同一账号跨多局遇到时 `matchCount` 递增，不产生重复记录
+## 常见问题
 
-日志与缓存均已被 `.gitignore` 忽略。
+**游戏里一直不显示译文？**
+先查启动选项里有没有 `-condebug`；再确认桥在跑（`http://127.0.0.1:8791/api/v1/health` 返回 JSON）；最后看 `logs/bridge.log` 里有没有 `BTIPC TRQ` / `BTIPC: r=.. seq=.. OK`。
 
----
+**还是 2～6 秒，没到 1 秒？**
+说明 https 通道没起来。看游戏 `console.log`：`https panel: not usable (bridge_nav_failed)` = 页面没加载，多半是没跑 `-Trust` 或没完全重启 Steam；`bridge_https.log` 里出现 `TLS handshake rejected by client` 也是同一件事（引擎用证书告警拒了）。
 
-## 从源码构建
+**开了 https 但偶尔退回慢通道？**
+连续 3 次硬失败会整局退回 BTIPC（日志 `https panel: dead ...`）。修好证书/重启 Steam 后重进游戏即恢复。
 
-需要 Reduced CSDK 12 与 [VPKEdit CLI](https://github.com/craftablescience/VPKEdit/releases)（放入 `tools/`）：
+**翻译失败会怎样？**
+服务商失败会回退显示原文；桥整个不在时约 3 秒放弃并跳过，不会在聊天里刷红字。
+
+**桥没启动 / 显示「桥离线」？**
+双击 `StartBridgeSilent.vbs`，或检查任务管理器里有没有 `node.exe`。
+
+**输入 `/tr` 没反应？**
+推荐改用 ESC →「翻译设置」（自带指针）。`/tr` 面板在聊天布局里，需要先按住 `Tab` 出鼠标指针才能点。
+
+**还能用悬浮窗吗？**
+可以，代码仍在。设置里可切显示形态；`overlay.mode = "web"` 还能退回浏览器小窗。
+
+**装证书安全吗？**
+证书只签给 `localhost` / `127.0.0.1` / `::1`，冒充不了任何公网域名；私钥只在本地 `config/certs/`（已 gitignore）。它写进的是**当前用户**的信任库，不碰机器级证书；`-Untrust` 可随时撤销。
+
+## 开发
+
+### 从源码构建
+
+需要 Reduced CSDK 12 与 [VPKEdit CLI](https://github.com/craftablescience/VPKEdit/releases)（放进 `tools/`）：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts/build.ps1 -Csdk12Root "<CSDK_DIR>"
 ```
 
-产物为 `dist/pak01_dir.vpk`。**部署前要先改成不与 addons 现有文件重名的名字**（推荐 `pak22_dir.vpk`），再复制到 Deadlock 的 `game/citadel/addons/`。
+产物为 `dist/pak01_dir.vpk`。部署前先改成不与 addons 现有文件重名的名字（推荐 `pak22_dir.vpk`），再复制到 `game/citadel/addons/`。
 
-> [!WARNING]
-> 别用裸的 `pak01_dir.vpk`：`pak01` 是游戏本体的 pak 组名，同名会冲突。
-
----
-
-## 测试
-
-**BTIPC 协议（离线，不需要游戏）**
+### 测试
 
 ```powershell
-node tests\btipc\crc.test.js        # CRC-16/CCITT-FALSE 标准向量
-node tests\btipc\frame.test.js      # 帧往返 / 位序例 / BUSY 帧 / CRC 篡改
-node tests\btipc\transport.test.js  # REQ 校验 / 轮次语义 / GC 不变量
-node tests\btipc\e2e_tail.test.js   # console.log → tail → 建窗 → 取帧
-node tests\btipc\route.test.js      # /btipc/dl 路由接线（桩 transport）
-node tests\btipc\live_http.test.js  # 真实监听端口 + 真实 tail + 逐面板状态码 → 逐位拼装
-```
+# 离线协议/通道测试（不需要游戏）
+node tests\btipc\crc.test.js
+node tests\btipc\frame.test.js
+node tests\btipc\transport.test.js
+node tests\btipc\e2e_tail.test.js
+node tests\btipc\route.test.js
+node tests\btipc\live_http.test.js
+node tests\https_panel_server.test.js   # 临时证书 + 桩上游，验证 TLS/反代/降级
 
-**模拟器（需要桥在跑）**
-
-```powershell
-node scripts\lingua_chat_simtest.js   # 面板树 + BTIPC 位信道全链路（用真实桥端 framer 编码）
+# 模拟器与桥侧回归（部分需要桥在跑）
+node scripts\lingua_chat_simtest.js
 node scripts\overlay_test.js
 node scripts\test_sender_backfill.js
 node scripts\test_steamid_roster.js
@@ -327,145 +350,41 @@ node scripts\test_bridge_dedup.js
 node scripts\test_bridge_fallback.js
 ```
 
-桥健康检查：
-
-```powershell
-curl.exe http://127.0.0.1:8791/api/v1/health
-```
-
----
-
-## 发布打包
+### 发布打包
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\package_release.ps1 -Version 2.1.0
 ```
 
-产出 `dist/DeadlockLingua-2.1.0-win64.zip`，内含 VPK、桥、内置 Node、启动/停止脚本与文档。
+产出 `dist/DeadlockLingua-2.1.0-win64.zip`，内含 VPK、桥（含 `bridge_https.js`）、内置 Node、启动/停止脚本、证书脚本与文档。
 
----
+### 贡献
 
-## 目录结构
+欢迎提交 Issue 与 Pull Request。提交前请自查：
 
-```text
-DeadlockLingua/
-├── mod/                          Panorama UI 源码
-│   └── panorama/
-│       ├── layout/               布局覆盖
-│       ├── scripts/              聊天扫描 / BTIPC 客户端 / 桥接（lingua_chat.js）
-│       └── styles/               译文样式
-├── core/                         本地 Node.js 桥
-│   ├── bridge_server.js          HTTP 服务、/btipc/dl 路由与配置接口
-│   ├── btipc/                    BTIPC 信道实现（crc16 / framer / window / transport）
-│   ├── config.js                 本地配置管理
-│   ├── glossary.js               游戏术语表（英雄/装备/战术）
-│   ├── hero_names.js             英雄译名与缩写
-│   ├── dictionary.js             自适应学习词典
-│   ├── overlay.js                悬浮窗数据源（tail console.log，legacy）
-│   ├── overlay_page.html         网页版悬浮窗页面（legacy）
-│   ├── steamid_enrich.js         SteamID 回填与整局名单
-│   └── providers/                翻译服务商（bing/microsoft/openai/deepl/google）
-├── tests/btipc/                  BTIPC 协议测试（离线可跑）
-├── scripts/
-│   ├── overlay_window.ps1        游戏外悬浮窗（原生 WPF，legacy）
-│   ├── build.ps1                 构建
-│   ├── package_release.ps1       发布打包
-│   └── *_test.js / *simtest.js   模拟测试
-├── config/                       配置与词典
-├── docs/                         架构说明、BTIPC 规格与优化日志
-├── assets/readme/                README 视觉素材
-├── ShowOverlay.bat               手动打开悬浮窗（不必开游戏）
-├── StartDeadlock.bat             终端/带 -condebug 启动游戏
-├── StartBridgeSilent.vbs         无窗口后台启动桥
-├── StopBridge.bat / RestartBridge.bat
-└── LICENSE / LICENSE_NOTICE.md
-```
+- 不要带 `apiKey`、`sk-` 开头的 Key、SteamID、`matchId`、聊天原文或本机绝对路径
+- `config/config.json`、`config/certs/`、`logs/`、`dist/`、`*.vpk`、`portable-node/` 均已被忽略，不要强行加入
+- `.js` 文件保持 UTF-8、行尾 CRLF
+- 改 BTIPC 协议任一侧，**必须同步另一侧**（游戏侧内联了 crc16 / 位序 / UTF-8 / base64 副本），并跑 `tests/btipc/*` 与 `scripts/lingua_chat_simtest.js`
+- 改 https 通道，跑 `tests/https_panel_server.test.js`，并确认「证书缺失 → 整局 BTIPC」这条降级没被破坏
 
-以下运行时目录不进入 Git：
+进度：
 
-- `config/config.json` — 本地密钥
-- `logs/` — 桥日志与聊天日志
-- `dist/` — 构建产物
-- `portable-node/` — 本地 Node 运行时
-- `tools/` — 本地打包工具
-
----
-
-## 工作原理
-
-项目由三部分组成：游戏内的 Panorama 模组、本机 Node.js 桥、以及（可选的）游戏外悬浮窗。数据是**双向**的：
-
-<p align="center">
-  <img src="./assets/readme/architecture.svg" width="100%" alt="数据流：游戏扫描聊天行，上行经 console.log 的结构化单行送到本地桥；桥翻译后把译文编码成 16 字节帧，游戏侧 128 个隐藏 Image 面板逐轮读回；译文由 mod 追加到原聊天行下方" />
-</p>
-
-**上行（游戏 → 桥）**：`console.log` 结构化单行
-
-```text
-[LCT] BTIPC REQ w=<窗口> id=<请求> len=<字节数> crc=<校验> b64=<原文>
-```
-
-桥每 0.8 秒增量 tail 这个文件。这也是 `-condebug` 必做的原因。
-
-**下行（桥 → 游戏）**：`GET /btipc/dl?w=&r=&p=&t=` 的**状态码**
-
-128 个隐藏 Image 面板逐轮问一次，`200` = 位 1、`404` = 位 0，凑满 16 字节解出一帧。帧里带 `seq` / `VALID` / `LEN` 与 CRC-16，轮号 `r` 前进即隐式确认；校验失败就同轮重投，桥端幂等重发同一帧。
-
-**渲染**：译文由 mod 追加为聊天行下的一个 `Label`——渲染能力一直没有被移除，之前缺的只是数据来源。
-
-> [!NOTE]
-> 悬浮窗（v2.0.x 的显示方式）走的是另一条**单向**通道：桥 tail 出 `[LCT-CHAT]` 后推给 WPF 窗口轮询。两条线共用同一份 `console.log` tail 与同一套翻译链。
-
----
-
-## 常见问题
-
-**Q：游戏里一直不显示译文？**
-A：先查启动选项里有没有 `-condebug`——这是最常见的原因。然后确认桥在跑（`http://127.0.0.1:8791/api/v1/health` 能看到 JSON），最后看 `logs/bridge.log` 里有没有 `BTIPC TRQ` / `BTIPC: r=.. seq=.. OK`。
-
-**Q：译文要等好几秒才出现？**
-A：正常。位信道有效带宽约 16 字节/秒，一条 60 字节的译文约 4 秒。这是当前通道的物理上限，不是卡住了。
-
-**Q：翻译失败时会怎样？**
-A：桥侧翻译失败会**回退原文**（不会卡住）；桥整个不在时约 3 秒收口并跳过，不会在聊天行上挂红标。
-
-**Q：桥没启动 / 显示「桥离线」？**
-A：双击 `StartBridgeSilent.vbs`，或检查任务管理器里有没有 `node.exe`。
-
-**Q：游戏内还能改设置吗？输入 `/tr` 没反应。**
-A：可以。推荐按 `ESC` →「翻译设置」：ESC 菜单自带鼠标指针，面板可以直接点；也可以输入 `/tr` 或点输入框右侧的 `set` 按钮（聊天布局下要先按住 `Tab` 出指针）。
-
-**Q：还想用悬浮窗看译文？**
-A：可以，代码仍在。设置里可切换显示形态；`overlay.mode="web"` 还能退回浏览器小窗。
-
-**Q：翻译偶尔变慢或失败？**
-A：可在设置里调大「翻译超时」，或配置备用服务商（`fallbackProviders`）做自动回退。
-
----
-
-## 贡献
-
-欢迎提交 Issue 与 Pull Request。
-
-- 提交前请自查：不要带 `apiKey` / `sk-` 开头的 Key / SteamID / `matchId` / 聊天原文 / 本机绝对路径
-- `config/config.json`、`logs/`、`dist/`、`*.vpk`、`portable-node/` 均已被忽略，不要强行加入
-- 修改 `.js` 文件时注意行尾为 CRLF，文件编码保持 UTF-8
-- 改 BTIPC 协议两侧任一处，**必须同步另一侧**（游戏侧内联了 crc16 / 位序 / UTF-8 / base64 的副本），并跑 `tests/btipc/*` 与 `scripts/lingua_chat_simtest.js`
-
-任务进度：
-
-- [x] **游戏内译文显示**（BTIPC 双向信道 + Image 位编码）
-- [x] 发送前翻译回填（改写输入框后走原版发送链路）
-- [x] 游戏外悬浮窗（原生 WPF，保留为备选）
-- [x] 字幕浮层（鼠标穿透 + 可拖拽）
-- [x] 术语表补全（46 英雄 / 194 装备）
+- [x] 游戏内译文显示（BTIPC 双向信道 + Image 位编码）
+- [x] 发送前翻译
+- [x] ESC 菜单设置入口与 `/tr` 三标签面板
+- [x] 游戏外悬浮窗 / 字幕浮层（备选）
+- [x] 术语表（42 英雄 / 194 装备）
 - [x] SteamID 被动回填
-- [ ] 位信道提速（规格里的 v1.1：精确闭合 + 紧缩帧，目标 60B 回程 ≤2.5s）
+- [x] **https 面板通道（2026-10-24，下行 <1s，BTIPC 兜底）**
+- [x] BTIPC 提速 Phase 1（fs.watch / 首拍 300ms / BUSY 180ms / keep-alive）
+- [ ] 位信道 v1.1（瘦帧 + 中文 UTF-16，目标 60B 回程 ≤2.5s）
+- [ ] 原生 mod（实验分支，未编译未实机验证）
 
----
-
-## 许可证
+## 许可证与来源
 
 - 本项目代码：GNU GPL v3，见 [`LICENSE`](LICENSE)
-- 第三方协议说明：见 [`LICENSE_NOTICE.md`](LICENSE_NOTICE.md)
+- 第三方协议与素材说明：见 [`LICENSE_NOTICE.md`](LICENSE_NOTICE.md)
 - 游戏内 Valve 布局素材仅用于兼容性，版权归 Valve
+
+**https 面板通道的来源**：协议语义参考上游 [BabelTower `docs/btipc-https-v1.md`](https://github.com/c1375rick/BabelTower/blob/main/docs/btipc-https-v1.md)（TLS 终结独立进程、页面同源 fetch 写 `document.title`、探针定生死、硬/软失败分类），本仓库独立实现，未复制其代码；「自签证书 + 写入 `CurrentUser\Root` + 完全重启 Steam」这一方案的最初实机先例来自该文档转述的 **DeadlockTranslate 0.6.19**。隐藏 HTML 面板 `SetURL` / `panel.title` 的机制事实来自 DLCT 与 `Hantu-Raya/Deadlock-mods-collection`（Apache-2.0）的公开可观测行为，实现为本项目独立编写。

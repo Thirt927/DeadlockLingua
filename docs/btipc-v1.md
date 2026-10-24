@@ -1,14 +1,21 @@
 # BTIPC v1 协议规格(本仓库实现口径)
 
-> **状态:桥端已实现并离线验收(2026-10-09);游戏侧待实现。**
+> **状态:桥端已实现并离线验收(2026-10-09);游戏侧已实现并实车验收(v2.1.0)。**
 > 依据上游 BabelTower 的冻结规格 `docs/btipc-v1.md`(GPL-3.0)自行实现,不合并其代码。
 > 桥端落地在 `core/btipc/{crc16,framer,window,transport}.js`,离线验收在 `tests/btipc/*.test.js`;
-> 游戏侧客户端将落在 `mod/panorama/scripts/lingua_chat.js` 的 `State.btipc` 区块。
+> 游戏侧客户端落在 `mod/panorama/scripts/lingua_chat.js` 的 `State.btipc` 区块。
 >
-> **为什么需要它**:游戏 2026-10-01 的更新移除了 Panorama 的 HTTP 能力
-> (`$.AsyncWebRequest` 调用即抛,隐藏 HTML 面板不再创建 CEF 实例),通过 HTTP/CEF 收发已不可能。
+> **为什么需要它**:游戏 2026-10-01 的更新移除了 `$.AsyncWebRequest`;隐藏 HTML 面板对
+> `http://` / `data:` / `file://` 三种 scheme 均不加载,本仓库因此只能走窄带通道。
 > 但**入站并非不可能** —— `<Image>` 面板的**加载状态**仍然可用作 1 bit 回读信道。
 > 详见 [architecture.md](architecture.md) 第 9 节。
+>
+> ⚠️ **2026-10-24 更正**:下面"面板不再创建 CEF 实例"的旧表述**不成立**。上游 BabelTower
+> 2026-10-15 实车证实:引擎在 LoadPage 之前按**证书链**拒绝未受信任页面(`error:-202`
+> = `ERR_CERT_AUTHORITY_INVALID`);本机自签证书加入 `CurrentUser\Root` 并完全重启 Steam
+> 后,隐藏面板可加载 `https://localhost:8792`,下行 **<1s**。本仓库 2.1.0 **尚未移植**该
+> 通道(见 [architecture.md](architecture.md) §10),BTIPC 仍是唯一可用下行;但"没有更宽的
+> 管子"只是本仓库当前实现状态,不是引擎事实(证据见 https://github.com/c1375rick/BabelTower/blob/main/docs/btipc-https-v1.md)。
 
 ---
 

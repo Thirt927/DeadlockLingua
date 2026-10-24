@@ -20,8 +20,8 @@ v1.0.x 的全部通信都建立在「Panorama 能发 HTTP、能收 HTTP」这一
 
 - 出站：`$.AsyncWebRequest` 调用即抛 `AsyncWebRequest has been removed.`，新 `panorama.dll` 里连
   `"Make a web request (disabled)"` 这种字符串都有；
-- 入站：隐藏 `<HTML>` 面板不再创建浏览器实例，`SetURL` 不报错但永远不发请求（桥端 `/bridge`
-  请求计数为 **0**）。
+- 入站：隐藏 `<HTML>` 面板对 `http://` / `data:` / `file://` 不加载，`SetURL` 不报错但永远不发请求
+  （桥端 `/bridge` 请求计数为 **0**）。⚠️ 2026-10-24 更正:真因是证书链(受信任 https 可加载),见 L3 注。
 
 同一时间窗内还出现 `gameinfo.gi` 被重置、HUD 布局被改写。所以旧版是三重打击叠加：
 **mod 先加载不上 → 加载上了也发不出请求 → 发得出也收不回来**。代码层面无解，只能换传输层
@@ -77,13 +77,20 @@ v1.0.x 的全部通信都建立在「Panorama 能发 HTTP、能收 HTTP」这一
   Panorama 白名单用的（[Momentum Mod 的更新日志](https://blog.momentum-mod.org/page/4/)），Deadlock 没有。
 - v1.0.0 里所有桥调用都走它：`httpGetJson()`、`buildApiUrl()`、翻译/日志/配置/健康检查。
 
-### L3（致命）入站 CEF 被引擎删除
+### L3（致命）入站 CEF 被引擎删除（2026-10-24 更正：此结论不成立）
 
 - 隐藏 `<HTML id="LCTBridgePanel">`（`v1.0.0` 的 `chat.xml` 第 224–225 行声明）是旧版的回退通道：
   `SetURL("/bridge?...")` → 页面 JS 把结果写进 `document.title` → Panorama 轮询读回。
 - 10/1 后：面板**确实会被渲染**（对局内实测 `geom 3x3`，不是 0×0），但 `SetURL` 不抛错、
   `panel.title` 永远 `undefined`、桥端 `/bridge` 加载**历史计数 0** —— 引擎不再为 HTML 面板建浏览器实例。
 - 这条结论是通过「桥端有没有收到请求」这种无法伪造的证据确认的，不是靠面板属性猜的。
+
+> ⚠️ **2026-10-24 更正**：上面「引擎不再为 HTML 面板建浏览器实例」**不成立**。当时只测了
+> `http://` / `data:` / `file://`,https 从未进矩阵。上游 BabelTower 2026-10-15 实车证实:
+> 引擎是在 LoadPage 之前按**证书链**拒掉未受信任页面(`error:-202` =
+> `ERR_CERT_AUTHORITY_INVALID`),受信任的本机自签 https 可正常加载(下行 <1s)。
+> 10/1 的观测(不报错、`title` 空、桥端计数 0)与"不建浏览器"和"建了但拒绝加载"两种解释
+> 都相容,当时按"Valve 删了 CEF"的先验选了错的那个。详见 `docs/architecture.md` §10。
 
 ### L4（放大器）桥与面板的旧设计缺陷，让故障看起来像「随机」
 
@@ -103,7 +110,7 @@ v1.0.x 的全部通信都建立在「Panorama 能发 HTTP、能收 HTTP」这一
 
 | 想做的事 | 可用原语 | 结果 |
 | --- | --- | --- |
-| 游戏内发请求到本地桥 | `$.AsyncWebRequest`（已删）、HTML 面板（无 CEF） | ✗ |
+| 游戏内发请求到本地桥 | `$.AsyncWebRequest`（已删）、HTML 面板（http 不加载；受信任 https 可用，2026-10-24 更正） | ✗ |
 | 读本地文件 / 剪贴板 / convar | `$` 只有 29 个成员，无此类原语 | ✗ |
 | 用 `BImageFileExists` 做 1 bit 入站 | 对 addons 里**实际存在**的文件也返回 `false` | ✗ |
 | 用引擎命名空间取数据 | `Game / Players / GameStateAPI / ...` 15 个命名空间实测 `present=(none)` | ✗ |
@@ -191,7 +198,7 @@ v1.0.x 的全部通信都建立在「Panorama 能发 HTTP、能收 HTTP」这一
 | --- | --- | --- |
 | 10/1 16:00:56 推送 build 25639407 | `deadlock.exe` / `pak01_dir.vpk` mtime + `appmanifest_1422450.acf` | `docs/OPTIMIZATION_LOG.md` 第三十六轮（约 766–775 行） |
 | 新 dll 禁用了 web request | `panorama.dll` 字符串 + 调用即抛 | 同上 |
-| HTML 面板不再建 CEF | 面板 `geom 3x3`、`title` 全空、桥端 `/bridge` 计数 0 | 第三十九 / 四十六轮 |
+| HTML 面板对 http/data/file 不加载(⚠ 2026-10-24 更正:不是"不建 CEF",真因是证书链,见 L3 更正注) | 面板 `geom 3x3`、`title` 全空、桥端 `/bridge` 计数 0 | 第三十九 / 四十六轮 |
 | addons 路径丢失与修法 | `gameinfo.gi` SearchPaths、手改触发 KeyValues FATAL | 第三十三轮 |
 | 旧版依赖点 | `$.AsyncWebRequest`、`ensurePanel()`、`SetURL`、`document.title` 轮询 | `git show v1.0.0:mod/panorama/scripts/lingua_chat.js`（约 3494–3920 行） |
 | 9/30 仍正常 | 35 条 `translate ok`（UTC 12:44–12:58） | `logs/bridge.log` |

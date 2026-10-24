@@ -1,8 +1,8 @@
 // Babel Tower - 游戏外翻译悬浮窗(overlay)
 //
-// 背景:2026/10/01 的 Deadlock 更新移除了 Panorama 的全部 HTTP 能力
-// ($.AsyncWebRequest 调用即抛 "AsyncWebRequest has been removed",隐藏 HTML 面板
-// 不再创建浏览器实例),游戏内既发不出请求也读不回响应。
+// 背景:2026/10/01 的 Deadlock 更新移除了 $.AsyncWebRequest(调用即抛),隐藏 HTML 面板
+// 对 http/data/file 不加载;2026-10-24 更正:面板的真拦点是证书链(受信任 https 可加载,
+// 见 docs/architecture.md §10),本仓库尚未实现该通道,游戏内仍发不出请求。
 // 唯一活着的通道是单向的「游戏 -> console.log」:mod 每落档一条聊天就打一行
 //   <时间戳> [PanoramaScript] [LCT-CHAT]{"o":0,"n":"Alice","c":"chat","h":"","t":"hello"}
 // 本模块增量 tail 该文件,把新聊天翻译成中文后存进环形缓冲,由浏览器里的悬浮窗

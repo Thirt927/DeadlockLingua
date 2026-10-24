@@ -65,15 +65,15 @@ Copy-Item F:\agents\deadlockfanyi\BabelTower-fork\dist\pak22_dir.vpk "E:\Steam\s
 
 - **游戏内**:`mod/panorama/*` — `chat.xml` / `hudchat.xml` 覆盖原版布局,注入 `lingua_chat.js`(扫描聊天 DOM、翻译、日志)
 - **本地桥**:`core/bridge_server.js`,监听 `127.0.0.1:8791`(Node.js HTTP)
-- **通信通道(重要变更 2026/10/01)**:游戏 **2026-10-01 16:00 的更新移除了 Panorama 的 HTTP 能力** —— `$.AsyncWebRequest` 调用即抛 `AsyncWebRequest has been removed.`,隐藏 HTML 面板 `SetURL` 不报错但引擎不再为其创建浏览器实例(`panel.title` 永远 `undefined`,桥端 `/bridge` 请求计数为 0)。**经 HTTP/CEF 收发数据已不可能**,不要再走 panel / AsyncWebRequest 路线。
+- **通信通道(2026-10-01 变更;2026-10-24 更正「面板/CEF 已死」)**:2026-10-01 16:00 的更新**移除了 `$.AsyncWebRequest`**(调用即抛);隐藏 HTML 面板 `SetURL` 到 `http://` / `data:` / `file://` 三种 scheme **都不加载**(`panel.title` 永远 `undefined`,桥端 `/bridge` 请求计数 0)。⚠️ **但这不等于「引擎不再为面板创建浏览器实例」**:上游 BabelTower 2026-10-15 实车定论是**引擎在 LoadPage 之前按证书链拒绝**(实机 neterror `error:-202` = `ERR_CERT_AUTHORITY_INVALID`);把本机自签证书(CN=BabelTower-localhost,SAN=`DNS:localhost` + `IP:127.0.0.1` + `IP:::1`)加入 `CurrentUser\Root` 并**完全退出重启 Steam** 后,隐藏面板可加载 `https://localhost:8792`,下行 **<1s**(vs BTIPC 3–27s)。上游实现:`core/bridge_https.js`(8792 TLS 终结,独立进程)/ `scripts/gen_bridge_cert.ps1` / https://github.com/c1375rick/BabelTower/blob/main/docs/btipc-https-v1.md。**本 fork 2026-10-24 起已实现该通道**:`core/bridge_https.js`(8792 TLS 终结,独立进程;证书缺失 `exit(3)`,上游不通 502 不退出)+ `scripts/gen_bridge_cert.ps1`(生成/信任/撤销)+ `config.https` + 桥端 `op=ui` 的 `httpsPanel`/`httpsPort` + 游戏侧 `lingua_chat.js` 的 `HTTPS_PANEL_*`(开机探针一次定生死;硬失败交回 BTIPC;连续 3 次硬失败整局退位泵)。启用:README 安装第 5 步(`-Trust` + **完全重启 Steam**);原理/排障/安全边界:`docs/https-panel.md`。**BTIPC 仍是兜底**,证书没装/Steam 没重启/探针判死时整局自动留在位泵。
 - **当前通道(2026/10/09 实车验收后)**:译文**直接显示在游戏内聊天行下方**(BTIPC 双向,见下)。悬浮窗**默认关闭**(`overlay.enabled=false`,v2.1.0 起),代码保留不删 —— 想用改回 `true` 或双击 `ShowOverlay.bat`;关闭后桥也**跳过**为悬浮窗做的翻译(否则每条聊天付两遍 provider 费用)。单向 `游戏 → console.log` 仍在用:mod 每落一条聊天就 `$.Msg("[LCT-CHAT]" + JSON 单行)`(埋点在 `pushEntry()`),桥端 `core/overlay.js` 增量 tail 解析 —— **聊天日志落盘靠它**,别关。
 - **入站通道(2026/10/09 更正,不要再沿用"架构上不可能"的旧结论)**:2026/10/01 那轮探针只覆盖了「Panorama JS 能主动发起」这一类入口(`AsyncWebRequest` / 面板 `SetURL` / 剪贴板 / `BImageFileExists`),**漏了另一类:引擎为了渲染会自己去取什么**。结论修正如下。
-  - **已封死(探针实测,不要再试)**:①`$.` 只有 29 个成员(`Msg/AssertHelper/Warning/DispatchEvent/DispatchEventAsync/RegisterEventHandler/RegisterForUnhandledEvent/UnregisterForUnhandledEvent/FindChildInContext/AsyncWebRequest/CreatePanel/CreatePanelWithProperties/CanLocalize/Localize/ConstructString/ConstructMFString/Language/Schedule/CancelScheduled/FrameTime/GetContextPanel/RegisterKeyBind/Each/DbgIsReloadingScript/HTMLEscape/LogChannel/BImageFileExists/MousePosition/CreatePanelWithCurrentContext`),没有读文件/读剪贴板/执行控制台命令的原语;②`globalThis` 上只有 5 个引擎全局(`PlayUISoundEvent/StopUISoundEvent/IsUISoundEventPlaying/PlayLocalHeroSound/StopLocalHeroSound`);③`Game/Players/GameStateAPI/GameInterfaceAPI/GameUI/Citadel/...` 15 个命名空间实测 `present=(none)`;④动态 `<HTML>` 面板设成会渲染的形态后,`SetURL` 到 `http://` / `data:` / `file://` 三者 `panel.title` **全为空**,桥端 `/bridge load` **零条** → 引擎根本不为面板创建 CEF 实例;⑤`BImageFileExists` 对 addons 目录里**实际存在**的文件也返回 `false`(它只认 `s2r://` 资源路径);⑥`Image` 面板的 `Get*` 回读口(93 个函数全量枚举,只有写入型)。
+  - **已封死(探针实测,不要再试)**:①`$.` 只有 29 个成员(`Msg/AssertHelper/Warning/DispatchEvent/DispatchEventAsync/RegisterEventHandler/RegisterForUnhandledEvent/UnregisterForUnhandledEvent/FindChildInContext/AsyncWebRequest/CreatePanel/CreatePanelWithProperties/CanLocalize/Localize/ConstructString/ConstructMFString/Language/Schedule/CancelScheduled/FrameTime/GetContextPanel/RegisterKeyBind/Each/DbgIsReloadingScript/HTMLEscape/LogChannel/BImageFileExists/MousePosition/CreatePanelWithCurrentContext`),没有读文件/读剪贴板/执行控制台命令的原语;②`globalThis` 上只有 5 个引擎全局(`PlayUISoundEvent/StopUISoundEvent/IsUISoundEventPlaying/PlayLocalHeroSound/StopLocalHeroSound`);③`Game/Players/GameStateAPI/GameInterfaceAPI/GameUI/Citadel/...` 15 个命名空间实测 `present=(none)`;④动态 `<HTML>` 面板设成会渲染的形态后,`SetURL` 到 `http://` / `data:` / `file://` 三者 `panel.title` **全为空**,桥端 `/bridge load` **零条** → 只证明这三种 scheme 不加载;不能推出「引擎不为面板创建浏览器实例」(2026-10-24 更正:坏的是证书链,受信任 https 可加载——见上一条及上游 https://github.com/c1375rick/BabelTower/blob/main/docs/btipc-https-v1.md);⑤`BImageFileExists` 对 addons 目录里**实际存在**的文件也返回 `false`(它只认 `s2r://` 资源路径);⑥`Image` 面板的 `Get*` 回读口(93 个函数全量枚举,只有写入型)。
   - **✅ 仍可用(上游 BabelTower 已实车验收)= `<Image>` 面板加载状态当 1 bit 入站**:游戏侧建 128 个隐藏 2×2 Image 面板,逐轮 `SetImage("/btipc/dl?w=<win>&r=<round>&p=<i>&t=<nonce>")`;桥端按位回 HTTP 状态码 —— bit=1 → `200`+PNG,bit=0 → `404`;游戏侧监听 **`ImageLoaded`**(事件白名单里恰好 8 个 VALID 之一)fire=1 / `T_CLOSE`(600ms)内静默=0。128 bit = 16 字节 = 一帧,扣除 6 字节帧头后载荷 10 字节/帧,实测 ~190 bit/s、位元零丢失(单 bit 延迟 P50 173ms / P99 1365ms)。
   - **为什么能成立**:图片加载由引擎在**渲染管线里自行发起**,不走 Panorama JS 的 HTTP API,所以 `AsyncWebRequest` 被移除不影响它。入站不需要 JS 原语,只需要一个「引擎会去取网络的声明式入口」。
   - 上行复用现成通道:`console.log` 结构化单行(`[LCT] BTIPC REQ w=.. id=.. len=.. crc=.. b64=..`),**硬依赖游戏带 `-condebug` 启动**(不带就不写 `console.log`,表现是"装了完全没反应")。
   - 协议规格见上游 `docs/btipc-v1.md`(冻结版:16 字节帧格式 / CRC-16-CCITT-FALSE 覆盖固定 14 字节 / 轮号 `r` 即隐式 ACK 与幂等重投 / BUSY 固定帧 / 风暴模式 / 参数表)。本仓库按该规格**自行实现**,不直接合并上游代码。
-  - **进度**:桥端(第六十四轮)+ 游戏侧(第六十五轮)均已于 2026-10-09 落地 —— `core/btipc/*` + `GET /btipc/dl` + `overlay.js` 的 `onLine` 钩子 + 5s GC 定时器;游戏侧 `lingua_chat.js` 的 BTIPC 客户端(内联 crc16/UTF-8/base64 + 128 Image 面板 + `ImageLoaded` + 轮次状态机)与 `dispatchJob → dispatchViaBtipc`。离线测试全绿(`tests/btipc/*` 5 套 + `lingua_chat_simtest.js` PASS 58/0,模拟器用真 framer 编码、游戏侧内联副本解码)。**尚未实车验收**(2026-10-09 离线全绿,实车待验收) —— 需关闭游戏后部署 `dist/pak22_dir.vpk` 并带 `-condebug` 启动。
+  - **进度**:桥端(第六十四轮)+ 游戏侧(第六十五轮)均已于 2026-10-09 落地 —— `core/btipc/*` + `GET /btipc/dl` + `overlay.js` 的 `onLine` 钩子 + 5s GC 定时器;游戏侧 `lingua_chat.js` 的 BTIPC 客户端(内联 crc16/UTF-8/base64 + 128 Image 面板 + `ImageLoaded` + 轮次状态机)与 `dispatchJob → dispatchViaBtipc`。离线测试全绿(`tests/btipc/*` 5 套 + `lingua_chat_simtest.js` PASS 58/0,模拟器用真 framer 编码、游戏侧内联副本解码)。**已实车验收(v2.1.0)**:2026-10-09 离线全绿后实车通过(部署 `dist/pak22_dir.vpk` + 带 `-condebug` 启动)。
   - 桥端铁律:①**`/btipc/dl` 的状态码是逐面板的** —— 面板 p 必须拿选中帧的第 p 位,位=1 才回 `200`,位=0 回 `404`；对同一轮所有面板回同一个状态码会让游戏侧把 16 字节全读成 1、CRC 必然不过(第六十六轮真实 HTTP 验收抓到的致命缺陷,回归见 `tests/btipc/live_http.test.js`)。②帧号只由轮号现算(`frameIndex = round - frameStartRound`),**不许存自增计数器**(会与游戏脱步)。③窗口 GC 的 `END_GC_MS` 必须 > 客户端最长重试跨度(现取 45s),否则会在客户端仍在重试时自删 → 全 404 → 全零位 → 误报 crc_dead。三条都已有测试护栏。
   - 游戏侧铁律:①**每次 SHOT 的 URL 必须唯一**(`t` 带 `shotSeq`)—— 同 URL 撞引擎缓存后不再 fire `ImageLoaded`(上游踩过 `frameFails 1→9`);②**位信道 ≈10 字节/轮(≈16 B/s)**,所以诊断/日志类重复流量一律**不许**走它(`diagLog` 只打 console.log、`flushChatLog` 不再镜像聊天行);③`pumpQueue` 里 bridge 任务要给 chat/outgoing 让位;④`RegisterEventHandler("ImageLoaded", panel, cb)` 是**固定 3 参**。
   - 渲染能力一直都在(`Label.text` 可用,mod 照样能往聊天行插字),缺的只是数据来源 —— 现在数据来源有了。`probeInboundChannels()` 已于第六十五轮**退役其面板/文件探针**(覆盖有盲区、正是它导致了错误结论,且每次启动都建一个真渲染面板),只留一行 `$` 成员表。
@@ -84,7 +84,7 @@ Copy-Item F:\agents\deadlockfanyi\BabelTower-fork\dist\pak22_dir.vpk "E:\Steam\s
   - **透明度只合成到背景色**(`New-PanelBrush` 生成 ARGB),不要用 `Window.Opacity`,否则文字一起变淡看不清。
   - **设计令牌**:配色集中在文件开头的 `$script:T`(取游戏自身世界观:1930s 纽约的氧化黄铜/铜绿/羊皮纸),字体在 `$script:F`(拉丁 Bahnschrift SemiCondensed + 中文回落雅黑;原文用工业压缩体、译文用人文无衬线,两者视觉分层)。两个窗口的 XAML 都是**插值 here-string**(`@"..."@`),直接引用 `$($T.Xxx)`。
   - ⚠️ **`overlay.background` / `overlay.accent` 会覆写令牌色**:`Apply-Config` 用配置里的这两项设置 `Root.Background` / `Root.BorderBrush`,所以改令牌时**必须同步** `core/config.js` 的 `DEFAULTS.overlay.background/accent`,否则新配色会被旧色盖掉。
-- **API 端点**:`/api/v1/translate` `/log` `/config` `/health` `/diag` `/api/v1/overlay/messages` `/api/v1/overlay/translate`;页面 `/bridge`(面板用,已废) `/overlay`(网页版悬浮窗)
+- **API 端点**:`/api/v1/translate` `/log` `/config` `/health` `/diag` `/api/v1/overlay/messages` `/api/v1/overlay/translate`;页面 `/bridge`(面板页;**本版无可用面板通道**,见上条「通信通道」) `/overlay`(网页版悬浮窗)
 - **聊天内容来源**:扫描 UI DOM(`#ChatMessages` 子行、`Team1Chat/Team2Chat` 顶栏气泡、大厅 `ChatLinesPanel`)
 
 ## 4.5 术语表(glossary.js)与其数据源
@@ -117,9 +117,15 @@ Copy-Item F:\agents\deadlockfanyi\BabelTower-fork\dist\pak22_dir.vpk "E:\Steam\s
 
 - 修改 `.js` 文件:**用 Python3 文本模式**(`open(path,"r"/"w",encoding="utf-8")`)读写;PowerShell 的 `$content.Replace()` 会因 CRLF/编码问题静默失败
 - 通过 shell heredoc 传中文给 `python3` stdin 会损坏成 `?`:**代码注释用英文**,或单独用 PowerShell 写中文
-- 文件行尾是 **CRLF**
+- 文件行尾**多数是 CRLF**,但 `docs/btipc-speedup-plan.md` / `docs/translation-rethink.md` / `docs/from-scratch-architectures.md` / `docs/update-2026-10-01-postmortem.md` 是 **LF**:改前先看,别整文件换行尾
 - `config.json` 里的 apiKey 是 DeepSeek 的,日志输出**绝不能**包含 apiKey
 - 默认语言中文,读取文件先试 UTF-8
+- **排除类结论的记账规则(2026-10-24 起;由「面板已死」误判催生)**:
+  - 写"某通道/某能力不可用"必须同时给出**覆盖矩阵**:测过哪些入口、哪些 scheme、每个入口的正例控制(证明测试真的到达了目标);**没测过的维度不得并入结论**。
+  - **scheme 是安全域变量**:`http` / `https` / `file` / `data` 是四个不同策略面,跨 scheme 不外推。
+  - 硬结论标**截止日期 + 复核方式**;"只能优化 X,不能换管子"这类断言一律写成**待推翻假设**,并写清什么观测能推翻它。
+  - 触及用户安全边界的方案(如往信任库装证书)**不能因为"重"就不提**:作为选项呈报 + 写清作用域、风险与撤销方式。
+  - 定期对照上游 `docs/` 与 `CHANGELOG`;本 fork 的"面板已死"就是上游 2026-10-15 已推翻、我们 9 天没回灌。
 
 ## 8. 推送 GitHub 前的敏感信息检查(强制)
 

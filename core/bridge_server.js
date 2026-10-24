@@ -24,7 +24,7 @@ const http = require("http");
 const path = require("path");
 const fs = require("fs");
 const os = require("os");
-const { execFile, execFileSync } = require("child_process");
+const { execFile, execFileSync, spawn } = require("child_process");
 
 const configStore = require("./config");
 const providerRegistry = require("./providers/registry");
@@ -1104,6 +1104,11 @@ const btipc = btipcTransport.createTransport({
         ok: true,
         ui: c.ui || {},
         provider: c.provider || "",
+        // https 面板通道能力:证书存在且 https.enabled 才让游戏侧去探针。
+        // 没有证书的用户一条死请求都不会发(探针本身也要 1.5s,不能白付)。
+        httpsPanel: !!(c.https && c.https.enabled !== false &&
+          fs.existsSync(path.resolve(__dirname, "..", String((c.https && c.https.pfx) || "config/certs/bridge.pfx")))),
+        httpsPort: Number((c.https && c.https.port) || 8792),
         keys: {
           microsoft: !!(c.microsoft && c.microsoft.apiKey),
           openai: !!(c.openai && c.openai.apiKey),
@@ -1322,4 +1327,66 @@ server.listen(PORT, HOST, () => {
   const activeProviderCfg = (cfg[cfg.provider] || {});
   const keySet = cfg.provider === "bing" ? true : !!(activeProviderCfg && activeProviderCfg.apiKey);
   log("info", "provider: " + cfg.provider + ", target: " + cfg.defaults.targetLanguage + " (key set: " + keySet + ")");
+  // https 面板通道:独立进程做 TLS 终结(8792),把 /bridge 与 /api/v1/* 原样代理回本进程。
+  // 拆进程的理由:证书坏了/握手失败绝不能连带 BTIPC 一起死;桥只保留一处 listen。
+  startHttpsBridge(cfg);
 });
+
+// ---------- https 面板通道(参考上游 BabelTower docs/btipc-https-v1.md,独立实现) ----------
+let httpsChild = null;
+
+function startHttpsBridge(cfgNow) {
+  const h = (cfgNow && cfgNow.https) || {};
+  if (h.enabled === false) {
+    log("info", "https panel: disabled (https.enabled=false)");
+    return;
+  }
+  const pfx = path.resolve(__dirname, "..", String(h.pfx || "config/certs/bridge.pfx"));
+  const passFile = path.resolve(__dirname, "..", String(h.passFile || "config/certs/bridge.pass"));
+  if (!fs.existsSync(pfx)) {
+    log("info", "https panel: cert missing (" + pfx + ") — run scripts/gen_bridge_cert.ps1 -Trust, " +
+      "then FULLY restart Steam; staying on BTIPC");
+    return;
+  }
+  const port = Number(h.port) || 8792;
+  const proxyTimeoutMs = Number(h.timeoutMs) || 30000;
+  const args = [
+    path.join(__dirname, "bridge_https.js"),
+    "--port", String(port),
+    "--upstream", String(PORT),
+    "--pfx", pfx,
+    "--pass-file", passFile,
+    // 代理硬超时必须大于 provider 超时(默认 15s),否则长翻译会被截成 502
+    "--timeout", String(proxyTimeoutMs),
+  ];
+  try {
+    httpsChild = spawn(process.execPath, args, {
+      cwd: path.join(__dirname, ".."),
+      stdio: "ignore",
+      windowsHide: true,
+    });
+  } catch (e) {
+    log("warn", "https panel: spawn failed: " + ((e && e.message) || String(e)));
+    httpsChild = null;
+    return;
+  }
+  httpsChild.on("exit", (code, sig) => {
+    log("info", "https panel: bridge_https exited code=" + code + (sig ? " sig=" + sig : "") +
+      (code === 3 ? " (cert unusable; BTIPC only)" : ""));
+    httpsChild = null;
+  });
+  httpsChild.on("error", (e) => {
+    log("warn", "https panel: bridge_https error: " + ((e && e.message) || String(e)));
+  });
+  log("info", "https panel: bridge_https on https://localhost:" + port + " (upstream " + PORT + ")");
+}
+
+function stopHttpsBridge() {
+  if (!httpsChild) return;
+  try { httpsChild.kill(); } catch (e) {}
+  httpsChild = null;
+}
+
+process.on("exit", stopHttpsBridge);
+process.on("SIGINT", () => { stopHttpsBridge(); process.exit(0); });
+process.on("SIGTERM", () => { stopHttpsBridge(); process.exit(0); });

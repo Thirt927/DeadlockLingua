@@ -57,6 +57,12 @@ Write-Host "==> 复制 BTIPC 信道层..."
 New-Item -ItemType Directory -Path (Join-Path $Stage "core\btipc") -Force | Out-Null
 Copy-Item (Join-Path $Root "core\btipc\*.js") (Join-Path $Stage "core\btipc\")
 
+Write-Host "==> 复制 https 面板通道..."
+# https 面板通道的 TLS 终结进程;缺了它 bridge_server 只记一条 info,BTIPC 兜底照常
+Copy-Item (Join-Path $Root "core\bridge_https.js") (Join-Path $Stage "core\")
+# 证书/信任脚本:用户侧唯一需要手动跑一次的脚本
+Copy-Item (Join-Path $Root "scripts\gen_bridge_cert.ps1") (Join-Path $Stage "scripts\")
+
 Write-Host "==> 复制配置示例与脚本..."
 Copy-Item (Join-Path $Root "config\config.example.json") (Join-Path $Stage "config\")
 Copy-Item (Join-Path $Root "config\dictionary.builtin.json") (Join-Path $Stage "config\")

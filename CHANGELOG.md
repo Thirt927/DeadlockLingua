@@ -16,6 +16,25 @@
 - **`/tr` 面板改为三标签页**：常用 / 服务商 / 高级；面板 600×640，常用 5 项一屏放下，
   服务商字段不再折叠；行结构仍是「标签在上 + 控件在下」，底部保存/测试/右下角 X 不变。
 
+### 新增（https 面板通道，2026-10-24）
+
+- **下行回到「一个 RTT」**：隐藏 HTML 面板加载受信任的 `https://localhost:8792/bridge`，
+  页面同源 `fetch('/api/v1/*')` 拿到整条结果写入 `document.title`，游戏侧导航 + 读 title。
+  参考上游 BabelTower [`docs/btipc-https-v1.md`](https://github.com/c1375rick/BabelTower/blob/main/docs/btipc-https-v1.md)
+  的语义自行实现；详细说明见 [`docs/https-panel.md`](docs/https-panel.md)。
+  - `core/bridge_https.js`：8792 TLS 终结（独立进程），把 `/bridge` 与 `/api/v1/*` 原样代理回 8791；
+    证书缺失/口令错 → 退出码 3（不视为故障），上游不通 → 502 不退出。
+  - `scripts/gen_bridge_cert.ps1`：自签证书（CN=BabelTower-localhost，SAN 含 `localhost` /
+    `127.0.0.1` / `::1`，EKU serverAuth）+ `-Trust` 写 `CurrentUser\Root`（certutil）+ `-Untrust`。
+  - 游戏侧探针：开机 `op=ui` 拿桥声明的 `httpsPanel` 能力，1.2s 后导航一次 `op=health`；
+    判活 → 本会话走 https；判死 → **整局留在 BTIPC**（不发死请求）。
+  - 降级：硬失败（页面没加载 / 面板不可用 / 超长 payload 截断）把 job 原样交回 BTIPC 重做；
+    软失败（页面活了但慢）按原语义结算；连续 3 次硬失败 → 本会话放弃 https。
+  - 桥端 `op=ui` 增加 `httpsPanel` / `httpsPort`；`config.https`（enabled/port/pfx/passFile）
+    默认开启；证书不存在时桥只记一条 info，不启动子进程。
+- **BTIPC 位泵保留为兜底**：证书没装、Steam 没重启、探针判死、连续硬失败，任何一条都自动回到
+  BTIPC，不需要用户切换。
+
 ### 性能（BTIPC 提速 Phase 1，2026-10-24）
 
 - **桥端尾随改为 `fs.watch`**：`core/overlay.js` 不再用 800ms 固定轮询，改为 watch + 40ms 去抖，
@@ -32,6 +51,18 @@
   测试不再卡死，与路由本身无关。
 - **预估收益**：60B 译文端到端 ~5.7s → ~3.6s（-35%）。**需实车验证**：
   看 `logs/bridge.log` 的 `BTIPC RSP ... +Nms` 与游戏 `console.log` 的 `BTIPC: r=.. dt=..` / `DONE total=..`。
+
+### 文档 / 结论更正（2026-10-24）
+
+- **「HTML 面板 / CEF 已死」的结论作废**：那是 2026-10-01 只测 `http://` / `data:` / `file://`
+  三种 scheme 得出的过度概括。引擎的真拦点是**证书链**（`error:-202` = `ERR_CERT_AUTHORITY_INVALID`）；
+  上游 BabelTower 2026-10-15 已用「本机自签证书 + `CurrentUser\Root` + 完全重启 Steam」跑通
+  受信任 `https://localhost` 面板通道，下行 **<1s**（本版 BTIPC 位泵 2~6 秒）。
+- **本版仍未实现该通道**，延迟现状不变；移植清单见 [`docs/UNIMPLEMENTED.md`](docs/UNIMPLEMENTED.md)「一、6」。
+- 涉及文档：`AGENTS.md`（§4/§7）、`docs/architecture.md`（§8.1/§10）、`docs/btipc-v1.md`、
+  `docs/UNIMPLEMENTED.md`、`docs/btipc-speedup-plan.md`（C5）、`docs/translation-rethink.md`、
+  `docs/from-scratch-architectures.md`、`docs/update-2026-10-01-postmortem.md`、`安装使用说明.txt`；
+  `README.md` / `README_EN.md` 已由并行会话重写，重写版保留了该更正。
 
 ### 仍需实机验证
 
@@ -153,6 +184,8 @@
 
 - 游戏内翻译不再可用：`$.AsyncWebRequest` 调用即抛 `AsyncWebRequest has been removed.`；隐藏 HTML 面板 `SetURL` 不报错，但引擎不再为其创建浏览器实例。
 - 经一次性探针实测（`$` 的全部 29 个成员、15 个引擎命名空间、HTML 面板的 `http:` / `data:` / `file:` 三种协议），确认**游戏内不存在任何可用的入站通道**，「在游戏内显示译文」在架构上不可行。
+
+⚠️ **2026-10-24 更正**：上面第 1、2 条里「引擎不再为 HTML 面板创建浏览器实例 / 全部 HTTP 能力被移除」的表述过度概括了 —— 实测只覆盖 `http:` / `data:` / `file:` 三种 scheme。上游 BabelTower 2026-10-15 证实：引擎是按**证书链**拒绝未受信任页面（`error:-202` = `ERR_CERT_AUTHORITY_INVALID`），受信任的本机自签 https 面板通道可正常加载（下行 <1s）。本版仍未移植该通道，详见 Unreleased「文档 / 结论更正」与 `docs/architecture.md` §10。
 - 唯一可用的通道变为单向的 `游戏 → console.log`：mod 在聊天落档点输出 `[LCT-CHAT]` 单行 JSON，本地桥增量 tail 解析并翻译。
 
 ### 新增
