@@ -1,0 +1,17 @@
+# Build output and binaries (never commit)
+build/
+*.dll
+*.pdb
+*.obj
+*.ilk
+*.exp
+*.lib
+*.tlog
+*.idb
+
+# Visual Studio / CMake leftovers
+.vs/
+CMakeUserPresets.json
+
+# Local configuration may contain machine-specific paths; keep it out of git.
+native.json
