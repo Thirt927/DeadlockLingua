@@ -11,6 +11,11 @@ const https = require("https");
 const http = require("http");
 const glossary = require("../glossary");
 
+// Keep-alive: 每次翻译都重新握手的话,TCP+TLS 要 100~300ms,和短译文本身同量级。
+// 同一个 Agent 复用连接;http 分支(Ollama / 本地网关)同理。
+const httpsAgent = new https.Agent({ keepAlive: true, maxSockets: 4 });
+const httpAgent = new http.Agent({ keepAlive: true, maxSockets: 4 });
+
 const DEFAULT_BASE = "https://api.openai.com/v1";
 const DEFAULT_MODEL = "gpt-4o-mini";
 
@@ -39,6 +44,7 @@ function requestJson(url, apiKey, payload, timeoutMs) {
       url,
       {
         method: "POST",
+        agent: url.protocol === "http:" ? httpAgent : httpsAgent,
         headers: {
           "Content-Type": "application/json",
           "Authorization": "Bearer " + String(apiKey || ""),

@@ -7,6 +7,9 @@
 
 const https = require("https");
 
+// Keep-alive: 避免每条消息重付一次 TCP+TLS 握手(见 deepl.js 同注)。
+const agent = new https.Agent({ keepAlive: true, maxSockets: 4 });
+
 function mapLang(lang) {
   const main = String(lang || "zh-Hans").toLowerCase().split("-")[0];
   const map = {
@@ -51,6 +54,7 @@ function postJson(url, apiKey, payload, timeoutMs) {
       url,
       {
         method: "POST",
+        agent: agent,
         headers: {
           "Content-Type": "application/json",
           "User-Agent": "BabelTower/0.1",

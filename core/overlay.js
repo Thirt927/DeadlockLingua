@@ -37,7 +37,10 @@ function resolveConsoleLogPath(cfg) {
 // 因为每次启动游戏 console.log 会被清空重写,只靠 size 变化判断增量会从错位字节开始读。
 const FINGERPRINT_LEN = 256;
 const MAX_CHUNK = 4 * 1024 * 1024;
-const POLL_MS = 800;
+// tail 节奏:优先 fs.watch(近实时,实测 40ms 去抖即可),watch 不可用/漏事件时靠兜底轮询。
+// 固定 800ms 轮询会让每条消息平均白等 400ms,且 BTIPC 的 INITIAL_SHOT_DELAY 必须跟着放大。
+const FALLBACK_POLL_MS = 1500;
+const WATCH_DEBOUNCE_MS = 40;
 
 // 环形缓冲:悬浮窗只需要最近的消息;上限防止长时间运行内存膨胀
 const RING_LIMIT = 300;
@@ -66,6 +69,9 @@ let dedup = new Map();
 let queue = [];
 let translating = 0;
 let timer = null;
+let watcher = null;
+let watchPath = "";
+let debounceTimer = null;
 let deps = { log: function () {}, getConfig: function () { return null; }, translate: null, isGameRunning: null };
 let pageCache = "";
 let started = false;
@@ -361,12 +367,57 @@ function tailOnce() {
   }
 }
 
+// fs.watch 只能监听"当前解析到的那个文件";路径来自配置/自动探测,游戏没启动时文件不存在。
+// 所以每次 tick 都调一次 ensureWatcher():文件出现/换了路径/被游戏重写时自动重建。
+function closeWatcher() {
+  if (watcher) {
+    try { watcher.close(); } catch (e) {}
+  }
+  watcher = null;
+  watchPath = "";
+}
+
+function ensureWatcher() {
+  let file = "";
+  try { file = resolveConsoleLogPath(deps.getConfig()); } catch (e) { file = ""; }
+  if (!file) return;
+  if (watcher && watchPath === file) return;
+  closeWatcher();
+  try {
+    watcher = fs.watch(file, { persistent: false }, function (event) {
+      // rename = 文件被删除/替换/轮转。先释放,下一次 tick 会重新建;
+      // 期间靠兜底轮询,不会丢内容(tailOnce 自己会按 size/指纹从头重读)。
+      if (event === "rename") closeWatcher();
+      scheduleTick();
+    });
+    watchPath = file;
+    deps.log("info", "overlay: fs.watch " + file);
+  } catch (e) {
+    // 文件还不存在 / 平台不支持:静默退回兜底轮询,不要刷日志
+    watcher = null;
+    watchPath = "";
+  }
+}
+
+// watch 事件会成串到达(一次写入可能触发多个 change),40ms 去抖合并成一次 tail。
+function scheduleTick() {
+  if (debounceTimer) return;
+  debounceTimer = setTimeout(function () {
+    debounceTimer = null;
+    tick();
+  }, WATCH_DEBOUNCE_MS);
+  if (debounceTimer && typeof debounceTimer.unref === "function") debounceTimer.unref();
+}
+
 function tick() {
   try {
     tailOnce();
   } catch (e) {
     deps.log("warn", "overlay tail failed: " + ((e && e.message) || String(e)));
   }
+  try {
+    ensureWatcher();
+  } catch (e) {}
 }
 
 // ---------- 对外接口 ----------
@@ -404,7 +455,9 @@ function start(d) {
   try {
     tailOnce();
   } catch (e) {}
-  timer = setInterval(tick, POLL_MS);
+  ensureWatcher();
+  // 兜底:watch 漏事件(网络盘/杀软占用/文件被重写)时,最多 1.5s 也能追上
+  timer = setInterval(tick, FALLBACK_POLL_MS);
   if (timer && typeof timer.unref === "function") timer.unref();
   deps.log("info", "overlay: watching " + (resolveConsoleLogPath(deps.getConfig()) || "(auto-detect failed)") + " for " + CHAT_MARKER);
 }
@@ -412,6 +465,9 @@ function start(d) {
 function stop() {
   if (timer) clearInterval(timer);
   timer = null;
+  if (debounceTimer) clearTimeout(debounceTimer);
+  debounceTimer = null;
+  closeWatcher();
   started = false;
 }
 

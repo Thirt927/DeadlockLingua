@@ -82,6 +82,14 @@ async function main() {
     JSON.stringify(me));
   assert("chinese text skipped by translator (already target language)", translated.length === 1, "translated=" + JSON.stringify(translated));
 
+  // 阶段 1b:fs.watch 近实时 —— 追加后必须在 600ms 内被读到。
+  // 旧的 800ms 固定轮询做不到(平均 400ms、最坏 800ms),这条断言就是它退役的护栏。
+  const tAppend = Date.now();
+  fs.appendFileSync(logFile, gameChatLine({ o: 0, n: "Fast", c: "chat", h: "", t: "watch latency probe" }));
+  const seenFast = await waitFor(() => overlay.list(0).some((m) => m.sender === "Fast"), 2000);
+  const dtAppend = Date.now() - tAppend;
+  assert("fs.watch picks up a new line quickly (< 600ms)", seenFast && dtAppend < 600, "dt=" + dtAppend + "ms");
+
   // 阶段 2:增量读取不应重复投递已见过的行
   const before = overlay.latestSeq();
   fs.appendFileSync(logFile, "\n");

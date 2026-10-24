@@ -16,6 +16,23 @@
 - **`/tr` 面板改为三标签页**：常用 / 服务商 / 高级；面板 600×640，常用 5 项一屏放下，
   服务商字段不再折叠；行结构仍是「标签在上 + 控件在下」，底部保存/测试/右下角 X 不变。
 
+### 性能（BTIPC 提速 Phase 1，2026-10-24）
+
+- **桥端尾随改为 `fs.watch`**：`core/overlay.js` 不再用 800ms 固定轮询，改为 watch + 40ms 去抖，
+  另留 1.5s 兜底轮询（watch 漏事件/文件被重写时仍能追上）。单条消息平均少等 ~0.4s、最坏少等 0.8s。
+- **首拍等待 1.2s → 0.3s**（`INITIAL_SHOT_DELAY_MS`）：桥现在 ~50ms 就能读到 REQ 行，
+  不必再按 1s 轮询留余量；若 watch 失效退回轮询，前几轮全 0/BUSY 由「4 轮全 0 判 bridge_down」
+  与同轮幂等重投兜底。
+- **BUSY 退避 500ms → 180ms**：翻译未就绪时不该按一整轮的节奏退让。
+- **翻译服务商复用连接**：`openai` / `deepl` / `google` / `microsoft` 加 `keepAlive` Agent
+  （Bing 原本已有），省掉每条消息一次 TCP+TLS 握手（实测 100~300ms）。
+- **阶段计时**：桥端 `BTIPC RSP` 行补 `+Nms`（TRQ→RSP，即桥内翻译+编码耗时），
+  与游戏侧 `dt` / `DONE total` 对账用。
+- `tests/btipc/route.test.js` 桩掉 `child_process`：受限沙箱里 `tasklist` 被拒（EPERM）时
+  测试不再卡死，与路由本身无关。
+- **预估收益**：60B 译文端到端 ~5.7s → ~3.6s（-35%）。**需实车验证**：
+  看 `logs/bridge.log` 的 `BTIPC RSP ... +Nms` 与游戏 `console.log` 的 `BTIPC: r=.. dt=..` / `DONE total=..`。
+
 ### 仍需实机验证
 
 - `SetParent` 跨布局把面板挂到 ESC 根在游戏内是否稳定；入口在左栏的落点是否被其他菜单项遮挡。

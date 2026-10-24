@@ -6,6 +6,9 @@
 
 const https = require("https");
 
+// Keep-alive: 避免每条消息重付一次 TCP+TLS 握手(见 deepl.js 同注)。
+const agent = new https.Agent({ keepAlive: true, maxSockets: 4 });
+
 const DEFAULT_ENDPOINT = "https://api.cognitive.microsofttranslator.com";
 
 // 常见错误码 -> 人类可读提示(用于游戏内红字显示)
@@ -50,6 +53,7 @@ function postJson(url, apiKey, region, payload, timeoutMs) {
       url,
       {
         method: "POST",
+        agent: agent,
         headers: {
           "Content-Type": "application/json",
           "Ocp-Apim-Subscription-Key": String(apiKey || ""),

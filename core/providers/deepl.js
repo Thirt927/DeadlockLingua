@@ -9,6 +9,10 @@
 
 const https = require("https");
 
+// Keep-alive: 翻译是高频短请求,每次新建连接要付 TCP+TLS 握手(实测 100~300ms)。
+// 串行队列下这笔开销每条消息都要付一次,复用连接直接省掉。
+const agent = new https.Agent({ keepAlive: true, maxSockets: 4 });
+
 const DEFAULT_ENDPOINT = "https://api-free.deepl.com/v2/translate";
 
 function mapLang(lang) {
@@ -42,6 +46,7 @@ function postForm(url, fields, timeoutMs) {
       url,
       {
         method: "POST",
+        agent: agent,
         headers: {
           "Content-Type": "application/x-www-form-urlencoded",
           "Content-Length": Buffer.byteLength(body),

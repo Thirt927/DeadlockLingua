@@ -64,6 +64,16 @@ const coreDir = path.resolve("core");
 const sandbox = {
   require: (m) => {
     if (m === "http") return fakeHttp;
+    // 本套只验路由接线;bridge_server 加载时 startGameWatch() 会 execFile("tasklist"),
+    // 在受限沙箱/无桌面环境里 spawn 会被拒(EPERM)并把测试卡死。这里桩掉子进程即可,
+    // 与 /btipc/dl 路由本身无关。
+    if (m === "child_process") {
+      return {
+        execFile: (f, a, cb) => { if (typeof cb === "function") cb(new Error("stub"), "", ""); },
+        exec: () => {},
+        spawn: () => ({ on: () => {}, unref: () => {} }),
+      };
+    }
     if (m === "./btipc/transport") return stubTransport;
     if (m === "./overlay") return stubOverlay;
     if (m.startsWith("./") || m.startsWith("../")) m = path.join(coreDir, m);

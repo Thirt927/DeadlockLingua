@@ -250,8 +250,9 @@ IDLE → REQ_SENT(发 REQ 行 + 启动轮询 r=1)
 ```
 
 - 轮询面板:`BTIPCD0..127`
-- **首拍延迟 `INITIAL_SHOT_DELAY`**:桥 tail 轮询间隔 1s,REQ 行可能晚于首拍到达 →
-  首轮全 404 → 误触风暴。故延迟 1.2s 再 SHOT(实车校准值)。
+- **首拍延迟 `INITIAL_SHOT_DELAY`**:桥端 tail 已从固定 800ms 轮询改为 `fs.watch`(实测 ~50ms 读到
+  REQ 行),故首拍只留 300ms 余量。若 watch 失效退回 1.5s 兜底轮询,前几轮会全 0 / BUSY ——
+  由「连续 4 轮全 0 = `bridge_down`」与同轮幂等重投兜底,不会误判或丢帧。
 - 每帧服务日志(低频,供验收对账):
   `BTIPC: r=<r> seq=<s> len=<l> dt=<ms> <OK|RETRY|BUSY|END>` → 走 `console.log` tail
 
@@ -300,12 +301,12 @@ IDLE → REQ_SENT(发 REQ 行 + 启动轮询 r=1)
 | `T_HARD_MS` | 12000 | 单轮硬超时 |
 | `RETRY_MAX` | 3 | 同一帧重投上限 |
 | `CRC_DEAD` | 8 | 同帧累计 fail 超过即放弃 |
-| `BUSY_BACKOFF_MS` | 500 | BUSY 轮询节奏 |
+| `BUSY_BACKOFF_MS` | 180 | BUSY 轮询节奏(翻译 0.6~1s,500ms 会白等整轮) |
 | `REQ_MAX_PAYLOAD` | 680 B | 受整行 ≤1000 字符约束;680B = 68 帧 ≤ 128 |
 | `REQ_TIMEOUT_MS` | 30000 | 从 REQ 发出起算 |
 | `WINDOW_TTL_MS` | 60000 | 桥端无活动 GC |
 | `END_GC_MS` | 45000 | 末帧服务后保留(**必须 > 客户端最长重试跨度**) |
-| `INITIAL_SHOT_DELAY` | 1200 ms | 等桥 tail 读到 REQ 行 |
+| `INITIAL_SHOT_DELAY` | 300 ms | 等桥 tail(fs.watch)读到 REQ 行 |
 | `CRC16` | CCITT-FALSE | poly 0x1021 / init 0xFFFF |
 
 ---

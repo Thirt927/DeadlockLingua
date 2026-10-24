@@ -3899,8 +3899,11 @@ function injectTranslation(row, sig, text) {
     const STORM_ROUNDS = 4; // 风暴持续轮数
     const T_HARD_MS = 12000; // 单轮硬超时(兜底,正常永远走不到)
     const CRC_DEAD = 8; // 同一帧累计 fail 上限
-    const BUSY_BACKOFF_MS = 500;
-    const INITIAL_SHOT_DELAY_MS = 1200; // 等桥的 console.log tail(1s 间隔)读到 REQ 行
+    const BUSY_BACKOFF_MS = 180; // BUSY 轮询节奏:桥端翻译通常 0.6~1s,500ms 会白等掉一整轮
+    // 桥端 tail 已改 fs.watch(≈50ms 读到 REQ),首拍不必再等 1.2s。
+    // 若 watch 失效退回 1.5s 轮询,首轮会是全 0/BUSY —— 由 4 轮全 0 的 bridge_down 判据与
+    // 幂等重投兜底,不会误判也不会丢帧。
+    const INITIAL_SHOT_DELAY_MS = 300;
     const B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
     let panels = [];

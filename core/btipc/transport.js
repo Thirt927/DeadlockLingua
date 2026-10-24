@@ -137,6 +137,8 @@ function createTransport(deps) {
   }
 
   function accept(req) {
+    // 阶段计时:TRQ -> RSP 就是"桥内翻译 + 编码"耗时,和游戏侧 dt / DONE total 对账用
+    const t0 = Date.now();
     tables.put(req.win, req.id, req.payload);
     const text = req.payload.toString("utf8");
     const op = splitEnvelope(text).kind;
@@ -146,10 +148,11 @@ function createTransport(deps) {
         const s = out === null || out === undefined ? "" : String(out);
         tables.setText(req.win, s);
         log("info", "BTIPC RSP w=" + req.win + " frames=" + framer.encode(req.id, s).length +
-          " bytes=" + Buffer.byteLength(s, "utf8"));
+          " bytes=" + Buffer.byteLength(s, "utf8") + " +" + (Date.now() - t0) + "ms");
       })
       .catch(function (e) {
         const msg = (e && e.message) || String(e);
+        log("warn", "BTIPC resolve failed w=" + req.win + " +" + (Date.now() - t0) + "ms: " + msg);
         log("warn", "BTIPC resolve failed w=" + req.win + ": " + msg);
         // 降级:回原文(游戏侧表现为"未翻译",不会卡死)
         try {
