@@ -807,6 +807,7 @@
   - `logs/bridge.log` 里面板导航请求 `/bridge` 的**历史计数为 0**(全量扫描), 即 SetURL 从未真正发出过一次请求。
   - 该结论推翻了"面板不渲染所以没有浏览器"的假设 —— 把面板挪到常驻容器也不会有用。
   - 同一版本 `$.AsyncWebRequest` 调用即抛 `AsyncWebRequest has been removed.`, 且无相关 convar 可打开。
+  - ⚠️ **2026-10-24 更正**: 上面"两条通道全废"与"引擎不再为 HTML 面板创建浏览器实例"只对 http/data/file 成立。真因是证书链(上游 2026-10-15 实车: 受信任自签 https 可加载, 下行 <1s)。详见文末《2026-10-24 结论更正》。
 - **连锁现象**(被本次改动修正): 通道全废后 mod 判定桥离线, 触发 `bridge self-heal #N [blank]` 每 6s 刷日志 + 每 4s 一次重新导航的探针空转; 且用户进对局后第一次发消息会先空等一次出站超时(默认 15s)才发原文。
 - **改动文件**
   - `mod/panorama/scripts/lingua_chat.js`
@@ -959,7 +960,7 @@
   - 面板三段 `title` **全为空**: `http title=[]` / `data title=[]` / `file title=[]`。
   - 桥端 `logs/bridge.log` **零条 `/bridge load`** —— 游戏从未向桥发出过任何一个请求。
 - **改动文件**: `mod/panorama/scripts/lingua_chat.js`(新增 `probeInboundChannels()` 与 boot 中的一次性调度, 保留作为"未来引擎若恢复 CEF 就能立刻发现"的 canary); 游戏 addons 目录临时放入 `lctprobe.html` / `lctprobe_yes.png`(探针用, 不在 VPK 内)。
-- **结论(定论)**: 本版 Deadlock 下, **游戏内不存在任何可用的入站通道** —— 网络(AsyncWebRequest + HTML 面板 + CEF)、引擎命名空间、文件可见性, 三条路全部被硬证据封死。因此**"在游戏内显示译文"在架构上不可能**, 与渲染代码无关(渲染一直是好的)。游戏内翻译功能就此终止, 译文只由游戏外悬浮窗展示。
+- **结论(定论)**: 本版 Deadlock 下, **游戏内不存在任何可用的入站通道** —— 网络(AsyncWebRequest + HTML 面板 + CEF)、引擎命名空间、文件可见性, 三条路全部被硬证据封死。因此**"在游戏内显示译文"在架构上不可能**, 与渲染代码无关(渲染一直是好的)。游戏内翻译功能就此终止, 译文只由游戏外悬浮窗展示。 ⚠️ **2026-10-24 更正: 本条「定论」只对 http/data/file 与「JS 主动发起」类入口成立; 受信任 https 面板通道已被上游 2026-10-15 实车跑通(下行 <1s), 本仓库 2.1.0 未移植。见文末《2026-10-24 结论更正》。**
 - **验证方式**: 已重建 VPK(8 个资源全 `ok`)并部署 `addons\pak22_dir.vpk`(2026/10/1 21:35:21, 302526 字节); 游戏 21:36 启动后探针输出如上, `deadlock.exe` 正常运行、聊天采集(`rowdiag`)正常。
 - **仍需用户测试**: 无(这是诊断, 不改功能)。顺带确认了第四十五轮的修复: 游戏内聊天行不再出现红色 `翻译失败: bridge_panel_unavailable`。
 - **已知限制**: 探针会随每次启动跑一次(约 6 秒、几条 diag 日志、建一个 2x2 隐藏面板后删除), 属刻意保留的 canary; 若要彻底去掉, 删除 `probeInboundChannels()` 及其 boot 调度即可。addons 目录里的 `lctprobe.html` / `lctprobe_yes.png` 可随手删掉(删掉后 `BImageFileExists` 那段的结果就只剩"两个都是 false", 但仍能反映文件不可见这一点)。
@@ -1925,3 +1926,53 @@ ode -e "JSON.parse(...)" 通过)。
   - 服务商页的 Key/端点/回退字段是否按服务商显隐；
   - ESC 入口打开的面板里标签是否同样可用；
   - 按住 Tab 时标签按钮/控件的焦点顺序是否顺手；若常用页超出一屏，优先收 row padding。
+
+## 2026-10-24: 结论更正 —— 「HTML 面板 / CEF 已死」不成立(受信任 https 可加载)
+
+- **背景**: 用户 2026-10-24 指出上游 BabelTower 已有 https 面板通道。复核上游仓库(HEAD `ec274649`)后确认: 本项目自 2026-10-01 起把「面板 http/data/file 都不加载」上升为「引擎不再为 HTML 面板创建浏览器实例」, 并写进 `AGENTS.md` / 多份 docs 的硬结论, 导致后续所有轮次只在窄带 BTIPC 上做协议微调(3~27s)。**是能力结论错了, 不是引擎删了 CEF。**
+- **更正内容(上游证据)**: 上游 BabelTower 2026-10-15 实车定论 —— 引擎在 LoadPage 之前按**证书链**拒绝未受信任页面(实机 neterror `error:-202` = `ERR_CERT_AUTHORITY_INVALID`); 本机自签证书(CN=BabelTower-localhost, SAN=`DNS:localhost` + `IP:127.0.0.1` + `IP:::1`, EKU=serverAuth)加入 `CurrentUser\Root` 并**完全退出重启 Steam**(仅重启游戏无效)后, 隐藏 HTML 面板可加载 `https://localhost:8792`, 页面同源 fetch 取整条译文写 `document.title` 回读, 下行 **<1s**(同局对照: 位泵 3.0–27.4s)。上游实现: `core/bridge_https.js`(8792 TLS 终结, 独立进程) / `scripts/gen_bridge_cert.ps1` / `docs/btipc-https-v1.md`。本项目实现的是 BTIPC 位信道、不合并上游代码, 但**能力事实**必须按上游实车结论更新。
+- **为什么当时会误判**: 第四十六轮探针只测了 `http://` / `data:` / `file://` 三种 scheme(https 从未进矩阵), 而「SetURL 不报错 + title 空 + 桥端计数 0」这组观测与「不建浏览器」和「建了但拒绝加载」两种解释完全相容; 当时按「Valve 删了 CEF」的先验选了错的那个。同类的「没有证据 = 证据不存在」在 10-01→10-09 已经犯过一次。
+- **改动文件(文档 + 代码注释;行为零变化)**:
+  - `AGENTS.md`: §4 通信通道条重写 + §4 端点注记 + §7 新增「排除类结论的记账规则」+ 顺手把 BTIPC「尚未实车验收」同步为已实车验收
+  - `docs/architecture.md`: §8.1 修正 + 新增 §10 更正
+  - `docs/btipc-v1.md` / `docs/UNIMPLEMENTED.md`(前提 + 新增「一、6 移植待决策」) / `docs/btipc-speedup-plan.md`(C5 前提作废) / `docs/translation-rethink.md` / `docs/from-scratch-architectures.md`: 前提句或「没有更宽管子」断言更正
+  - `docs/update-2026-10-01-postmortem.md`: L3 标题/正文/证据索引加更正注
+  - `README.md` / `安装使用说明.txt`: 用户可见口径改为「面板受证书链限制; 本版未实现该通道」(README 随后由**并行会话**重写, 重写版 L193 的 NOTE 保留了该更正并补了证书链真因; `README_EN.md` 同步)
+  - `CHANGELOG.md`: Unreleased 增加「结论更正」小节
+  - `mod/panorama/scripts/lingua_chat.js` / `core/overlay.js`: 只改注释里"面板/CEF 已死"的表述(3 处 + 1 处), 无任何代码逻辑改动; `node --check` 与 `lingua_chat_simtest.js` 已验证
+  - 注: `native/docs/DESIGN.md` 的同一句断言已随**并行会话**提交到 `feat/native-mod` 分支(commit `2e22fc4`), main 工作树不含该文件, 故不在本次改动清单里
+- **不变的部分(别误读)**: 本仓库 2.1.0 **未移植** https 面板通道, 当前实现仍只有 BTIPC; `core/btipc/*` 冻结面、帧格式、护栏一概不动; 「2~6 秒」仍是本版实际延迟。
+- **验证方式**: 文档级更正 + 仅注释的代码改动: `node --check mod/panorama/scripts/lingua_chat.js`、`node --check core/overlay.js` 通过; `scripts/lingua_chat_simtest.js` 全绿; 行尾/编码保持(CRLF 为主、`安装使用说明.txt` 保留 BOM); 无需重建 VPK(注释不影响资源编译与行为)。
+- **并发编辑**: 本次会话期间另一会话重写了 `README.md` / `README_EN.md`(新 README 已保留本更正)、并在 `feat/native-mod` 分支提交了 `native/`; 本条目的其余改动都落在 main 工作树, 未被覆盖。
+- **仍需用户测试/决策**: ①是否移植 https 面板通道(需动当前用户信任库, 可按 `-SkipCert` 跳过); ②移植前先做本机两臂探针复核(同进程 http+https、记录 `tlsClientError`、先确认监听再采信否定), 不要只凭文档宣布可用。
+- **待办**: 本机复核实验 → 成立则移植 `bridge_https.js` + 证书脚本 + mod 侧开机探针/三级降级 + 自启脚本 + 护栏测试。
+
+## 2026-10-24: README 重写(去图 + 精简目录)
+
+- **背景**: 用户要求「重写 readme,去掉图片,简化目录」。原 README 依赖 `assets/readme/` 的 10 张手工 SVG(hero、5 枚徽章、3 条章节标题、架构图),目录 16 项,且部分数据已过时。
+- **改动文件**: `README.md`、`README_EN.md`。
+- **改动内容**:
+  - 去掉全部 `<img>` 与 HTML 块,顶部改为纯文本元信息行(许可证 / 版本 / 平台 / 运行时),语言切换改为纯链接。
+  - 目录 16 项 → 7 项(简介 / 安装 / 使用 / 配置与接口 / 技术说明 / 常见问题 / 开发):API 与配置合并,工作原理、术语表、日志、目录结构合并进「技术说明」。
+  - 数据修正:英雄数 46 → 42(对齐 `core/glossary.js`);`overlay.enabled` 默认值 true → false(对齐 `core/config.js`);删除未实现却写在表里的 `/api/v1/quickchat`、`/api/v1/gamenames`,补上 `/settings`;`StartDeadlock.bat` 说明改为「默认只启桥,`-game` 才拉游戏」(原文误称它会自动带 `-condebug`)。
+  - `README_EN.md` 同步重写,并修掉「设置只在悬浮窗」的过时段落。
+  - 行尾统一 CRLF,UTF-8 无 BOM。
+- **验证方式**: Node 脚本核对两份 README:无 `<img>` / `<p>` / `<div>` / `<details>` / `assets/readme` 引用;CRLF 行尾;BOM 无;TOC 锚点与标题逐项对齐;配置默认值、英雄/装备数量与 `core/config.js` / `core/glossary.js` 实际输出核对一致。未改代码,无需重建 VPK。
+- **仍需用户测试**: 无(纯文档)。
+
+## 2026-10-24: BTIPC 提速 Phase 1(尾随 / 首拍 / BUSY / 连接复用)
+
+- **优化主题**: 按 `docs/btipc-speedup-plan.md` 的 A 类做低风险提速, 不动协议帧格式。
+- **改动文件**:
+  - `core/overlay.js`: 800ms 固定轮询 -> `fs.watch` + 40ms 去抖, 保留 1.5s 兜底轮询; `stop()` 释放 watcher。
+  - `mod/panorama/scripts/lingua_chat.js`: `INITIAL_SHOT_DELAY_MS` 1200->300; `BUSY_BACKOFF_MS` 500->180。
+  - `core/providers/{openai,deepl,google,microsoft}.js`: keepAlive Agent(Bing 原本已有)。
+  - `core/btipc/transport.js`: `BTIPC RSP` 行补 `+Nms`(TRQ->RSP 耗时), 供与游戏侧 dt/DONE 对账。
+  - `scripts/overlay_test.js`: 新增"追加后 <600ms 读到"断言; `tests/btipc/route.test.js`: 桩掉 `child_process`。
+  - `docs/btipc-v1.md`: 参数表同步(180 / 300)。
+- **原因/效果**: 尾随 + 首拍是每条消息的固定等待(合计约 1.8s); BUSY 按整轮白等; 服务商每条重付 TCP+TLS。
+  预估 60B 译文端到端 5.7s -> ~3.6s(-35%), 实际以实车数据为准。
+- **验证方式**: `node --check` 8 个改动文件通过; `scripts/overlay_test.js` PASS 14/0;
+  `tests/btipc/*` 六套全 PASS; `scripts/lingua_chat_simtest.js` PASS 58/0
+  (模拟器需本机桥在 8791, 已用 `--no-watch --no-overlay` 启动)。
+- **是否需用户测试**: 是 —— 实车一局, 对比 `logs/bridge.log` 的 `BTIPC RSP ... +Nms`、

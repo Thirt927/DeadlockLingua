@@ -137,7 +137,8 @@
 
 - **隐藏 HTML 面板 + 轮询 `panel.title`**:用隐藏 HTML 面板加载 `/bridge` 页面,页面内 JS
   同源调用受限 API,再把结果写回 `document.title`,Panorama 轮询读回。2026-10-01 更新后
-  彻底失效(面板不再创建浏览器实例,桥端 `/bridge` 请求计数为 0)。
+  对 `http://` / `data:` / `file://` 均不加载(桥端 `/bridge` 请求计数为 0)。
+  ⚠️ 旧表述"面板不再创建浏览器实例"已于 2026-10-24 更正,见第 10 节。
 - **`$.AsyncWebRequest` 直连**:同版本调用即同步抛错,已移除。
 
 ### 8.2 游戏外悬浮窗(v2.0.x 主路径,自 v2.0.1 起 legacy)
@@ -180,3 +181,20 @@ v2.0.0 写下的结论「游戏内不存在任何可用的入站通道,在游戏
 
 - 上行仍复用现成通道:`console.log` 结构化单行,**硬依赖 `-condebug`**。
 - 完整规格(帧格式 / 轮次状态机 / CRC / 重试 / 风暴模式 / 参数表)见 **[btipc-v1.md](btipc-v1.md)**。
+
+## 10. 更正(2026-10-24):面板通道"彻底失效"只对 http/data/file 成立
+
+§8.1 与 §9 的旧口径("引擎不再为 HTML 面板创建浏览器实例")**不成立**。上游 BabelTower
+2026-10-15 实车证实:引擎在 LoadPage 之前按**证书链**拒绝未受信任的页面(实机 neterror
+`error:-202` = `ERR_CERT_AUTHORITY_INVALID`);把本机自签证书(CN=BabelTower-localhost,
+SAN=`DNS:localhost` + `IP:127.0.0.1` + `IP:::1`)写入 `CurrentUser\Root` 并**完全退出重启
+Steam** 后,隐藏 HTML 面板可加载 `https://localhost:8792`,由页面同源 fetch 取整条译文再写
+`document.title` 回读 —— 下行 **<1s**(位泵 3.0–27.4s)。
+
+桥侧为此需要:独立 TLS 终结进程(8792 → 转发 8791;证书缺失 `exit(3)`,不得连带 BTIPC)、
+证书生成/信任/撤销脚本、mod 侧开机探针(1.2s 一次,判死整局退 BTIPC)与三级降级。
+
+**本仓库(2.1.0)未移植**;移植前请按上游 `docs/btipc-https-v1.md` §4 的步骤在本机复核
+(建议先做同进程 http/https 两臂探针,记录 `tlsClientError`,并确认监听成立再采信否定),
+不要只凭本文档宣布可用。上游证据链:该文档 §2.4(结论修正史)、§4.1(Steam 信任缓存双向
+实测)、§8.1(同局 1 秒闭环)。https://github.com/c1375rick/BabelTower/blob/main/docs/btipc-https-v1.md

@@ -16,7 +16,7 @@
 
 10/1 之后，「有来源」只剩四条合法路径：
 
-1. **Panorama JS API** —— 已死（`AsyncWebRequest` / CEF 都没了）；
+1. **Panorama JS API** —— `AsyncWebRequest` 已删;HTML 面板只差"受信任的本机 https";上游 2026-10-15 实车跑通(下行 <1s),本仓库未移植(见 `docs/architecture.md` §10);
 2. **资源加载** —— 1 bit/次，就是现在的 BTIPC 位信道；
 3. **引擎自己的本地化管线** —— 免费、无限带宽，但只能用于**固定字符串**（快捷聊天、Ping、系统提示）；
 4. **本机内存（原生 DLL）** —— 无限带宽、零延迟，但踩反作弊。

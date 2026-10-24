@@ -33,6 +33,18 @@
 - **预估收益**：60B 译文端到端 ~5.7s → ~3.6s（-35%）。**需实车验证**：
   看 `logs/bridge.log` 的 `BTIPC RSP ... +Nms` 与游戏 `console.log` 的 `BTIPC: r=.. dt=..` / `DONE total=..`。
 
+### 文档 / 结论更正（2026-10-24）
+
+- **「HTML 面板 / CEF 已死」的结论作废**：那是 2026-10-01 只测 `http://` / `data:` / `file://`
+  三种 scheme 得出的过度概括。引擎的真拦点是**证书链**（`error:-202` = `ERR_CERT_AUTHORITY_INVALID`）；
+  上游 BabelTower 2026-10-15 已用「本机自签证书 + `CurrentUser\Root` + 完全重启 Steam」跑通
+  受信任 `https://localhost` 面板通道，下行 **<1s**（本版 BTIPC 位泵 2~6 秒）。
+- **本版仍未实现该通道**，延迟现状不变；移植清单见 [`docs/UNIMPLEMENTED.md`](docs/UNIMPLEMENTED.md)「一、6」。
+- 涉及文档：`AGENTS.md`（§4/§7）、`docs/architecture.md`（§8.1/§10）、`docs/btipc-v1.md`、
+  `docs/UNIMPLEMENTED.md`、`docs/btipc-speedup-plan.md`（C5）、`docs/translation-rethink.md`、
+  `docs/from-scratch-architectures.md`、`docs/update-2026-10-01-postmortem.md`、`安装使用说明.txt`；
+  `README.md` / `README_EN.md` 已由并行会话重写，重写版保留了该更正。
+
 ### 仍需实机验证
 
 - `SetParent` 跨布局把面板挂到 ESC 根在游戏内是否稳定；入口在左栏的落点是否被其他菜单项遮挡。
@@ -153,6 +165,8 @@
 
 - 游戏内翻译不再可用：`$.AsyncWebRequest` 调用即抛 `AsyncWebRequest has been removed.`；隐藏 HTML 面板 `SetURL` 不报错，但引擎不再为其创建浏览器实例。
 - 经一次性探针实测（`$` 的全部 29 个成员、15 个引擎命名空间、HTML 面板的 `http:` / `data:` / `file:` 三种协议），确认**游戏内不存在任何可用的入站通道**，「在游戏内显示译文」在架构上不可行。
+
+⚠️ **2026-10-24 更正**：上面第 1、2 条里「引擎不再为 HTML 面板创建浏览器实例 / 全部 HTTP 能力被移除」的表述过度概括了 —— 实测只覆盖 `http:` / `data:` / `file:` 三种 scheme。上游 BabelTower 2026-10-15 证实：引擎是按**证书链**拒绝未受信任页面（`error:-202` = `ERR_CERT_AUTHORITY_INVALID`），受信任的本机自签 https 面板通道可正常加载（下行 <1s）。本版仍未移植该通道，详见 Unreleased「文档 / 结论更正」与 `docs/architecture.md` §10。
 - 唯一可用的通道变为单向的 `游戏 → console.log`：mod 在聊天落档点输出 `[LCT-CHAT]` 单行 JSON，本地桥增量 tail 解析并翻译。
 
 ### 新增

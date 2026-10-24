@@ -3163,9 +3163,9 @@ function resolveSteamId(record) {
   }
 
   // ================= 悬浮窗出站通道(console.log) =================
-  // 2026/10/01 的 Deadlock 更新移除了 Panorama 的全部 HTTP 能力
-  // (AsyncWebRequest 调用即抛错、HTML 面板不再创建浏览器实例),游戏内已不可能
-  // 再收发网络请求。唯一活着的出向通道是 游戏 -> console.log:这里把每条最终落档的
+  // 2026/10/01 的 Deadlock 更新移除了 `$.AsyncWebRequest`(调用即抛错);HTML 面板对 http/data/file
+  // 不加载(2026-10-24 更正:真因是证书链,受信任 https 可加载,本版未实现——见 docs/architecture.md §10)。
+  // 游戏内发请求因此不可用;唯一活着的出向通道是 游戏 -> console.log:这里把每条最终落档的
   // 聊天(已去重、已解析 sender)打一行带标记的 JSON,本地桥增量 tail 该文件,
   // 翻译后推给游戏外的悬浮窗显示。
   // 注意:payload 用 JSON.stringify 保证单行(换行会被转义),桥端按标记切分后直接 JSON.parse。
@@ -3624,13 +3624,16 @@ function injectTranslation(row, sig, text) {
 
   // HTML 桥面板:必须在 chat.xml 里用 <HTML id="LCTBridgePanel"> 声明,
   // 这里只做查找;运行时 $.CreatePanel("HTML",...) 不会得到可用的 HTML 面板。
-  // 2026/10/01 Deadlock 更新后这条通道被引擎彻底废掉,实测结论:
-  //   - 面板确实会被渲染(对局中实测布局 3x3,不再是 0x0),但引擎不再为 HTML 面板
-  //     创建浏览器实例:SetURL 不报错、panel.title 永远 undefined;
+  // 2026/10/01 Deadlock 更新后这条通道在本版不可用,实测结论:
+  //   - 面板确实会被渲染(对局中实测布局 3x3,不再是 0x0),但 SetURL 到 http/data/file
+  //     都不加载:panel.title 永远 undefined;⚠ 2026-10-24 更正:真因是证书链拒绝
+  //     (error:-202 = ERR_CERT_AUTHORITY_INVALID),受信任的本机自签 https 可加载
+  //     (上游 BabelTower 2026-10-15 实车,下行 <1s;本版未实现,见 architecture.md §10);
   //   - 桥端 logs/bridge.log 里面板导航请求 /bridge 的历史计数为 0;
   //   - 同版本 $.AsyncWebRequest 调用即抛 "AsyncWebRequest has been removed."
-  // 即游戏侧已完全丧失 HTTP 能力。这里直接禁用面板通道,让"发消息"不再空等超时,
-  // 而是立刻按原文发送;等引擎恢复该能力时把开关改回 true 即可。
+  // 本版因此直接禁用面板通道,让"发消息"不再空等超时,而是立刻按原文发送;
+  // 若要实现 https 面板通道,不能只把开关改回 true —— 还需桥侧 TLS 终结 + 证书信任,
+  // 见 docs/UNIMPLEMENTED.md「一、6」。
   const PANEL_CHANNEL_ENABLED = false;
 
   function ensurePanel() {
@@ -4475,8 +4478,9 @@ function injectTranslation(row, sig, text) {
       }
     }
     // 唯一通道:BTIPC。
-    // 2026/10/01 的更新之后,AsyncWebRequest 调用即抛、HTML 面板也不再创建浏览器实例,
-    // ② 直连与 ③ 面板导航两条老通道都已失效(它们的实现仍留在文件里,但不再参与分发)。
+    // 2026/10/01 之后 AsyncWebRequest 调用即抛;面板导航对 http/data/file 不加载
+    // (2026-10-24 更正:真因是证书链,受信任 https 可加载,本版未实现——见 docs/architecture.md §10);
+    // ② 直连与 ③ 面板导航两条老通道在本版都不可用(实现仍留在文件里,但不再参与分发)。
     dispatchViaBtipc(job);
   }
 
@@ -4758,10 +4762,10 @@ function injectTranslation(row, sig, text) {
     }
   }
 
-  // 通道不存在类错误:本版游戏(2026-10-01)移除了 Panorama 的全部 HTTP 能力,
-  // 游戏内翻译已经不可能成功。这类失败对**每一行**聊天都会发生,再在行上挂
-  // "翻译失败: xxx" 只是刷屏 —— 译文现在由游戏外的悬浮窗显示, 状态栏也已一次性
-  // 提示过通道问题(warnBridgeOffline)。
+  // 通道不存在类错误:本版游戏(2026-10-01)移除了 $.AsyncWebRequest、面板对 http 不加载
+  // (2026-10-24 更正:真因是证书链,受信任 https 可加载,本版未实现——见 docs/architecture.md §10),
+  // 所以这类失败对**每一行**聊天都会发生,再在行上挂"翻译失败: xxx"只是刷屏;
+  // 译文由 BTIPC/悬浮窗显示, 状态栏也已一次性提示过通道问题(warnBridgeOffline)。
   const CHANNEL_GONE_ERRORS = [
     "bridge_panel_unavailable",
     "bridge_offline",

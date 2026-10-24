@@ -1,10 +1,11 @@
 # 未实现功能与待优化项(UNIMPLEMENTED & ROADMAP)
 
 > 本文件记录当前版本尚未完成/明确不做/待验证的功能与优化方向,便于后续迭代对照。
-> 现状前提(**2026-10-09 更新**):游戏 2026-10-01 的更新移除了 Panorama 的 HTTP 能力
-> (`AsyncWebRequest` / 面板 `SetURL` / CEF),经这些通道收发数据已不可能。
+> 现状前提(**2026-10-09 更新;2026-10-24 更正「面板已死」的结论**):游戏 2026-10-01 的更新
+> 移除了 `$.AsyncWebRequest`;隐藏面板对 `http://` / `data:` / `file://` 均不加载,但真因是
+> 证书链(受信任 https 可加载,上游已实车,见「一、6」),**不是引擎删了 CEF**。
 > 但**入站并非不可能** —— 上游 BabelTower 用 `<Image>` 面板加载状态 + `ImageLoaded` 事件
-> 做出了 1 bit 入站通道(BTIPC),本仓库将按该规格自行实现,以恢复游戏内译文显示(见「一、5」)。
+> 做出了 1 bit 入站通道(BTIPC),本仓库已按该规格自行实现(见「一、5」)。
 > v2.1.0(2026-10-09)起译文主显示路径为**游戏内**(BTIPC 双向信道,已落地并实车验收);
 > 游戏外悬浮窗自 v2.0.1 起归档为 legacy(代码保留可用),出站发消息也可走剪贴板路线。
 > 详见 docs/architecture.md 第 9 节。
@@ -47,6 +48,13 @@
 - **已知坑(来自上游实车)**:同 `r` 重投的 URL 必须变化(否则撞引擎缓存不触发 `ImageLoaded`);
   桥端窗口 GC 必须晚于客户端最长重试跨度;同轮位到达乱序,须按面板 id 定位位值而非到达序;
   存在迟到整轮重放,须按 `(id, round)` 幂等去重。
+
+### 6. https 面板通道(低延迟下行)未移植(2026-10-24,待决策)
+- **事实更正**:本仓库此前把"面板对 http/data/file 不加载"写成"引擎不再为 HTML 面板创建浏览器实例 / 面板已死",**不成立**。上游 BabelTower 2026-10-15 实车证实:引擎在 LoadPage 之前按**证书链**拒绝(`error:-202` = `ERR_CERT_AUTHORITY_INVALID`);本机自签证书(CN=BabelTower-localhost,SAN=`DNS:localhost` + `IP:127.0.0.1` + `IP:::1`)加入 `CurrentUser\Root` 并**完全退出重启 Steam** 后,隐藏面板可加载 `https://localhost:8792`,页面同源 fetch 取整条译文写 `document.title`,下行 **<1s**(位泵 3~27s)。证据/步骤见 https://github.com/c1375rick/BabelTower/blob/main/docs/btipc-https-v1.md。
+- **本仓库现状**:2.1.0 **未实现**——`core/` 无 `bridge_https.js`、`scripts/` 无 `gen_bridge_cert.ps1`、mod 无 https 探针。当前延迟仍是 2~6 秒,但**这不是引擎上限**。
+- **移植清单**:①桥侧独立 TLS 终结进程(8792 → 转发 8791;证书缺失 `exit(3)`,不得连带 BTIPC);②证书脚本(生成/信任/撤销,`certutil -user`,SAN 必须带 IP);③mod 侧开机探针(1.2s 一次,判死整局退 BTIPC)+ 三级降级;④自启脚本拉起第二个进程;⑤护栏测试(Origin 白名单含 https 回环源、证书缺失降级、桥只允许一处 listen)。
+- **安全边界**:需往**当前用户**根证书库写一张自签证书(SAN 仅 localhost/127.0.0.1/::1,冒充不了公网域名);安装时必须显式征求同意,并提供 `-SkipCert` / `-Untrust`。
+- **前置**:移植前先在本机做一次两臂探针复核(同进程 http + https、记录 `tlsClientError`、先确认监听成立再采信否定)——上游结论早于当前游戏版本。
 
 ## 二、已实现优化(摘要)
 
