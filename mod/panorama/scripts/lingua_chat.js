@@ -191,6 +191,7 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
   const BRIDGE_ALIVE_SECONDS = 1.5; // 桥页面存活标记的等待上限
   const RETRY_LIMIT = 2; // 每条消息最多尝试次数(含首次)
   const RETRY_DELAY_SECONDS = 0.4;
+  const BUSY_RETRY_LIMIT = 20; // BTIPC 单槽忙时的短重排上限(不丢弃消息)
   const OUTGOING_TIMEOUT_MS = 30000; // 出站翻译超时兜底值:设置面板未配"超时(ms)"时使用。超时则按原文发送,避免卡住重复按键;计时从任务开始处理算起(见 dispatchJob)
   const CACHE_LIMIT = 300;
   const SEEN_LIMIT = 500;
@@ -228,6 +229,8 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
     bootLogged: false,
     seen: new Set(), // 消息签名去重
     cache: new Map(), // 签名 -> { translation }
+    textCache: new Map(), // 目标语言 + 原文 -> { translation }(跨 HUD/普通行复用)
+    pendingText: new Map(), // 同一原文的在途任务别名(避免 HUD/普通行重复请求)
     queue: [], // 待翻译任务
     activeRequests: 0,
     requestSeq: 0,
@@ -1630,6 +1633,8 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
   // 关闭时挂回原聊天布局;ESC 菜单关闭时由 pollSteamIdRoster 兜底恢复。
   const ESC_SETTINGS_BUTTON_ID = "LCTSettingsMenuButton";
   let escSettingsButtonLogged = false;
+  let escSubDumped = false;
+  let escOrderLogged = false;
   let escHostParent = null;   // 面板原来的父节点(聊天布局根)
   let escHostedPanel = null;  // 当前挂到 ESC 的面板实例
   let escBackdrop = null;     // ESC 里的遮罩(挡住 EscapeBackground 的 resume 点击)
@@ -1704,44 +1709,283 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
     diagLog("escopen", "PANORAMA: settings hosted in ESC root");
   }
 
+  // 读面板 id / 文本:id 属性在这版引擎上不一定挂在 .id 上,两个来源都试
+  function panelIdOf(p) {
+    let id = "";
+    try { id = String(p.id || ""); } catch (e) {}
+    if (!id) { try { id = String(p.GetAttributeString("id") || ""); } catch (e) {} }
+    return id;
+  }
+
+  function panelTextOf(p) {
+    let tx = "";
+    try { tx = String(p.text || ""); } catch (e) {}
+    if (!tx) { try { tx = String(p.GetAttributeString("text") || ""); } catch (e) {} }
+    return tx;
+  }
+
+  // 一次性把 ESC 子树压成一行日志(路径:id:类型:文本),用于核对真实行结构
+  function describePanelTree(root, maxNodes) {
+    const out = [];
+    const stack = [{ p: root, path: "" }];
+    let visited = 0;
+    while (stack.length > 0 && visited < maxNodes) {
+      const item = stack.pop();
+      const p = item.p;
+      if (!isValid(p)) continue;
+      visited += 1;
+      const id = panelIdOf(p);
+      let type = "";
+      try { type = String(p.paneltype || ""); } catch (e) {}
+      let tx = panelTextOf(p);
+      if (tx.length > 12) tx = tx.slice(0, 12);
+      if (id || tx) out.push(item.path + ":" + id + ":" + type + (tx ? ":" + tx : ""));
+      const n = childCount(p);
+      for (let i = n - 1; i >= 0; i -= 1) stack.push({ p: childAt(p, i), path: item.path + "." + i });
+    }
+    return out.join(";");
+  }
+
+  // 沿父链爬到 ESC 布局根:子面板上的 FindChildTraverse 在本作里不可靠
+  // (日志一直是 anchor=none),从根上查才稳定。
+  function findEscapeLayoutRoot(escapeRoot) {
+    let root = escapeRoot;
+    let guard = 0;
+    while (guard < 40 && isValid(root)) {
+      let parent = null;
+      try { parent = root.GetParent ? root.GetParent() : null; } catch (e) {}
+      if (!isValid(parent)) break;
+      root = parent;
+      guard += 1;
+    }
+    return root;
+  }
+
+  // 手动 DFS 按 id 找面板(id 忽略大小写),作为 FindChildTraverse 失效时的兜底
+  function findPanelByIdWalk(scope, wanted, maxNodes) {
+    if (!isValid(scope)) return null;
+    const target = String(wanted || "").toLowerCase();
+    if (!target) return null;
+    const stack = [scope];
+    let visited = 0;
+    const limit = Math.max(100, maxNodes || 3000);
+    while (stack.length > 0 && visited < limit) {
+      const p = stack.pop();
+      if (!isValid(p)) continue;
+      visited += 1;
+      const id = panelIdOf(p);
+      if (id && id.toLowerCase() === target) return p;
+      const n = childCount(p);
+      for (let i = n - 1; i >= 0; i -= 1) stack.push(childAt(p, i));
+    }
+    return null;
+  }
+
+  // QOL 的 ESC 设置入口就挂在原生 #SubOptions 里(玩家反馈 / 设置 那组小行),
+  // 这里照做:优先 #SubOptions 作宿主,尽量排在 #quit 之前。
+  function findEscapeSubOptions(escapeRoot) {
+    let sub = null;
+    try { sub = findChild(escapeRoot, "SubOptions"); } catch (e) {}
+    if (isValid(sub)) return sub;
+    const top = findEscapeLayoutRoot(escapeRoot);
+    try { sub = findChild(top, "SubOptions"); } catch (e) {}
+    if (isValid(sub)) return sub;
+    sub = findPanelByIdWalk(top, "SubOptions", 3000);
+    if (isValid(sub)) return sub;
+    return findPanelByIdWalk(escapeRoot, "SubOptions", 2000);
+  }
+
+  // 原生「设置」行作锚点:入口插在「玩家反馈」与「设置」之间,即 QOL 的位置
+  function findEscapeRowAnchor(sub) {
+    let settings = null;
+    try { settings = findChild(sub, "Settings"); } catch (e) {}
+    if (!isValid(settings)) settings = findPanelByIdWalk(sub, "Settings", 400);
+    if (!isValid(settings)) {
+      // 文本兜底:QOL 布局可能改了 id,直接找「设置 / Settings」标签
+      const stack = [sub];
+      let visited = 0;
+      while (stack.length > 0 && visited < 400) {
+        const p = stack.pop();
+        if (!isValid(p)) continue;
+        visited += 1;
+        const low = panelTextOf(p).trim().toLowerCase();
+        if (low === "设置" || low === "settings") { settings = p; break; }
+        const n = childCount(p);
+        for (let i = n - 1; i >= 0; i -= 1) stack.push(childAt(p, i));
+      }
+    }
+    if (!isValid(settings)) return null;
+    // 沿父链上爬到 SubOptions 的直接子节点(即整行),避免把入口塞进按钮内部
+    let node = settings;
+    let cursor = settings;
+    let guard = 0;
+    while (guard < 8 && isValid(cursor)) {
+      guard += 1;
+      const parent = cursor.GetParent ? cursor.GetParent() : null;
+      if (!isValid(parent)) break;
+      node = cursor;
+      if (parent === sub) break;
+      cursor = parent;
+    }
+    return node;
+  }
+
+  function pickEscapeSettingsHost(escapeRoot) {
+    const sub = findEscapeSubOptions(escapeRoot);
+    if (isValid(sub)) {
+      if (!escSubDumped) {
+        escSubDumped = true;
+        diagLog("esctree-sub", "PANORAMA: ESC sub=[" + describePanelTree(sub, 300) + "]");
+      }
+      const anchor = findEscapeRowAnchor(sub);
+      if (isValid(anchor)) return { host: sub, anchor: anchor };
+      // 兜底:按行序插在第 2 行之前(玩家反馈之后、设置之前),避免落到「退出游戏」下面
+      if (childCount(sub) >= 3) {
+        const second = childAt(sub, 1);
+        if (isValid(second)) return { host: sub, anchor: second };
+      }
+      return { host: sub, anchor: null };
+    }
+    return { host: escapeRoot, anchor: null };
+  }
+
+  // 入口外观完全沿用原生小行(nav_menu_item minor):24px、暗色,鼠标选中才变绿;
+  // 齿轮在文字后面(右侧),始终可见但低透明度 —— 与「玩家反馈 / 设置」同格式。
+  function styleEscapeSettingsButton(btn) {
+    if (!isValid(btn)) return;
+    try {
+      btn.style.width = "fit-children";
+      btn.style.height = "fit-children";
+      btn.style.horizontalAlign = "left";
+      btn.style.verticalAlign = "bottom";
+      btn.style.backgroundColor = "#00000000";
+      btn.style.backgroundImage = "none";
+      btn.style.marginLeft = "0px";
+      btn.style.marginTop = "2px";
+      btn.style.marginBottom = "2px";
+    } catch (e) {}
+    const label = findChild(btn, ESC_SETTINGS_BUTTON_ID + "Label");
+    if (isValid(label)) {
+      label.text = "DEADLOCKLINGUA";
+      try { label.style.height = "fit-children"; } catch (e) {}
+    }
+    const icon = findChild(btn, ESC_SETTINGS_BUTTON_ID + "Icon");
+    if (isValid(icon)) {
+      if (isValid(label)) {
+        try {
+          if (typeof icon.MoveChildAfter === "function") icon.MoveChildAfter(label);
+          else if (typeof label.MoveChildBefore === "function") label.MoveChildBefore(icon);
+        } catch (e) {}
+      }
+      try { icon.style.visibility = "visible"; } catch (e) {}
+      try { icon.style.opacity = "0.35"; } catch (e) {}
+      try { icon.style.width = "20px"; } catch (e) {}
+      try { icon.style.height = "20px"; } catch (e) {}
+      try { icon.style.marginLeft = "8px"; } catch (e) {}
+      try { icon.style.marginRight = "0px"; } catch (e) {}
+    }
+  }
+
   function ensureEscapeSettingsButton(escapeRoot) {
     if (!isValid(escapeRoot)) return;
+    let pick;
+    try { pick = pickEscapeSettingsHost(escapeRoot); } catch (e) { pick = { host: escapeRoot, anchor: null }; }
+    const host = pick.host;
+    const anchor = pick.anchor;
+    const placeBefore = function (panel) {
+      if (!isValid(anchor) || !isValid(panel) || panel === anchor) return;
+      // 三种排序方式依次尝试:本作 MoveChild* 在子面板上表现不可靠,所以都试一遍
+      try {
+        if (typeof panel.MoveChildBefore === "function") panel.MoveChildBefore(anchor);
+      } catch (e) {}
+      try {
+        const par = panel.GetParent ? panel.GetParent() : null;
+        if (isValid(par) && typeof par.MoveChildBefore === "function") par.MoveChildBefore(panel, anchor);
+      } catch (e) {}
+      try {
+        if (typeof anchor.MoveChildAfter === "function") anchor.MoveChildAfter(panel);
+      } catch (e) {}
+      // 兜底:从锚点起(含锚点)到底的兄弟依次重挂一次父节点,
+      // SetParent 会把它追加到末尾,结果入口被挤到锚点之前
+      try {
+        const par = panel.GetParent ? panel.GetParent() : null;
+        if (isValid(par) && par === anchor.GetParent()) {
+          const tail = [];
+          let hit = false;
+          const n = childCount(par);
+          for (let i = 0; i < n; i += 1) {
+            const sib = childAt(par, i);
+            if (!isValid(sib)) continue;
+            if (sib === anchor) hit = true;
+            if (hit && sib !== panel) tail.push(sib);
+          }
+          for (let i = 0; i < tail.length; i += 1) {
+            try { tail[i].SetParent(par); } catch (e) {}
+          }
+        }
+      } catch (e) {}
+    };
+    // 排序结果核对:把宿主当前子项按顺序打印一次
+    const logOrder = function () {
+      if (escOrderLogged) return;
+      escOrderLogged = true;
+      try {
+        const parts = [];
+        const n = childCount(host);
+        for (let i = 0; i < n; i += 1) {
+          const p = childAt(host, i);
+          if (!isValid(p)) continue;
+          const tx = panelTextOf(p).trim().slice(0, 10);
+          parts.push(i + ":" + (panelIdOf(p) || "-") + (tx ? "(" + tx + ")" : ""));
+        }
+        diagLog("escorder", "PANORAMA: ESC order host=" + panelIdOf(host) + " [" + parts.join(",") + "]");
+      } catch (e) {}
+    };
     try {
-      if (findChild(escapeRoot, ESC_SETTINGS_BUTTON_ID)) return;
-    } catch (e) {}
-    try {
-      const host = findChild(escapeRoot, "LeftStripe") || escapeRoot;
+      let existing = null;
+      try { existing = findChild(getRoot(), ESC_SETTINGS_BUTTON_ID); } catch (e) {}
+      if (!isValid(existing)) { try { existing = findChild(escapeRoot, ESC_SETTINGS_BUTTON_ID); } catch (e) {} }
+      if (!isValid(existing)) existing = findPanelByIdWalk(findEscapeLayoutRoot(escapeRoot), ESC_SETTINGS_BUTTON_ID, 3000);
+      if (isValid(existing)) {
+        // 旧构建曾把它挂在 #LeftStripe / 布局根下(排在屏幕外),这里纠正父节点与外观
+        const cur = existing.GetParent ? existing.GetParent() : null;
+        if (cur !== host) {
+          try { existing.SetParent(host); } catch (e) {}
+          escSettingsButtonLogged = false;
+        }
+        styleEscapeSettingsButton(existing);
+        placeBefore(existing);
+        logOrder();
+        return;
+      }
       const btn = $.CreatePanel("Button", host, ESC_SETTINGS_BUTTON_ID);
       if (!btn) return;
       btn.AddClass("nav_menu_item");
       btn.AddClass("minor");
-      btn.style.width = "220px";
-      btn.style.height = "40px";
-      btn.style.horizontalAlign = "left";
-      btn.style.verticalAlign = "bottom";
-      btn.style.marginLeft = "40px";
-      btn.style.marginBottom = "48px";
-      btn.style.zIndex = "9000";
+      try { btn.style.flowChildren = "right"; } catch (e) {}
+      // 先建文字、后建齿轮,保证齿轮在文字右侧(不依赖 MoveChildAfter)
+      const label = $.CreatePanel("Label", btn, ESC_SETTINGS_BUTTON_ID + "Label");
+      if (label) {
+        label.AddClass("menuButtonLabel");
+        label.text = "DEADLOCKLINGUA";
+      }
       const icon = $.CreatePanel("Panel", btn, ESC_SETTINGS_BUTTON_ID + "Icon");
       if (icon) {
         icon.AddClass("smallIcon");
         icon.AddClass("GearIcon");
       }
-      const label = $.CreatePanel("Label", btn, ESC_SETTINGS_BUTTON_ID + "Label");
-      if (label) {
-        label.AddClass("menuButtonLabel");
-        label.text = "翻译设置";
-      }
+      styleEscapeSettingsButton(btn);
+      placeBefore(btn);
+      logOrder();
       const handler = function () { openEscapeSettings(); };
       const hasSetPanelEvent = typeof btn.SetPanelEvent === "function";
       if (hasSetPanelEvent) btn.SetPanelEvent("onactivate", handler);
       else {
         try { btn.SetAttributeString("onactivate", "LCTEscapeOpenSettings();"); } catch (e) {}
       }
-      diagLog("escbtnmode", "PANORAMA: ESC settings button mode=" + (hasSetPanelEvent ? "SetPanelEvent" : "attribute"));
       if (!escSettingsButtonLogged) {
         escSettingsButtonLogged = true;
-        diagLog("escbtn", "PANORAMA: ESC settings entry injected");
+        diagLog("escbtn", "PANORAMA: ESC settings entry injected host=" + panelId(host) + "/" + String(host.paneltype || "") + " anchor=" + (isValid(anchor) ? panelId(anchor) : "none"));
       }
     } catch (e) {
       diagLog("escbtnfail", "PANORAMA: ESC settings entry failed: " + (e && e.message ? e.message : String(e)));
@@ -3339,6 +3583,30 @@ function resolveSteamId(record) {
     return [record.channel || "", record.sender || "", record.text || ""].join("\x00");
   }
 
+  // 译文只取决于原文 + 目标语言,与发送者/频道无关。HUD 顶栏和左下聊天常是同一句的
+  // 两份 DOM 副本;按这个 key 去重可避免同一条消息占用两次 BTIPC 单槽。
+  function translationTextKey(text) {
+    return targetLanguage() + "\x00" + String(text || "").trim();
+  }
+
+  function trimTextCache() {
+    while (State.textCache.size > CACHE_LIMIT) {
+      const firstKey = State.textCache.keys().next().value;
+      if (firstKey === undefined) break;
+      State.textCache.delete(firstKey);
+    }
+  }
+
+  function addPendingTextAlias(key, row, sig, record) {
+    const pending = State.pendingText.get(key);
+    if (!pending) return false;
+    for (let i = 0; i < pending.length; i += 1) {
+      if (pending[i].row === row && pending[i].sig === sig) return true;
+    }
+    pending.push({ row: row, sig: sig, record: record });
+    return true;
+  }
+
   function isTargetLanguageText(text) {
     const t = String(State.cfg.targetLanguage || "zh-Hans").toLowerCase();
     if (t.indexOf("zh") === 0) return CJK_RE.test(text);
@@ -3486,6 +3754,13 @@ function injectTranslation(row, sig, text) {
       label.text = String(text);
     } catch (e) {}
     applyTransLabelStyle(label, false);
+    // 保证 HUD 译文永远排在 ChatBubble 之后,而不是受子节点创建/复用时序影响。
+    if (hud) {
+      const bubble = findClass(row, HUD_BUBBLE_CLASS);
+      if (isValid(bubble) && typeof label.MoveChildAfter === "function") {
+        try { label.MoveChildAfter(bubble); } catch (e) {}
+      }
+    }
     // 只显示译文模式:隐藏原文(快捷对话/Ping 行保留气泡,避免消息"消失")
     // HUD 顶栏行/大厅行不折叠:气泡本身短暂显示,折叠会连译文一起隐藏
     if (!hud && !lobby && State.cfg.displayMode === "translation_only") {
@@ -3549,7 +3824,13 @@ function injectTranslation(row, sig, text) {
   }
 
   function enqueue(row, sig, record) {
-    State.queue.push({ kind: "chat", row: row, sig: sig, record: record, attempts: 0 });
+    const textKey = translationTextKey(record.text);
+    if (addPendingTextAlias(textKey, row, sig, record)) return;
+    State.pendingText.set(textKey, [{ row: row, sig: sig, record: record }]);
+    State.queue.push({
+      kind: "chat", row: row, sig: sig, record: record, attempts: 0,
+      textKey: textKey, test: !!row.__lctTestForce,
+    });
     pumpQueue();
   }
 
@@ -3577,8 +3858,15 @@ function injectTranslation(row, sig, text) {
   // bridge 任务的最长让位时间:连续聊天时不能让配置/身份上报永远排不上队
   const BRIDGE_STARVE_MS = 10000;
 
+  function btipcChannelBusy() {
+    try { return typeof BTIPC !== "undefined" && BTIPC.busy(); } catch (e) { return false; }
+  }
+
   function pumpQueue() {
     while (State.queue.length > 0 && State.activeRequests < MAX_ACTIVE_REQUESTS) {
+      // BTIPC 是物理单槽。即使 activeRequests 因某次回调异常暂时失真,也不能让
+      // 新任务撞上在途 transfer 后被 busy 快速失败。
+      if (btipcChannelBusy()) break;
       let readyIndex = -1;
       // bridge(config / 身份 / health)让位给 chat 与 outgoing:BTIPC 一次传输要好几秒,
       // 若让 bridge 先占住单槽,用户消息会明显卡顿甚至排队超时按原文发。
@@ -4841,17 +5129,35 @@ function injectTranslation(row, sig, text) {
 
   function handleResult(job, payload) {
     if (payload.ok && payload.translation) {
-      State.cache.set(job.sig, { translation: payload.translation });
+      const translation = String(payload.translation);
+      const textKey = job.textKey || translationTextKey(job.record.text);
+      State.cache.set(job.sig, { translation: translation });
+      State.textCache.set(textKey, { translation: translation });
       trimCache();
+      trimTextCache();
+
+      // 同一原文可能同时存在于左下聊天与 HUD 顶栏。首个请求完成后,把所有仍存活
+      // 的副本一起补上译文,避免重复占用 BTIPC 单槽。
+      const pending = State.pendingText.get(textKey) || [];
+      State.pendingText.delete(textKey);
+      for (let i = 0; i < pending.length; i += 1) {
+        const alias = pending[i];
+        if (!alias || (alias.row === job.row && alias.sig === job.sig)) continue;
+        if (!isValid(alias.row) || alias.row.__lctSig !== alias.sig) continue;
+        State.cache.set(alias.sig, { translation: translation });
+        injectTranslation(alias.row, alias.sig, translation);
+      }
+
       // 行可能已被回收复用:只有行仍持有同一条消息时才注入,避免旧译文贴到新消息
       if (isValid(job.row) && job.row.__lctSig === job.sig) {
-        injectTranslation(job.row, job.sig, payload.translation);
-        log("translated [" + (job.record.channel || "chat") + "] " + job.record.sender + ": " + payload.translation.slice(0, 60));
+        injectTranslation(job.row, job.sig, translation);
+        log("translated [" + (job.record.channel || "chat") + "] " + job.record.sender + ": " + translation.slice(0, 60));
       } else {
         // 诊断:翻译成功但行已失效(游戏可能在 2 秒内清理了顶栏消息行)
         log("translated skipped: row=" + (isValid(job.row) ? "valid" : "GONE") + " sig=" + ((job.row && job.row.__lctSig === job.sig) ? "match" : "MISMATCH") + " text=" + String(job.record.text || "").slice(0, 30));
-        // HUD 测试行被游戏清理后,重建一条译文显示行(验证通路;真实消息行生命周期更长不受影响)
-        tryRecreateHudTranslation(job, payload.translation);
+        // 真实消息行被回收时不再往顶栏根节点挂浮层;那种兜底会跑到气泡上方。
+        // 只保留 !lcttest 自检行的可视化兜底,真实消息依赖 textCache 在后续行副本恢复。
+        if (job.test) tryRecreateHudTranslation(job, translation);
       }
       finishJob();
     } else {
@@ -4905,6 +5211,8 @@ function injectTranslation(row, sig, text) {
     for (let i = 0; i < CHANNEL_GONE_ERRORS.length; i++) {
       if (e === CHANNEL_GONE_ERRORS[i]) return true;
     }
+    // busy 是本地单槽竞争,不是桥离线。把它当成 channel gone 会永久漏掉这条消息。
+    if (e === "btipc_busy") return false;
     // BTIPC 的失败一律是"桥那一侧不在"(通道本身没坏,坏的是对端):
     // 出站按原文发送、聊天行不挂红标(译文仍由游戏外悬浮窗兜底展示)。
     if (e.indexOf("btipc_") === 0) return true;
@@ -4913,7 +5221,20 @@ function injectTranslation(row, sig, text) {
 
   // 失败/重试:统一由 failJob 释放活动槽(finishJob),避免队列卡死
   function failJob(job, error) {
+    if (job.kind === "chat" && error === "btipc_busy") {
+      job.busyAttempts = (job.busyAttempts || 0) + 1;
+      if (job.busyAttempts <= BUSY_RETRY_LIMIT) {
+        job.retryAt = nowMs() + RETRY_DELAY_SECONDS * 1000;
+        State.queue.unshift(job);
+        $.Schedule(RETRY_DELAY_SECONDS, pumpQueue);
+        log("busy requeue (" + job.busyAttempts + "): " + String(job.record.text || "").slice(0, 40));
+        finishJob();
+        return;
+      }
+      error = "btipc_busy_timeout";
+    }
     if (job.kind === "chat" && isChannelGone(error)) {
+      if (job.textKey) State.pendingText.delete(job.textKey);
       // 不重试(重试永远不会成功)、不注入错误标签;保留 seen 去重, 避免同一行被反复重扫
       log("channel gone, skip in-game translate: " + String(error));
       finishJob();
@@ -4927,6 +5248,7 @@ function injectTranslation(row, sig, text) {
       log("retry (" + job.attempts + "): " + String(error).slice(0, 80));
     } else {
       // 失败后允许同一文本在新行上重试(旧行已注入错误;seen 去重不应永久吞掉重试)
+      if (job.kind === "chat" && job.textKey) State.pendingText.delete(job.textKey);
       if (job.kind === "chat" && job.sig) {
         try { State.seen.delete(job.sig); } catch (e) {}
       }
@@ -5436,14 +5758,19 @@ function injectTranslation(row, sig, text) {
     if (record.isOwn && record.sender && record.sender !== UNKNOWN_NAME) State.selfName = String(record.sender).trim();
     if (!record.hud) logRowIdentityDiagnostic(row, record);
     const sig = makeSignature(record);
+    const textKey = translationTextKey(record.text);
 
     // 已处理过的行:若签名变化说明被回收复用,重置处理状态
     const prevSig = row.__lctSig;
     if (row.__lctProcessed && prevSig === sig) {
+      const skipTranslation = shouldSkip(record);
+      const cachedText = skipTranslation ? null : State.textCache.get(textKey);
+      if (cachedText) { injectTranslation(row, sig, cachedText.translation); return false; }
       // 已处理过的行如果还有挂起日志(等字段补全),继续尝试补齐。
       if (State.pendingLogs && State.pendingLogs[pendingKey(record.text, record.isOwn, record.sender)]) {
         pushChatLog(record);
       }
+      if (!skipTranslation) addPendingTextAlias(textKey, row, sig, record);
       // 尝试从缓存恢复译文(聊天滚动回收场景)
       if (State.cache.has(sig)) restoreFromCache(row, sig);
       return false;
@@ -5454,6 +5781,22 @@ function injectTranslation(row, sig, text) {
     }
     row.__lctSig = sig;
     row.__lctProcessed = true;
+
+    const skipTranslation = shouldSkip(record);
+
+    const cachedText = skipTranslation ? null : State.textCache.get(textKey);
+    if (cachedText) {
+      State.seen.add(sig);
+      pushChatLog(record);
+      injectTranslation(row, sig, cachedText.translation);
+      return false;
+    }
+    if (!skipTranslation && State.pendingText.has(textKey)) {
+      State.seen.add(sig);
+      pushChatLog(record);
+      addPendingTextAlias(textKey, row, sig, record);
+      return false;
+    }
 
     if (State.seen.has(sig)) {
       if (State.cache.has(sig)) restoreFromCache(row, sig);
@@ -5475,7 +5818,7 @@ function injectTranslation(row, sig, text) {
     // 聊天日志采集(所有新消息都记,不随 shouldSkip 过滤——指令/自己的消息也要留档)
     pushChatLog(record);
 
-    if (shouldSkip(record)) return false;
+    if (skipTranslation) return false;
     if (State.cache.has(sig)) {
       injectTranslation(row, sig, State.cache.get(sig).translation);
       return false;

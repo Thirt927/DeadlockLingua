@@ -1726,7 +1726,8 @@
   - AGENTS.md: 同步更新 §2 的「进度」注记,补上「2026-10-09 离线全绿,实车待验收」。
   - scripts/package_release.ps1: 默认版本不再硬编码 2.0.0,改为从仓库根 VERSION 文件读(单一事实来源),缺 VERSION 且未传 -Version 时报错;-Version 显式传参仍生效。
   - scripts/autostart.ps1: 不再运行时动态生成一份 .vbs(与仓库自带的 scripts/babel_bridge_autostart.vbs 逻辑不一致且被 .gitignore,跨机器装自启会缺文件),改为直接引用仓库自带的那份静态 vbs,缺文件时 	hrow 明确报错。
-  - core/bridge_server.js / core/overlay.js: DEFAULT_DEADLOCK_CONSOLE_LOG / DEFAULT_CONSOLE_LOG 两处写死的 E:/Steam/... 本机路径,改为 esolveConsoleLogPath() 自动探测(config 显式路径 > 常见 Steam 发行位置 E:/C:/D:/Program Files (x86),全部不存在则留空静默跳过),config.example.json 的 deadlockConsoleLog 示例值也改成 ""(留空 = 自动探测),去掉本机路径入库。
+  - core/bridge_server.js / core/overlay.js: DEFAULT_DEADLOCK_CONSOLE_LOG / DEFAULT_CONSOLE_LOG 两处写死的 E:/Steam/... 本机路径,改为 
+esolveConsoleLogPath() 自动探测(config 显式路径 > 常见 Steam 发行位置 E:/C:/D:/Program Files (x86),全部不存在则留空静默跳过),config.example.json 的 deadlockConsoleLog 示例值也改成 ""(留空 = 自动探测),去掉本机路径入库。
   - config/config.example.json: overlay 颜色示例值 #0D0F14 / #E0A34A 与 core/config.js DEFAULTS.overlay 的 #131920 / #C9A44E 对齐(AGENTS.md 明确写过这两处必须同步,否则新配色会被旧色盖掉)。
   - core/providers/openai.js: describeHttpError 404 分支不再硬编码「DeepSeek 官方: ...」的厂商专属建议,改为通用的「检查 baseUrl 是否带对前缀(OpenAI 需 /v1,DeepSeek 需 https://api.deepseek.com)以及 model 名是否正确」。
   - core/providers/registry.js: 注释不再把 Ollama 单列为「后续 Provider」,改为说明 Ollama / LM Studio / 任意 OpenAI 兼容端点走 openai.js(改 aseUrl 即可),不必单独建文件。
@@ -1887,7 +1888,6 @@ ode -e "JSON.parse(...)" 通过)。
 - **验证方式**: `scripts/build.ps1` 编译 7 个资源成功;产物复制为 `dist/pak22_dir.vpk` 并部署到 Deadlock 的 `game/citadel/addons/pak22_dir.vpk`(331,033 字节,2026-10-16 00:20);用 vpkeditcli 从 VPK 解包 `panorama/styles/lingua_chat.vcss_c`,确认 `.LCTSelectValue` / `.LCTToggleValue` 已不再含 `height: 30px`。
 - **仍需用户测试**: 重启 Deadlock 后打开设置面板,检查下拉值、开关值文字是否已在 30px 控件框内上下居中;若仍有少量偏差,需要一张游戏内截图再针对游戏 sans 中文字体的具体 ascent/descent 微调。
 
-
 ## 2026-10-24: ESC 菜单「翻译设置」入口（v2.1.0 宿主编排）
 
 - **背景**: v2.1.0 的游戏内面板在聊天布局里，需要按住 Tab 出指针才能点，且右下角 X 容易被全屏 Tab 界面挡；完整设置的网页页又要离开游戏。用户要求把入口放到 ESC 菜单，直接使用游戏内面板。
@@ -2007,3 +2007,117 @@ ode -e "JSON.parse(...)" 通过)。
 - **是否需用户测试**: 是 —— 按 README 安装第 5 步跑 `-Trust` 并**完全重启 Steam**, 进对局看
   `console.log` 是否出现 `https panel: ALIVE`; 若出现 `not usable` / `bridge_https.log` 里
   `TLS_ALERT_CERTIFICATE_UNKNOWN`, 说明证书没被信任或 Steam 没完全重启。
+
+## 第八十四轮(2026-10-17): 修 BTIPC busy 漏译、重复请求与 HUD 译文错位
+
+- **背景(用户实机反馈)**: ①有时别人的译文出现在聊天气泡上方而不是气泡内;②整体翻译偏慢;③最近一局 18:58:00 左右 Graves 的一条英文发言在用户消息之后没有翻译。
+- **日志定位**: `console.log` 显示该条 rowdiag 已到达，但排队期间前一条长消息仍占用 BTIPC 单槽，日志连续出现 `btipc fail (busy): 已有在途传输` 与 `channel gone, skip in-game translate: btipc_busy`。旧代码把 `btipc_busy` 当成桥离线直接丢弃。另有 `translated skipped: row=GONE ... HUD test: recreated translation overlay`，旧的 HUD 兜底浮层挂在顶栏根节点上，视觉上会跑到气泡上方。
+- **改动文件**: `mod/panorama/scripts/lingua_chat.js`、`scripts/lingua_chat_simtest.js`。
+- **改动内容**:
+  - `btipc_busy` 不再视为 channel gone；新增 20 次短重排上限，并用 `BTIPC.busy()` 阻止新任务撞上在途 transfer。
+  - 新增按「目标语言 + 原文」索引的 `textCache` / `pendingText`：同一句同时出现在左下聊天和 HUD 顶栏时只发一次 BTIPC 请求，完成后把所有仍存活副本一起补上译文；重复短语命中缓存则秒出。
+  - HUD 译文在 `MessageContents` 内用 `MoveChildAfter(ChatBubble)` 明确排到气泡后面；真实消息行被回收时不再创建顶栏根节点的临时浮层，避免译文出现在气泡上方。`!lcttest` 自检行仍保留可视化兜底。
+- **验证方式**: `node --check` 通过；`lingua_chat_simtest.js` 新增 HUD/普通行同文本去重用例后全量 `PASS 60 / FAIL 0`；`scripts/build.ps1` 编译 7 个资源成功，并重新部署 `dist/pak22_dir.vpk` 到 Deadlock addons。
+- **仍需用户测试**: 重启 Deadlock 后确认：①普通聊天与 HUD 顶栏的每个气泡副本各只有一条译文且位于气泡下方；②连续聊天时不再因 busy 漏译；③重复消息/连发场景的等待时间应比 2.1.0 更短。
+
+## 第八十五轮(2026-10-24): ESC 菜单「翻译设置」入口挂错容器导致不可见
+
+- **背景(用户实机反馈)**: 更新到含 ESC 入口的构建后,游戏内按 ESC 看不到「翻译设置」。
+- **日志定位**: `console.log` 里其实已有 `PANORAMA: ESC settings entry injected`(按钮创建成功),说明注入逻辑跑了;问题在挂载位置。游戏自己的 `panorama/styles/hud_escape_menu.vcss_c` 显示 `#LeftStripe{height:100%;flow-children:down}`,真正的竖排导航列表是它内部的 `#ContextualMenu`。旧代码优先取 `LeftStripe` 并把按钮追加为最后一个流式子节点,于是被排到 100% 高度之下(屏幕外)。
+- **改动文件**: `mod/panorama/scripts/lingua_chat.js`。
+- **改动内容**:
+  - 新增 `pickEscapeSettingsHost()`:优先用游戏自带 `Settings` 小按钮的父节点作宿主并 `MoveChildAfter` 紧跟其后;找不到则依次回退 `ContextualMenu` → `Menu` → `LeftStripe` → ESC 根。
+  - `ensureEscapeSettingsButton()` 对已存在的旧按钮做父节点纠正(并从 `LeftStripe` 挪走),去掉原先会把按钮推到屏幕外的 `vertical-align: bottom` / 大 margin / 固定 220px 宽,改为 `fit-children` + 36px 高,沿用原生 `nav_menu_item minor` 样式。
+  - `escbtn` 诊断行补充实际宿主与锚点 id,便于下一轮实机核对。
+- **验证方式**: `node --check` 通过;`scripts/lingua_chat_simtest.js` PASS 60 / FAIL 0;`scripts/build.ps1` 编译 7 个资源成功,`dist/pak22_dir.vpk`(354,870 字节)已部署到 addons。本机无游戏,未实机点击。
+- **仍需用户测试**: 重启 Deadlock 进对局按 ESC,确认菜单里能看到并点击「翻译设置」,打开后面板可正常操作、关闭后 `/tr` 仍可用;若仍看不到,提供 `console.log` 中 `escbtn` 行的 `host=.. anchor=..` 值。
+
+## 第八十六轮(2026-10-24): ESC「翻译设置」入口改为原生「交换英雄」同款样式
+
+- **背景(用户实机反馈)**: 第八十五轮后入口可见了,但位置在屏幕左上、带深色底板、字号偏小,用户要求做成和下面「交换英雄」一样的样式。
+- **根因**: 上一轮 `findEscapeMenuRoot()` 拿到的其实是布局根下的无名 `Panel`(日志 `host=/Panel anchor=none`),既找不到 `ContextualMenu`/`Menu`,也没找到原生 `Settings` 锚点,于是按钮成了布局根的直系子节点,靠默认对齐落在左上角。
+- **改动文件**: `mod/panorama/scripts/lingua_chat.js`。
+- **改动内容**:
+  - `pickEscapeSettingsHost()` 改为从 `getRoot()` 开始找原生 `#changehero`(交换英雄),用它的父节点作宿主并 `MoveChildBefore(changehero)`;找不到再退 `Settings` → `ContextualMenu` → `Menu` → `LeftStripe`。
+  - 新增 `styleEscapeSettingsButton()`:命中 `changehero` 时内联 60px / 加粗 / 绿色 `#4DD883`(同 `.nav_menu_item.resume` hover 色)/ 去按钮底板 / 底部对齐 `margin-bottom:350px`(交换英雄是 280px,正好压在它上方);非 hero 分支保留上一轮的 36px 小按钮样式。
+  - 已存在的旧按钮走同一套重挂父节点 + 重刷样式逻辑,不必重开游戏脚本也能自愈(仍需重启游戏加载新 VPK)。
+- **验证方式**: `node --check` 通过;`lingua_chat_simtest.js` PASS 60 / FAIL 0;`build.ps1` 编译成功,`dist/pak22_dir.vpk`(357,190 字节)已部署。
+- **仍需用户测试**: 重启 Deadlock 进对局按 ESC,确认「翻译设置」位于「交换英雄」正上方、字号/颜色与其一致且可点击。
+
+## 第八十七轮(2026-10-24): ESC 入口字号对齐「交换英雄」+ 手动 DFS 找锚点
+
+- **背景(用户实机反馈)**: 第八十六轮后入口仍偏小、不在「交换英雄」旁边。日志 `escbtn host=/Panel anchor=none` 说明 `findChild("changehero")` 依然找不到锚点,`hero=false` 分支没有套用 60px 样式。
+- **改动文件**: `mod/panorama/scripts/lingua_chat.js`。
+- **改动内容**:
+  - 新增 `findEscapeHeroAnchor()`:先按 id 试 `changehero`/`ChangeHero`;失败则在 3000 节点预算内做手动 DFS,先按 id 忽略大小写匹配,再按 Label 文本匹配「交换英雄 / Change Hero」,命中 Label 时取其父节点作为条目;结果缓存到 `escHeroAnchor`(失效自动重扫,单局最多 40 次,避免每 5 秒全树扫描)。
+  - 第 20 次扫描仍找不到时打一行 `PANORAMA: ESC scan ids=...`(前 60 个 id),用于下一轮定位真实 id。
+  - `styleEscapeSettingsButton()` 的字号/颜色/加粗改为无条件应用(60px、`#4DD883`),不再依赖是否命中 hero 锚点;hero 命中时额外套底部对齐 `margin-bottom:350px` 并排到交换英雄正上方,同时去掉按钮底板(`background-color`/`background-image` 置空)。
+- **验证方式**: `node --check` 通过;`lingua_chat_simtest.js` PASS 60 / FAIL 0;`build.ps1` 编译成功,`dist/pak22_dir.vpk`(352,240 字节)已部署。
+- **仍需用户测试**: 重启 Deadlock 按 ESC,确认「翻译设置」与「交换英雄」同字号、同绿色、紧挨其上方一行;若位置仍不对,把 `console.log` 里 `ESC settings entry injected host=.. anchor=..` 与 `ESC scan ids=..` 两行发我。
+
+## 第八十八轮(2026-10-24): ESC 入口改为 QOL 同款小行(DEADLOCKLINGUA)
+
+- **背景(用户实机反馈+截图)**: 第八十七轮把入口做成 60px 绿色后,它和原生三条大项(游玩/交换英雄)在视觉上叠在一起。原因:原生大项按 `margin-bottom` 每行 70px 排布(490/420/350/280),文字本身 60px,行间只剩约 10px,根本塞不进第二条 60px 文案。用户要求参考 QOL 的 ESC 设置入口,并把名字改成 DeadlockLingua。
+- **QOL(pak08)的做法**: 整体替换 `panorama/layout/hud_escape_menu.vxml_c` + 自己的样式与 JS,把设置入口做成 `#SubOptions` 里的一行小字(玩家反馈 / QOL LOCK ⚙ / 设置 之间),24px 绿色 + 齿轮。我们不能替换整份布局(会覆盖掉 QOL 自己的条目),所以只在运行时把同样的行注入 `#SubOptions`。
+- **改动文件**: `mod/panorama/scripts/lingua_chat.js`。
+- **改动内容**:
+  - 新增 `findEscapeLayoutRoot()`(沿父链爬到 ESC 布局根)与 `findPanelByIdWalk()`(id 忽略大小写的 DFS 兜底,因为子面板上 `FindChildTraverse` 在本作里一直返回空,日志长期 `anchor=none`)。
+  - 新增 `findEscapeSubOptions()`(依次尝试 `escapeRoot` → 布局根 → DFS)并让 `pickEscapeSettingsHost()` 优先挂 `#SubOptions`,尽量排在 `#quit` 之前。
+  - `styleEscapeSettingsButton()` 改为 QOL 同款:24px、绿色 `#4DD883`、加粗、齿轮 20px/0.8 透明、去掉按钮底板;文案固定 `DEADLOCKLINGUA`(创建和已存在两条路径都生效)。
+  - 「已存在按钮」的查找也加了 DFS 兜底,避免 `FindChildTraverse` 失效时每轮重复创建。
+  - 删除第八十七轮针对「交换英雄」锚点的 DFS/诊断代码(那条路已被证明放不进 60px 行间)。
+- **验证方式**: `node --check` 通过;`lingua_chat_simtest.js` PASS 60 / FAIL 0;`build.ps1` 编译成功,`dist/pak22_dir.vpk`(350,924 字节)已部署。
+- **仍需用户测试**: 重启 Deadlock 按 ESC,确认「玩家反馈 / DEADLOCKLINGUA ⚙ / 设置」三行并排且不再与大项重叠;若位置仍在左上角,提供 `console.log` 中 `ESC settings entry injected host=.. anchor=..` 一行。
+
+## 第八十九轮(2026-10-24): ESC 入口改成与「玩家反馈/设置」完全同格式
+
+- **背景(用户实机反馈)**: 第八十八轮的小行还是绿色加粗、齿轮在文字前面。QOL 的入口与上下的「玩家反馈 / 设置」是同一格式:暗色 24px,鼠标悬停才变绿;齿轮在文字右侧。
+- **改动文件**: `mod/panorama/scripts/lingua_chat.js`。
+- **改动内容**:
+  - `styleEscapeSettingsButton()` 不再内联字号/颜色/加粗,完全交给原生 `.nav_menu_item.minor`(24px / `offWhite&44` 暗色 / hover 变绿)。
+  - 齿轮改为排在 Label 之后(`icon.MoveChildAfter(label)`),`visibility: visible`、`opacity: 0.35`、`margin-left: 8px`、`margin-right: 0`,对齐 QOL 的 `#ModSettingsGearIcon`;hover 时由原生 `.minor:hover .smallIcon` 自动变绿。
+  - 文案仍为 `DEADLOCKLINGUA`。
+- **验证方式**: `node --check` 通过;`lingua_chat_simtest.js` PASS 60 / FAIL 0;`build.ps1` 编译成功,`dist/pak22_dir.vpk`(350,982 字节)已部署。
+- **仍需用户测试**: 重启 Deadlock 按 ESC,确认「DEADLOCKLINGUA」与邻居同字体/同暗色、悬停变绿,齿轮在文字右侧。
+
+## 第九十轮(2026-10-24): ESC 入口齿轮改到文字右侧(改为创建顺序保证)
+
+- **背景(用户实机反馈)**: 第八十九轮靠 `icon.MoveChildAfter(label)` 调顺序,实机齿轮仍在文字左侧。
+- **改动文件**: `mod/panorama/scripts/lingua_chat.js`。
+- **改动内容**:
+  - 创建顺序改为「先 Label、后 Icon」,并在按钮上显式 `flow-children: right`,不再依赖 `MoveChildAfter` 生效与否。
+  - `styleEscapeSettingsButton()` 对已存在的旧按钮保留 `MoveChildAfter` 兜底,并增加反向 `label.MoveChildBefore(icon)` 分支。
+- **验证方式**: `node --check` 通过;`lingua_chat_simtest.js` PASS 60 / FAIL 0;`build.ps1` 编译成功,`dist/pak22_dir.vpk`(351,247 字节)已部署。
+- **仍需用户测试**: 重启 Deadlock 按 ESC,确认齿轮位于 DEADLOCKLINGUA 右侧。
+
+## 第九十一轮(2026-10-24): ESC 入口插到「玩家反馈」与「设置」之间(对齐 QOL)
+
+- **背景(用户实机反馈)**: 第九十轮入口被追加到 `#SubOptions` 末尾,显示在「退出游戏」下面;QOL 的入口是在「玩家反馈」和「设置」之间。
+- **改动文件**: `mod/panorama/scripts/lingua_chat.js`。
+- **改动内容**:
+  - 新增 `findEscapeRowAnchor(sub)`:先按 id `Settings` 找设置行,失败则按 Label 文本「设置 / Settings」找;再沿父链上爬到 `#SubOptions` 的直接子节点,得到「整行」作锚点(避免把入口插进按钮内部)。
+  - `pickEscapeSettingsHost()` 改为用该行作锚点,配合已有 `MoveChildBefore` 把入口插到设置行之前。
+- **验证方式**: `node --check` 通过;`lingua_chat_simtest.js` PASS 60 / FAIL 0;`build.ps1` 编译成功,`dist/pak22_dir.vpk`(352,607 字节)已部署。
+- **仍需用户测试**: 重启 Deadlock 按 ESC,确认 DEADLOCKLINGUA 位于「玩家反馈」与「设置」之间。
+
+## 第九十二轮(2026-10-24): ESC 入口定位改为「行序兜底 + 子树转储」
+
+- **背景(用户实机截图)**: 第九十一轮后 DEADLOCKLINGUA 仍排在「退出游戏」下面,说明设置行锚点没找到(该版 `FindChildTraverse`/`GetAttributeString` 在子面板上通路不可靠)。
+- **改动文件**: `mod/panorama/scripts/lingua_chat.js`。
+- **改动内容**:
+  - 新增 `panelIdOf()` / `panelTextOf()`(同时读属性与 `.id`/`.text` 两个来源),`findPanelByIdWalk()` 与文本匹配都改用它们。
+  - 新增 `describePanelTree()` 并在首次解析到 `#SubOptions` 时打一行 `PANORAMA: ESC sub=[路径:id:类型:文本]`,作为后续定位的唯一真值来源。
+  - `pickEscapeSettingsHost()` 增加行序兜底:锚点找不到且 `#SubOptions` 子项 ≥3 时,直接插到第 2 个子项之前(玩家反馈之后、设置之前),不再落到「退出游戏」下面。
+  - `placeBefore()` 加自引用保护,避免锚点恰好是本按钮时产生 MoveChildBefore 自环。
+- **验证方式**: `node --check` 通过;`lingua_chat_simtest.js` PASS 60 / FAIL 0;`build.ps1` 编译成功,`dist/pak22_dir.vpk`(354,267 字节)已部署。
+- **仍需用户测试**: 重启 Deadlock 按 ESC 看是否插到「玩家反馈 / 设置」之间;若仍不对,提供 `console.log` 中 `PANORAMA: ESC sub=[...]` 整行。
+
+## 第九十三轮(2026-10-24): ESC 入口按「SetParent 重排 + 结果核对日志」定位
+
+- **背景(用户实机反馈)**: 第九十二轮入口仍不在「玩家反馈」与「设置」之间。`console.log` 的 `ESC sub=[...]` 转储给出真实结构:`#SubOptions` 子项依次为 `PlayerFeedback`、无名行(内含 `settings` + `QuickMute`)、`quit`;我们的按钮被追加到末尾。结合第八十九/九十轮「`MoveChildAfter` 无效、改创建顺序才生效」的证据,判断本作 `MoveChild*` 在子面板上不可靠。
+- **改动文件**: `mod/panorama/scripts/lingua_chat.js`。
+- **改动内容**:
+  - `placeBefore()` 改为多策略:①`panel.MoveChildBefore(anchor)` ②父面板两参形式 ③`anchor.MoveChildAfter(panel)` ④兜底从锚点起到底的兄弟依次 `SetParent(par)`(追加到末尾),把入口挤到锚点之前。
+  - 新增 `logOrder()`:首次排序后打一行 `PANORAMA: ESC order host=... [i:id(text),...]`,直接给出宿主真实子项顺序,便于一锤定音。
+- **验证方式**: `node --check` 通过;`lingua_chat_simtest.js` PASS 60 / FAIL 0;`build.ps1` 编译成功,`dist/pak22_dir.vpk`(356,092 字节)已部署。
+- **仍需用户测试**: 重启 Deadlock 按 ESC 看位置;若仍不对,提供 `console.log` 中 `PANORAMA: ESC order` 整行。

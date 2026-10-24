@@ -153,6 +153,7 @@ function freshEnv(cfg, envOpts) {
   const imageHandlers = new Map();
   const btipcShots = []; // 每次 SetImage 的 URL(诊断用)
   let btipcReqCount = 0;
+  const btipcReqTexts = [];
 
   function btipcServe(win, r, p) {
     const w = btipcWindows.get(win);
@@ -203,6 +204,7 @@ function freshEnv(cfg, envOpts) {
       const tm = /^t=([A-Za-z0-9-]{1,16})(;tm=\d{1,7})?$/.exec(text.slice(0, nl));
       if (tm) { target = tm[1]; body = text.slice(nl + 1); }
     }
+    btipcReqTexts.push(body);
     btipcWindows.set(win, { id: id, frames: null, frameStartRound: null });
     // 用真实桥翻译(与旧路径同一个 /api/v1/translate)
     const req = http.request({
@@ -287,6 +289,7 @@ function freshEnv(cfg, envOpts) {
     bridgePanel, setUrlCalls, createdPanels, wedge,
     btipcWindows, btipcShots, imageHandlers,
     btipcReqCount: () => btipcReqCount,
+    btipcReqTexts: () => btipcReqTexts.slice(),
     addRow(kind, sender, text, opts) {
       const row = new MockPanel(null).setClass("ChatMessage", "Expired");
       if (opts && opts.own) row.setClass("IsSelf");
@@ -517,6 +520,23 @@ async function test8_consecutiveIncoming() {
   assert("both rows translated", ok && !!l1 && !!l2, l1 && l1.text + " | " + l2 && l2.text);
   assert("row1 label is translation of msg1", l1 && l1.text.indexOf("hello") === -1 && l1.text.length > 0, l1 && l1.text);
   assert("row2 label is translation of msg2", l2 && l2.text.indexOf("gg") === -1 && l2.text.length > 0, l2 && l2.text);
+}
+
+// 同一句在普通聊天与 HUD 顶栏各有一份 DOM 副本时,只能请求一次。
+async function test8b_duplicateTextDedup() {
+  console.log("\n[8b] duplicate HUD/chat copies of one message -> one BTIPC request, both labels filled");
+  const env = freshEnv(CFG.translationOnly);
+  const text = "duplicate chat dedup test";
+  const row = env.addRow("text", "Alice", text);
+  const hud = env.addHudRow(text);
+  const ok = await waitFor(() => {
+    return labelsOf(row).length > 0 && hud.FindChildrenWithClassTraverse("LCTTranslationHud").length > 0;
+  }, 20000);
+  const hudLabels = hud.FindChildrenWithClassTraverse("LCTTranslationHud");
+  const copies = env.btipcReqTexts().filter((s) => s === text).length;
+  assert("both normal and HUD copies translated", ok && labelsOf(row).length === 1 && hudLabels.length === 1,
+    "chat=" + labelsOf(row).length + " hud=" + hudLabels.length);
+  assert("duplicate text uses exactly one BTIPC request", copies === 1, "requests=" + copies);
 }
 
 // HUD 顶栏聊天翻译(方案 A:不改布局,扫描 CitadelHudTopBarChat 的 Messages 容器)
@@ -796,6 +816,7 @@ async function main() {
   await test6_ownMessageSkipped();
   await test7_consecutiveOutgoing();
   await test8_consecutiveIncoming();
+  await test8b_duplicateTextDedup();
   await test9_hudTopBarTranslation();
   await test10_hudOwnMessageSkipped();
   await test11_hudBothTeamsFoundById();
