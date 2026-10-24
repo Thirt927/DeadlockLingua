@@ -5896,6 +5896,8 @@ function injectTranslation(row, sig, text) {
     try { insideChat = !!panel.BAscendantHasClass("CitadelChat"); } catch (e) {}
     diagLog("setopen", "PANORAMA: settings opened vis=" + vis + " saveBtn=" + (saveBtn ? "yes" : "no") + " inChat=" + (insideChat ? "yes" : "no"));
     syncPanelFromConfig();
+    // 恢复上次所在的标签页;LCTShowTab 会同步页显隐、标签高亮和状态栏提示
+    LCTShowTab(settingsTab || "common");
     // 面板直接吃内存里的 State.cfg —— **不**在打开时向桥读配置:
     // `op=config` 的应答 1313 字节 = 132 帧,超过协议 128 帧(1280B)上限,走位信道收不到。
     // UI 偏好在开机时已由 `op=ui`(254B)同步进来,这里无需再问桥,所以面板是秒开的。
@@ -5915,10 +5917,11 @@ function injectTranslation(row, sig, text) {
     try {
       if (hasClass(panel, SETTINGS_VISIBLE_CLASS)) {
         let focused = "";
-        const first = findChild(panel, "LCTEnabled");
+        const focusId = settingsTab === "service" ? "LCTProviderSelect" : (settingsTab === "advanced" ? "LCTTimeout" : "LCTEnabled");
+        const first = findChild(panel, focusId) || findChild(panel, "LCTEnabled");
         if (first && first.SetFocus) { first.SetFocus(); focused = "panel-first"; }
         else if (panel.SetFocus) { panel.SetFocus(); focused = "panel"; }
-        diagLog("focus", "PANORAMA: settings focus -> " + (focused || "none"));
+        diagLog("focus", "PANORAMA: settings focus -> " + (focused || "none") + " tab=" + settingsTab);
       }
     } catch (e) {}
   }
@@ -5942,9 +5945,39 @@ function injectTranslation(row, sig, text) {
   let lastSettingsToggleAt = 0;
   // 开合状态**由 JS 记**,不用 hasClass 反查 —— 实测 hasClass(panel,"LCTVisible") 恒为 false
   // (日志里 toggle 每次都报 open),导致面板永远关不掉。以本地状态位为准更可靠。
-  // 高级设置折叠状态(纯 UI 状态,不落盘;默认收起)
-  let uiAdvancedOpen = false;
+  // 服务商字段现在由「服务商」标签页承载,不再折叠;保持 true 让 syncProviderRows 正常显示
+  let uiAdvancedOpen = true;
   let settingsOpen = false;
+  let settingsTab = "common";
+
+  // 常用 / 服务商 / 高级 标签页切换
+  function LCTShowTab(tab) {
+    const root = getRoot();
+    const defs = [
+      ["common", "LCTPageCommon", "LCTTabCommon"],
+      ["service", "LCTPageService", "LCTTabService"],
+      ["advanced", "LCTPageAdvanced", "LCTTabAdvanced"],
+    ];
+    for (let i = 0; i < defs.length; i += 1) {
+      const on = defs[i][0] === tab;
+      const page = findChild(root, defs[i][1]);
+      const nav = findChild(root, defs[i][2]);
+      if (page) {
+        try { if (on) page.AddClass(SETTINGS_VISIBLE_CLASS); else page.RemoveClass(SETTINGS_VISIBLE_CLASS); } catch (e) {}
+      }
+      if (nav) {
+        try { if (on) nav.AddClass("LCTTabActive"); else nav.RemoveClass("LCTTabActive"); } catch (e) {}
+      }
+    }
+    settingsTab = tab;
+    if (tab === "service") {
+      syncProviderRows();
+    } else if (tab === "advanced") {
+      setStatus("高级选项一般保持默认");
+    } else {
+      setStatus("常用设置 · 改完点保存");
+    }
+  }
 
   function LCTToggleSettings() {
     const now = nowMs();
@@ -6572,6 +6605,7 @@ function injectTranslation(row, sig, text) {
   exportGlobal("LCTPickOption", LCTPickOption);
   exportGlobal("LCTSave", LCTSave);
   exportGlobal("LCTTest", LCTTest);
+  exportGlobal("LCTShowTab", LCTShowTab);
   exportGlobal("LCTEscapeOpenSettings", openEscapeSettings);
 
   exportGlobal("LCTRowHovered", function (panel) {

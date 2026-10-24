@@ -1,4 +1,4 @@
-﻿/* Babel Tower - 聊天翻译 UI 样式
+/* Babel Tower - 聊天翻译 UI 样式
    仅使用 Source 2 Panorama 支持的 CSS(flow-children / align / visibility 等),
    技术写法参照已发布的同类 mod(如 DLCT)验证过的模式。 */
 
@@ -55,8 +55,8 @@
    - 控件统一高度 30px / 圆角 4px / 1px 边框;正文字号 13px,分组标题 11px */
 .LCTSettingsPanel {
   align: center center;
-  width: 560px;
-  height: 620px;
+  width: 600px;
+  height: 640px;
   background-color: gradient( linear, 0% 0%, 0% 100%, from( #151b22 ), color-stop( 0.5, #0e1318 ), to( #0a0d10 ) );
   border: 1px solid rgba(201, 164, 78, 0.22);
   border-radius: 8px;
@@ -101,6 +101,53 @@
   color: #8a94a3;
   vertical-align: center;
   margin-left: 8px;
+}
+
+/* 标签栏:常用 / 服务商 / 高级 */
+.LCTTabBar {
+  width: 100%;
+  height: 38px;
+  flow-children: right;
+  padding: 0px 10px;
+  background-color: rgba(0, 0, 0, 0.18);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.LCTTab {
+  height: 38px;
+  padding: 0px 16px;
+  background-color: transparent;
+  border: 0px solid transparent;
+  border-bottom: 2px solid transparent;
+  color: #8d97a3;
+  font-size: 12px;
+  font-weight: semi-bold;
+  text-align: center;
+  transition-property: color, border-color;
+  transition-duration: 0.15s;
+  transition-timing-function: ease-in-out;
+}
+
+.LCTTab Label {
+  color: #8d97a3;
+  vertical-align: middle;
+}
+
+.LCTTab:hover {
+  color: #ffffff;
+}
+
+.LCTTab:hover Label {
+  color: #ffffff;
+}
+
+.LCTTab.LCTTabActive {
+  color: #e7b96b;
+  border-bottom: 2px solid #c9a44e;
+}
+
+.LCTTab.LCTTabActive Label {
+  color: #e7b96b;
 }
 
 
@@ -159,6 +206,20 @@
   flow-children: down;
   overflow: squish scroll;
   padding: 6px 14px 12px 14px;
+}
+
+/* 标签页:每个页面独立滚动,常用页一屏放下 */
+.LCTSettingsPage {
+  width: 100%;
+  height: 100%;
+  flow-children: down;
+  overflow: squish scroll;
+  padding: 6px 14px 12px 14px;
+  visibility: collapse;
+}
+
+.LCTSettingsPage.LCTVisible {
+  visibility: visible;
 }
 
 /* 分组标题 */

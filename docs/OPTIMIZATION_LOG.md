@@ -1904,3 +1904,24 @@ ode -e "JSON.parse(...)" 通过)。
   - 关闭面板后 `/tr` 是否仍正常；
   - 与 QOL Lock / Show Rank 同装时入口是否仍在（运行时注入，不覆盖 ESC 布局）；
   - 若入口位置被挡，提供截图调整锚点。
+
+
+## 2026-10-24: /tr 面板标签页重构（第 84 版）
+
+- **背景**: 原面板是 16+ 项的单列长滚动，常用开关、服务商字段、超时/日志混在一起；用户要求做一版设置界面 UI 优化。
+- **方案**: 保持实机验证过的「标签在上 + 控件在下（全宽）」堆叠行、30px 控件、右下角 X 不变，把内容拆成 **常用 / 服务商 / 高级** 三个标签页；面板从 560×620 调整为 600×640，常用页 5 项一屏放下；服务商字段不再用「高级设置」折叠，直接放在服务商页。
+- **改动文件**:
+  - `mod/panorama/layout/chat.xml`: 新增 `LCTTabBar` 与 `LCTPageCommon/Service/Advanced`，按页重排全部行与菜单；移除 `LCTAdvanced` 折叠头。
+  - `mod/panorama/styles/lingua_chat.css`: 面板 600×640；新增 `.LCTTabBar` / `.LCTTab` / `.LCTSettingsPage` 样式；行/控件样式保持不变。
+  - `mod/panorama/scripts/lingua_chat.js`: `uiAdvancedOpen=true`；新增 `LCTShowTab`（页显隐 + 标签高亮 + 状态提示）；打开面板恢复上次标签并聚焦对应首个控件；导出 `LCTShowTab`。
+  - `docs/ui/panel-tabbed.html` / `.png`: 浏览器 1:1 预览图（非游戏截图）。
+- **验证方式**:
+  - XML 解析、`node --check` 通过；
+  - `scripts/lingua_chat_simtest.js` 58/0；
+  - `scripts/test_steamid_roster.js` 3/0；
+  - 未构建 VPK、未实机（本机无游戏与 CSDK）。
+- **仍需用户测试**:
+  - `/tr` 打开后三个标签是否正常切换、常用页是否一屏放下；
+  - 服务商页的 Key/端点/回退字段是否按服务商显隐；
+  - ESC 入口打开的面板里标签是否同样可用；
+  - 按住 Tab 时标签按钮/控件的焦点顺序是否顺手；若常用页超出一屏，优先收 row padding。
