@@ -2,6 +2,22 @@
 
 所有重要变更都会记录在此文件。
 
+## Unreleased
+
+### 新增
+
+- **ESC 菜单「翻译设置」入口**：运行时注入到 ESC 左栏，点击把现有 `LCTSettingsPanel`
+  临时挂到 `CitadelHudEscapeMenu` 下打开，关闭/ESC 菜单收起时自动挂回聊天布局。
+  - 复用同一个 `State` 与 BTIPC 客户端，不复制面板、不额外占用窄带信道；
+  - 不覆盖 `hud_escape_menu.xml`，可与 QOL Lock / Show Rank 等同样改 ESC 菜单的 mod 共存；
+  - 打开时创建全屏遮罩，挡住 `EscapeBackground` 的 resume 点击。
+- ESC 菜单有原生鼠标指针，面板可以直接点，不再需要「按住 Tab 出指针 + 点右下角」。
+- `pollSteamIdRoster` 在 ESC 关闭时兜底把面板收回聊天布局，避免状态错位。
+
+### 仍需实机验证
+
+- `SetParent` 跨布局把面板挂到 ESC 根在游戏内是否稳定；入口在左栏的落点是否被其他菜单项遮挡。
+
 ## v2.1.0 - 2026-10-16
 
 ### 发版前面板修复（2026-10-14 至 2026-10-16）

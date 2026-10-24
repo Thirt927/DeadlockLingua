@@ -1885,3 +1885,22 @@ ode -e "JSON.parse(...)" 通过)。
   - 删除 `.LCTToggleValue` 的固定 `height: 30px`,同样改为自适应高度 + 父容器垂直居中。
 - **验证方式**: `scripts/build.ps1` 编译 7 个资源成功;产物复制为 `dist/pak22_dir.vpk` 并部署到 Deadlock 的 `game/citadel/addons/pak22_dir.vpk`(331,033 字节,2026-10-16 00:20);用 vpkeditcli 从 VPK 解包 `panorama/styles/lingua_chat.vcss_c`,确认 `.LCTSelectValue` / `.LCTToggleValue` 已不再含 `height: 30px`。
 - **仍需用户测试**: 重启 Deadlock 后打开设置面板,检查下拉值、开关值文字是否已在 30px 控件框内上下居中;若仍有少量偏差,需要一张游戏内截图再针对游戏 sans 中文字体的具体 ascent/descent 微调。
+
+
+## 2026-10-24: ESC 菜单「翻译设置」入口（v2.1.0 宿主编排）
+
+- **背景**: v2.1.0 的游戏内面板在聊天布局里，需要按住 Tab 出指针才能点，且右下角 X 容易被全屏 Tab 界面挡；完整设置的网页页又要离开游戏。用户要求把入口放到 ESC 菜单，直接使用游戏内面板。
+- **方案**: 不复制面板、不新增 BTIPC 客户端。运行时往 ESC 左栏注入一个「翻译设置」按钮；点击时把现有 `LCTSettingsPanel` 从聊天布局 `SetParent` 到 `CitadelHudEscapeMenu`，创建全屏遮罩挡住 `EscapeBackground` 的 resume 点击；关闭或 ESC 菜单收起时 `SetParent` 回聊天布局。ESC 菜单自带鼠标指针，面板可直接操作。
+- **改动文件**:
+  - `mod/panorama/scripts/lingua_chat.js`: `ensureEscapeSettingsButton` / `openEscapeSettings` / `restoreEscPanel` / `ensureEscapeBackdrop`；`closeSettingsPanel` 恢复父节点；`pollSteamIdRoster` 在 ESC 关闭时兜底；导出 `LCTEscapeOpenSettings`。
+- **为什么不用网页**: 用户明确不要网页设置；ESC 菜单有指针，游戏内面板可以直接点，不必离开游戏。
+- **验证方式**:
+  - `node --check` 通过；
+  - `scripts/lingua_chat_simtest.js` 58/0；
+  - `scripts/test_steamid_roster.js` 3/0（模拟 ESC 根里已出现「翻译设置」按钮）。
+  - 未构建 VPK、未实机（本机无游戏与 CSDK）。
+- **仍需用户测试**:
+  - 重启游戏后按 ESC，看左栏是否出现「翻译设置」；点击能否把面板挂到 ESC 菜单并直接点击；
+  - 关闭面板后 `/tr` 是否仍正常；
+  - 与 QOL Lock / Show Rank 同装时入口是否仍在（运行时注入，不覆盖 ESC 布局）；
+  - 若入口位置被挡，提供截图调整锚点。

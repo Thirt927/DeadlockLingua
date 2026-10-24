@@ -1,4 +1,4 @@
-﻿// Babel Tower - Deadlock 聊天翻译 Panorama 脚本
+// Babel Tower - Deadlock 聊天翻译 Panorama 脚本
 // ------------------------------------------------------------------
 // 独立实现(不复制任何现有 mod 代码),技术路线与 DLCT 一致:
 //   扫描聊天行 -> 去重 -> 隐藏 HTML 面板桥接本地 Core -> 原文下方追加译文
@@ -1619,6 +1619,129 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
     } catch (e) {}
   }
 
+  // ESC 左栏注入「翻译设置」入口:把现有 LCTSettingsPanel 临时挂到 ESC 根,
+  // 复用同一个 State / BTIPC 客户端(不复制面板,不抢窄带信道)。
+  // 关闭时挂回原聊天布局;ESC 菜单关闭时由 pollSteamIdRoster 兜底恢复。
+  const ESC_SETTINGS_BUTTON_ID = "LCTSettingsMenuButton";
+  let escSettingsButtonLogged = false;
+  let escHostParent = null;   // 面板原来的父节点(聊天布局根)
+  let escHostedPanel = null;  // 当前挂到 ESC 的面板实例
+  let escBackdrop = null;     // ESC 里的遮罩(挡住 EscapeBackground 的 resume 点击)
+
+  function ensureEscapeBackdrop(escRoot) {
+    if (escBackdrop && isValid(escBackdrop)) return;
+    try {
+      let existing = null;
+      try { existing = findChild(escRoot, "LCTSettingsBackdrop"); } catch (e) {}
+      if (existing) { escBackdrop = existing; return; }
+      const bd = $.CreatePanel("Panel", escRoot, "LCTSettingsBackdrop");
+      if (!bd) return;
+      bd.style.width = "100%";
+      bd.style.height = "100%";
+      bd.style.backgroundColor = "rgba(0, 0, 0, 0.55)";
+      bd.style.zIndex = "4900";
+      if (typeof bd.SetPanelEvent === "function") {
+        bd.SetPanelEvent("onactivate", function () {
+          settingsOpen = false;
+          closeSettingsPanel();
+        });
+      }
+      escBackdrop = bd;
+    } catch (e) {
+      diagLog("escbdfail", "PANORAMA: ESC backdrop failed: " + (e && e.message ? e.message : String(e)));
+    }
+  }
+
+  function restoreEscPanel() {
+    const panel = escHostedPanel;
+    if (escBackdrop && isValid(escBackdrop)) {
+      try { escBackdrop.DeleteAsync(0); } catch (e) {}
+    }
+    escBackdrop = null;
+    if (panel && isValid(panel) && escHostParent && isValid(escHostParent)) {
+      try { panel.SetParent(escHostParent); } catch (e) {}
+    }
+    escHostParent = null;
+    escHostedPanel = null;
+  }
+
+  function openEscapeSettings() {
+    const panel = findChild(getRoot(), SETTINGS_PANEL_ID);
+    if (!panel) {
+      setStatus("设置面板未找到(chat.xml 未生效?)");
+      return;
+    }
+    const escRoot = (State.escRoot && isValid(State.escRoot)) ? State.escRoot : findEscapeMenuRoot(getRoot());
+    if (!isValid(escRoot)) {
+      setStatus("ESC 菜单还没就绪,请重新按 ESC");
+      return;
+    }
+    if (!escHostParent) {
+      try { escHostParent = panel.GetParent ? panel.GetParent() : null; } catch (e) {}
+    }
+    escHostedPanel = panel;
+    ensureEscapeBackdrop(escRoot);
+    let moved = false;
+    try {
+      panel.SetParent(escRoot);
+      moved = true;
+    } catch (e) {
+      diagLog("escmovefail", "PANORAMA: settings SetParent(ESC) failed: " + (e && e.message ? e.message : String(e)));
+    }
+    if (!moved) {
+      setStatus("无法把设置面板挂到 ESC 菜单");
+      restoreEscPanel();
+      return;
+    }
+    settingsOpen = true;
+    openSettingsPanel();
+    diagLog("escopen", "PANORAMA: settings hosted in ESC root");
+  }
+
+  function ensureEscapeSettingsButton(escapeRoot) {
+    if (!isValid(escapeRoot)) return;
+    try {
+      if (findChild(escapeRoot, ESC_SETTINGS_BUTTON_ID)) return;
+    } catch (e) {}
+    try {
+      const host = findChild(escapeRoot, "LeftStripe") || escapeRoot;
+      const btn = $.CreatePanel("Button", host, ESC_SETTINGS_BUTTON_ID);
+      if (!btn) return;
+      btn.AddClass("nav_menu_item");
+      btn.AddClass("minor");
+      btn.style.width = "220px";
+      btn.style.height = "40px";
+      btn.style.horizontalAlign = "left";
+      btn.style.verticalAlign = "bottom";
+      btn.style.marginLeft = "40px";
+      btn.style.marginBottom = "48px";
+      btn.style.zIndex = "9000";
+      const icon = $.CreatePanel("Panel", btn, ESC_SETTINGS_BUTTON_ID + "Icon");
+      if (icon) {
+        icon.AddClass("smallIcon");
+        icon.AddClass("GearIcon");
+      }
+      const label = $.CreatePanel("Label", btn, ESC_SETTINGS_BUTTON_ID + "Label");
+      if (label) {
+        label.AddClass("menuButtonLabel");
+        label.text = "翻译设置";
+      }
+      const handler = function () { openEscapeSettings(); };
+      const hasSetPanelEvent = typeof btn.SetPanelEvent === "function";
+      if (hasSetPanelEvent) btn.SetPanelEvent("onactivate", handler);
+      else {
+        try { btn.SetAttributeString("onactivate", "LCTEscapeOpenSettings();"); } catch (e) {}
+      }
+      diagLog("escbtnmode", "PANORAMA: ESC settings button mode=" + (hasSetPanelEvent ? "SetPanelEvent" : "attribute"));
+      if (!escSettingsButtonLogged) {
+        escSettingsButtonLogged = true;
+        diagLog("escbtn", "PANORAMA: ESC settings entry injected");
+      }
+    } catch (e) {
+      diagLog("escbtnfail", "PANORAMA: ESC settings entry failed: " + (e && e.message ? e.message : String(e)));
+    }
+  }
+
   function pollSteamIdRoster() {
     try {
       const root = getRoot();
@@ -1628,6 +1751,12 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
       State.rosterNextPoll = nowMs() + ROSTER_POLL_MS;
       const escapeRoot = findEscapeMenuRoot(root);
       State.escRoot = isValid(escapeRoot) ? escapeRoot : null;
+      if (isValid(escapeRoot)) ensureEscapeSettingsButton(escapeRoot);
+      // ESC 关闭时把临时挂过去的面板收回聊天布局,避免 settingsOpen 状态与可见性错位
+      if (settingsOpen && escHostedPanel && (!isValid(escapeRoot) || !isEscapeMenuOpen(escapeRoot, root))) {
+        settingsOpen = false;
+        closeSettingsPanel();
+      }
       // 被动路径:资料卡已打开(用户自己悬停/点击)时零成本扫描+差异学习,
       // 不做悬停模拟,不会主动打开任何人的资料卡
       captureVisibleProfileAccounts(root);
@@ -5795,12 +5924,15 @@ function injectTranslation(row, sig, text) {
   }
 
   function closeSettingsPanel() {
-    const panel = findChild(getRoot(), SETTINGS_PANEL_ID);
+    const panel = (escHostedPanel && isValid(escHostedPanel)) ? escHostedPanel : findChild(getRoot(), SETTINGS_PANEL_ID);
     if (panel) {
       try {
         panel.RemoveClass(SETTINGS_VISIBLE_CLASS);
       } catch (e) {}
     }
+    // 先隐藏,再把面板从 ESC 根挂回聊天布局,最后释放输入焦点
+    restoreEscPanel();
+    settingsOpen = false;
     // 关闭后必须释放输入焦点:面板里的 TextEntry(如"超时/延迟时间")若继续持焦,
     // WASD 会被当文本读,导致退出界面后人物无法移动。必须在隐藏面板之后调用。
     dropInputFocus();
@@ -5823,6 +5955,8 @@ function injectTranslation(row, sig, text) {
       settingsOpen = false;
       closeSettingsPanel();
     } else {
+      // 上一次可能停留在 ESC 根里(ESC 菜单被关掉时还没轮到 poll 兜底),先挂回聊天布局
+      if (escHostParent) restoreEscPanel();
       settingsOpen = true;
       openSettingsPanel();
     }
@@ -6438,6 +6572,7 @@ function injectTranslation(row, sig, text) {
   exportGlobal("LCTPickOption", LCTPickOption);
   exportGlobal("LCTSave", LCTSave);
   exportGlobal("LCTTest", LCTTest);
+  exportGlobal("LCTEscapeOpenSettings", openEscapeSettings);
 
   exportGlobal("LCTRowHovered", function (panel) {
     try {
