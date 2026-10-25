@@ -3620,11 +3620,33 @@ function resolveSteamId(record) {
     return !!pa && pa === pb;
   }
 
+  // 是否含有"字母"(不限拉丁字母)。
+  // 不能用 /^[\d\s\W_]+$/ 判"纯数字/符号":JS 的 \W 把西里尔、希腊、假名等非 ASCII
+  // 字母全算成符号,俄语 "нет" 会被误判成纯符号而跳过翻译。这里按码位显式列出主要
+  // 文字系统的字母区段(拉丁/希腊/西里尔/希伯来/阿拉伯/天城文/泰文/日文/中文/韩文)。
+  function hasLetterChar(text) {
+    const s = String(text || "");
+    for (let i = 0; i < s.length; i += 1) {
+      const c = s.charCodeAt(i);
+      if ((c >= 0x41 && c <= 0x5a) || (c >= 0x61 && c <= 0x7a)) return true; // 拉丁
+      if (c < 0x80) continue;
+      if (c >= 0xc0 && c <= 0x24f && c !== 0xd7 && c !== 0xf7) return true; // 拉丁扩展(带重音等)
+      if (c >= 0x370 && c <= 0x52f) return true; // 希腊 + 西里尔
+      if (c >= 0x590 && c <= 0x6ff) return true; // 希伯来 + 阿拉伯
+      if (c >= 0x900 && c <= 0x97f) return true; // 天城文
+      if (c >= 0xe00 && c <= 0xe7f) return true; // 泰文
+      if (c >= 0x3040 && c <= 0x30ff) return true; // 日文假名
+      if ((c >= 0x3400 && c <= 0x4dbf) || (c >= 0x4e00 && c <= 0x9fff)) return true; // 中文
+      if ((c >= 0x1100 && c <= 0x11ff) || (c >= 0xac00 && c <= 0xd7af)) return true; // 韩文
+    }
+    return false;
+  }
+
   function shouldSkip(record) {
     const text = record.text;
     if (!text || text.length < 2) return true;
     if (text.charAt(0) === "/") return true; // 指令消息
-    if (/^[\d\s\W_]+$/.test(text)) return true; // 纯数字/符号
+    if (!hasLetterChar(text)) return true; // 纯数字/符号/表情
     if (record.isOwn && State.cfg.translateOwn === false) return true; // 可配置:默认翻译自己的消息
     if (!State.cfg.force && isTargetLanguageText(text)) return true; // 已为目标语言
     return false;
