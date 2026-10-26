@@ -78,7 +78,7 @@
 			<Label id="LCTOutgoingHint" class="LCTOutgoingHint" text="" />
 		</Panel>
 		<!-- Babel Tower 设置面板(默认隐藏、居中弹窗;ESC 关闭)
-     第 85 版:回到第一版 800×620 视觉 —— 左导航、金色主色、行内标题/说明 + 右侧控件 -->
+     第 86 版:回到第一版 800×620 视觉 —— 左导航、金色主色、行内标题/说明 + 右侧控件 -->
 		<Panel id="LCTSettingsPanel" class="LCTSettingsPanel" oncancel="LCTCloseSettings();">
 			<Panel class="LCTSettingsHeader">
 				<Panel class="LCTBrandMark"><Label class="LCTBrandMarkText" text="DL" /></Panel>

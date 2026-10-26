@@ -2144,7 +2144,7 @@ ode -e "JSON.parse(...)" 通过)。
   - `CHANGELOG.md`: 更新 Unreleased 面板条目与实机验证项。
 - **验证方式**:
   - XML 解析、`node --check` 通过；
-  - `scripts/lingua_chat_simtest.js` 58/0；`scripts/test_steamid_roster.js` 3/0；
+  - `scripts/lingua_chat_simtest.js` 60/0；`scripts/test_steamid_roster.js` 3/0；
   - 未构建 VPK、未实机（本机无游戏与 CSDK）。
 - **仍需用户测试**:
   - 800×620 在游戏字体下是否一屏/滚动合适；两栏行标题与右侧控件是否垂直对齐；
