@@ -2130,3 +2130,15 @@ ode -e "JSON.parse(...)" 通过)。
 - **改动内容**: 新增 `hasLetterChar()`,按码位枚举拉丁/拉丁扩展/希腊/西里尔/希伯来/阿拉伯/天城文/泰文/假名/中文/韩文的字母区段;`shouldSkip()` 改为 `!hasLetterChar(text)`。
 - **验证方式**: `node --check` 通过;离线比对 `нет` / `ты коч братан` / `как дела у команды` / `こんにちは` / `안녕` / `مرحبا` / `γεια` 均判定含字母,`!!!` / `123 456` / `👍👍` / `...` 仍跳过;桥端 `POST /api/v1/translate` 对俄语实测返回中文译文;`build.ps1` 编译成功,`dist/pak22_dir.vpk`(364,542 字节)已部署到 addons。
 - **仍需用户测试**: 重启 Deadlock 进对局,确认俄语/其他语种聊天出现中文译文。
+
+## 第九十五轮(2026-10-25): 聊天框内单条消息语言覆盖(`//sd 俄语 …` / `//ru …`)
+
+- **需求**: 不想每次去设置页切「出站目标语言」,而是在聊天框里直接指定这一条用什么语言发。
+- **设计**: 提交时先解析前缀再走原有出站链路。显式形式 `//sd <语言> <正文>`;短形式 `//<语言代码或别名> <正文>`。只影响这一条(一次性),命中后固定「只发译文」,并强制翻译(即使设置页 `outgoing=off`)。
+- **改动文件**: `mod/panorama/scripts/lingua_chat.js`、`scripts/lingua_chat_simtest.js`、`README.md`。
+- **改动内容**:
+  - 新增 `LANG_ALIASES`(中简/繁、英、俄、日、韩、法、德、西、葡、意、波兰、乌克兰、阿拉伯、土耳其、泰、越南、印尼;代码与中英文名均可)与 `parseLangOverride()`。
+  - `handleChatSubmit` 在出站 gate 之前插入覆盖分支;`translateOutgoing` / `enqueueOutgoing` 增加 `target` 参数并透传到 `buildBridgeUrl` / `buildApiUrl` / `btipcEnvelope`(桥端本就逐请求接收 `targetLanguage`,无需改动)。
+  - 防泄漏:`//sd <未知语言>` 明确报错且**不发送**(保留输入);`//<未知 token> <正文>` 丢掉前缀后**按设置页的出站方式**(`off`/`translation`/`bilingual` + 默认目标语言)翻译正文再发(原实现是把整条原样发出);翻译关闭/桥离线时只发去掉前缀的正文;翻译超时也发正文。
+- **验证方式**: `node --check` 通过;`lingua_chat_simtest.js` 新增 [7b]/[7c]/[7d] 用例(俄语 `//sd ru`、日语 `//ja` 短形式、未知语言不发送、`//随便 正文` 按设置翻译、`outgoing=off` 时只发去前缀正文),全量 **PASS 68 / FAIL 0**;`build.ps1` 编译成功,`dist/pak22_dir.vpk` 已部署到 addons。
+- **仍需用户测试**: 重启 Deadlock,在聊天框试 `//sd 俄语 我们一起去推中路`、`//ru hello` 与 `//随便 我们推中`,确认只发出对应译文/按设置翻译的正文,且下一条恢复默认语言。

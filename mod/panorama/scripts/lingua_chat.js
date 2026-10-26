@@ -3856,7 +3856,7 @@ function injectTranslation(row, sig, text) {
     pumpQueue();
   }
 
-  function enqueueOutgoing(text, done) {
+  function enqueueOutgoing(text, done, target) {
     // 超时兜底:翻译超过 OUTGOING_TIMEOUT_MS 未返回,按原文发送,避免用户等待/重复按键。
     // 计时放在 dispatchJob(任务真正开始处理时),排队等待不计入——
     // 否则连续快速发 3 条时,第 3 条还在排队就已超时,直接发原文。
@@ -3868,7 +3868,8 @@ function injectTranslation(row, sig, text) {
       done(translated, detected);
     };
     // 出站优先:插队到前面,不让用户的发送等在大量入站翻译后面
-    State.queue.unshift({ kind: "outgoing", row: null, sig: null, record: { text: text }, attempts: 0, done: once, enqueuedAt: nowMs() });
+    // target 非空 = 本条消息的语言覆盖(//sd 俄语 / //ru),否则按设置页的出站目标语言
+    State.queue.unshift({ kind: "outgoing", row: null, sig: null, record: { text: text }, target: target || null, attempts: 0, done: once, enqueuedAt: nowMs() });
     pumpQueue();
   }
 
@@ -3927,7 +3928,7 @@ function injectTranslation(row, sig, text) {
     }
     const text = encodeURIComponent(job.record.text);
     const source = encodeURIComponent("auto");
-    const target = encodeURIComponent(job.kind === "outgoing" ? resolveOutgoingTarget() : targetLanguage());
+    const target = encodeURIComponent(job.target || (job.kind === "outgoing" ? resolveOutgoingTarget() : targetLanguage()));
     const tm = job.kind === "outgoing" ? outgoingTimeoutMs() : (State.cfg.timeoutMs || 15000);
     return (
       base +
@@ -4097,7 +4098,7 @@ function injectTranslation(row, sig, text) {
       return base + job.op + "?d=" + (job.data || "{}");
     }
     const text = encodeURIComponent(job.record.text);
-    const target = encodeURIComponent(job.kind === "outgoing" ? resolveOutgoingTarget() : targetLanguage());
+    const target = encodeURIComponent(job.target || (job.kind === "outgoing" ? resolveOutgoingTarget() : targetLanguage()));
     // provider 不传:由桥按 config.json 的 provider 执行(设置面板保存或手改 config.json 均生效,
     // 避免游戏侧 State.cfg.provider 与桥不同步导致 OpenAI/DeepSeek 配置不生效)
     // 显式传 timeoutMs:出站翻译用设置面板的"超时(ms)"(未配则回退 OUTGOING_TIMEOUT_MS),
@@ -4805,7 +4806,7 @@ function injectTranslation(row, sig, text) {
       } catch (e) {}
       return "op=" + job.op + "\n" + body;
     }
-    const target = String(job.kind === "outgoing" ? resolveOutgoingTarget() : targetLanguage());
+    const target = String(job.target || (job.kind === "outgoing" ? resolveOutgoingTarget() : targetLanguage()));
     if (/^[A-Za-z0-9-]{1,16}$/.test(target)) return "t=" + target + "\n" + job.record.text;
     return String(job.record.text);
   }
@@ -6088,6 +6089,64 @@ function injectTranslation(row, sig, text) {
     }
   }
 
+  // ================= 单条消息发送语言覆盖 =================
+  // 聊天框里直接写 `//sd 俄语 正文` 或 `//ru 正文`,只让这一条按指定语言发出(仅发译文)。
+  // 桥端 runTranslate 的 targetLanguage 本来就是逐请求传入,所以这里只做解析与透传。
+  const LANG_ALIASES = {
+    "zh": "zh-Hans", "zh-hans": "zh-Hans", "zh-cn": "zh-Hans", "cn": "zh-Hans", "chinese": "zh-Hans",
+    "中文": "zh-Hans", "汉语": "zh-Hans", "简体": "zh-Hans", "简体中文": "zh-Hans",
+    "zh-hant": "zh-Hant", "zh-tw": "zh-Hant", "tw": "zh-Hant",
+    "繁体": "zh-Hant", "繁体中文": "zh-Hant",
+    "en": "en", "english": "en", "英语": "en", "英文": "en",
+    "ja": "ja", "japanese": "ja", "日语": "ja", "日文": "ja",
+    "ko": "ko", "korean": "ko", "韩语": "ko", "韩文": "ko",
+    "ru": "ru", "russian": "ru", "俄语": "ru", "俄文": "ru",
+    "fr": "fr", "french": "fr", "法语": "fr", "法文": "fr",
+    "de": "de", "german": "de", "德语": "de", "德文": "de",
+    "es": "es", "spanish": "es", "西语": "es", "西班牙语": "es",
+    "pt": "pt", "portuguese": "pt", "葡语": "pt", "葡萄牙语": "pt",
+    "it": "it", "italian": "it", "意语": "it", "意大利语": "it",
+    "pl": "pl", "polish": "pl", "波兰语": "pl",
+    "uk": "uk", "ukrainian": "uk", "乌克兰语": "uk",
+    "ar": "ar", "arabic": "ar", "阿拉伯语": "ar",
+    "tr": "tr", "turkish": "tr", "土耳其语": "tr",
+    "th": "th", "thai": "th", "泰语": "th",
+    "vi": "vi", "vietnamese": "vi", "越南语": "vi",
+    "id": "id", "indonesian": "id", "印尼语": "id",
+  };
+
+  function langFromToken(token) {
+    return LANG_ALIASES[String(token || "").toLowerCase()] || null;
+  }
+
+  // 返回 { target, body } | { error } | null(不是语言指令,按普通聊天处理)
+  function parseLangOverride(text) {
+    const s = String(text || "").trim();
+    if (s.indexOf("//") !== 0) return null;
+    const rest = s.slice(2);
+    const sp = rest.search(/\s/);
+    const first = (sp === -1 ? rest : rest.slice(0, sp)).toLowerCase();
+    const afterFirst = sp === -1 ? "" : rest.slice(sp + 1).trim();
+    // 显式形式 `//sd <语言> <正文>`:语言不认识时明确报错,不把前缀当正文发出去
+    if (first === "sd") {
+      const sp2 = afterFirst.search(/\s/);
+      const langTok = (sp2 === -1 ? afterFirst : afterFirst.slice(0, sp2)).toLowerCase();
+      const body = sp2 === -1 ? "" : afterFirst.slice(sp2 + 1).trim();
+      if (!langTok) return { error: "用法: //sd <语言> <正文>" };
+      const target = langFromToken(langTok);
+      if (!target) return { error: "未知语言: " + langTok };
+      if (!body) return { error: "缺少正文: //sd " + langTok + " <正文>" };
+      return { target: target, body: body };
+    }
+    // 短形式 `//ru <正文>`:命中语言别名 → 按该语言发;未知 token → 按设置页的方式翻译正文
+    const target = langFromToken(first);
+    if (!target) {
+      if (!afterFirst) return null; // 只有 `//xxx`、没有正文:当普通聊天原样发
+      return { useSettings: true, body: afterFirst };
+    }
+    return { target: target, body: afterFirst };
+  }
+
   function clearInput() {
     try {
       const input = State.input || findChild(getRoot(), CHAT_INPUT_ID);
@@ -6129,6 +6188,63 @@ function injectTranslation(row, sig, text) {
       return;
     }
 
+    // 单条消息语言覆盖: //sd 俄语 正文 / //ru 正文(只影响这一条,且只发译文)
+    const langOverride = parseLangOverride(trimmed);
+    if (langOverride) {
+      if (langOverride.error) {
+        // 保留输入内容让用户改正,不发送:否则 `//sd 火星语 ...` 会整条发出去
+        setStatus(langOverride.error);
+        return;
+      }
+      const ovBody = String(langOverride.body).trim();
+      const ovTarget = langOverride.target;
+      // 翻译被关闭 / 桥已确认离线:发去掉前缀的正文,绝不把指令本身发出去
+      if (State.cfg.enabled === false || (!State.bridgeUp && State.bridgeOfflineSince)) {
+        setStatus(State.cfg.enabled === false ? "翻译已关闭,已按原文发送" : "翻译通道不可用,已按原文发送");
+        clearInput();
+        try { input.text = ovBody; } catch (e) {}
+        triggerStockSubmit(input);
+        clearInput();
+        return;
+      }
+      if (State.outgoingPending === ovBody) {
+        log("lang override dedupe: same text pending, ignored: " + ovBody.slice(0, 40));
+        return;
+      }
+      State.outgoingPending = ovBody;
+      setOutgoingHint("翻译成 " + ovTarget + "…");
+      clearInput();
+      translateOutgoing(ovBody, function (translated, detected) {
+        State.outgoingPending = null;
+        setOutgoingHint("");
+        const trText = String(translated || "").trim();
+        if (!trText) {
+          diagLog("outfail", "PANORAMA: lang override: translation unavailable (timeout/error), sending original body");
+          setStatus("翻译不可用,已按原文发送");
+        }
+        // 覆盖语义固定为「只发译文」;原文已是目标语言时原样发送正文
+        let send = (trText && !sameLanguage(detected, ovTarget)) ? trText : ovBody;
+        const MAX_SEND_CHARS = 400;
+        if (send.length > MAX_SEND_CHARS) send = send.slice(0, MAX_SEND_CHARS) + "…";
+        if (send !== ovBody) setStatus("已按 " + ovTarget + " 发送: " + String(send).slice(0, 40));
+        log("lang override " + ovTarget + " detected=" + (detected || "-") + " -> " + send.slice(0, 80));
+        const cur = safeText(input);
+        try { input.text = send; } catch (e) {}
+        triggerStockSubmit(input);
+        if (cur !== "" && cur !== ovBody) {
+          try { input.text = cur; } catch (e) {}
+        } else {
+          clearInput();
+        }
+      }, ovTarget);
+      return;
+    }
+
+    // //<未知 token> <正文>:按设置页的出站方式(off/translation/bilingual + 默认目标语言)
+    // 翻译「正文」后发送,前缀本身绝不发进聊天。`useSettings` 只换掉要发送的文本,
+    // 其余逻辑与普通回车完全一致。
+    const outgoingText = (langOverride && langOverride.useSettings) ? String(langOverride.body).trim() : trimmed;
+
     // 发送前翻译(off=发原文 / translation=仅译文 / bilingual=原文|译文)
     // 若检测到消息已是目标语言(sameLanguage),则按原文发送,不做无用翻译
     const outgoingMode = State.cfg.outgoing || "off";
@@ -6137,42 +6253,43 @@ function injectTranslation(row, sig, text) {
     // 上一轮就是因此把"没日志"误判成"没执行",这里必须走可采集的通道。
     diagLog("outgate", "PANORAMA: outgoing gate mode=" + outgoingMode +
       " enabled=" + (!!State.cfg.enabled) + " bridgeUp=" + (!!State.bridgeUp) +
-      " offlineSince=" + (!!State.bridgeOfflineSince));
-    if (State.cfg.enabled && outgoingMode !== "off" && trimmed.charAt(0) !== "/") {
+      " offlineSince=" + (!!State.bridgeOfflineSince) +
+      " prefixOverride=" + (outgoingText !== trimmed));
+    if (State.cfg.enabled && outgoingMode !== "off" && outgoingText.charAt(0) !== "/") {
       // 已确认桥离线时不要卡着不发:否则按回车"没反应",而且 outgoingPending
       // 去重会把之后每一次回车全部吞掉(表现就是"打 hello 按回车发不出去")。
       // 离线状态下翻译本来就不可能成功,直接按原文发送。
       if (!State.bridgeUp && State.bridgeOfflineSince) {
         log("outgoing: bridge unreachable, sending original without waiting");
         setStatus("翻译通道不可用,已按原文发送");
-        try { input.text = trimmed; } catch (e) {}
+        try { input.text = outgoingText; } catch (e) {}
         triggerStockSubmit(input);
         return;
       }
       const outTarget = resolveOutgoingTarget();
       // 防重复发送:同一文本翻译中,重复按 Enter 直接忽略(避免队列积压发多条)
       // 不同文本则排队(前一文本的翻译结果已提交,不冲突)
-      if (State.outgoingPending === trimmed) {
-        log("outgoing dedupe: same text pending, ignored: " + trimmed.slice(0, 40));
+      if (State.outgoingPending === outgoingText) {
+        log("outgoing dedupe: same text pending, ignored: " + outgoingText.slice(0, 40));
         return;
       }
-      State.outgoingPending = trimmed;
+      State.outgoingPending = outgoingText;
       // 立即清空输入框:视觉反馈"已发送",不再误以为没发出去而重复按键
       clearInput();
-      translateOutgoing(trimmed, function (translated, detected) {
+      translateOutgoing(outgoingText, function (translated, detected) {
         State.outgoingPending = null;
-        let send = trimmed;
-        if (translated && translated !== trimmed && !sameLanguage(detected, outTarget)) {
+        let send = outgoingText;
+        if (translated && translated !== outgoingText && !sameLanguage(detected, outTarget)) {
           const trText = String(translated).trim();
           if (outgoingMode === "translation") send = trText;
-          else if (outgoingMode === "bilingual") send = trimmed + " | " + trText;
+          else if (outgoingMode === "bilingual") send = outgoingText + " | " + trText;
           // 超长消息保护:游戏聊天发送有长度上限,拼接过长会被截断/失败;
           // 优先保留原文,译文超限部分截断加省略号
           const MAX_SEND_CHARS = 400;
           if (send.length > MAX_SEND_CHARS) {
             if (outgoingMode === "bilingual") {
-              const budget = Math.max(0, MAX_SEND_CHARS - trimmed.length - 3);
-              send = trimmed + " | " + (trText.length > budget ? trText.slice(0, budget) + "…" : trText);
+              const budget = Math.max(0, MAX_SEND_CHARS - outgoingText.length - 3);
+              send = outgoingText + " | " + (trText.length > budget ? trText.slice(0, budget) + "…" : trText);
             } else {
               send = send.slice(0, MAX_SEND_CHARS) + "…";
             }
@@ -6182,7 +6299,7 @@ function injectTranslation(row, sig, text) {
           // 翻译不可用/超时:按原文发送,但必须留可采集的日志,否则用户看到原文会以为服务商坏了
           diagLog("outfail", "PANORAMA: outgoing: translation unavailable (timeout/error), sending original");
           setStatus("翻译不可用,已按原文发送");
-        } else if (translated === trimmed || sameLanguage(detected, outTarget)) {
+        } else if (translated === outgoingText || sameLanguage(detected, outTarget)) {
           // 目标语言与原文相同(en->en 等):不发无用译文
           log("outgoing: no-op (detected=" + (detected || "unknown") + " == target), sending original");
           setStatus("原文已是目标语言,按原文发送");
@@ -6208,13 +6325,13 @@ function injectTranslation(row, sig, text) {
 
     // 常规发送:确保文本就位后触发原版发送(与 DLCT commitChatText 行为一致)
     try {
-      input.text = trimmed;
+      input.text = outgoingText;
     } catch (e) {}
     triggerStockSubmit(input);
     clearInput();
   }
 
-  function translateOutgoing(text, done) {
+  function translateOutgoing(text, done, target) {
     // ⚠️ 这里原本有一道"直连不可用就必须存在 HTML 面板"的闸门:
     //     const usable = detectAsyncWebRequest() || !!ensurePanel();
     //     if (!usable) { done(null, null); return; }
@@ -6223,7 +6340,7 @@ function injectTranslation(row, sig, text) {
     // 静默拦掉**:done(null,null) → 上层走"翻译不可用"分支 → 按原文发送。
     // 表现正是"发送前翻译没效果、发出去的是中文",且因为只 log() 而毫无痕迹。
     // (第六十七轮从 bridgePost 里清掉了同一道闸门,漏了这个副本。)
-    enqueueOutgoing(text, done);
+    enqueueOutgoing(text, done, target);
   }
 
   // ================= 设置面板 =================

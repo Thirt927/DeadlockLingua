@@ -510,6 +510,91 @@ async function test7_consecutiveOutgoing() {
   globalThis.$.DispatchEvent = origDispatch;
 }
 
+async function test7b_langOverride() {
+  console.log("\n[7b] //sd <lang> <body> -> only translation sent, prefix stripped (works with outgoing=off)");
+  const env = freshEnv(CFG.translationOnly); // outgoing=off:覆盖指令必须自己强制翻译
+  const input = env.contextPanel.FindChildTraverse("ChatInput") ||
+    env.contextPanel.addChild(new MockPanel("ChatInput"));
+  const submitted = [];
+  const origDispatch = globalThis.$.DispatchEvent;
+  globalThis.$.DispatchEvent = (name, panel) => {
+    if ((name === "CitadelChatInputSubmitted" || name === "CitadelChatTextSubmitted") && panel) {
+      submitted.push(String(panel.text || ""));
+    }
+    origDispatch(name, panel);
+  };
+
+  input.text = "//sd ru 我们一起去推中路";
+  globalThis.LCTOnChatSubmit();
+  const ok = await waitFor(() => submitted.length >= 1, 30000);
+  await sleep(400);
+  const sent = submitted[0] || "";
+  assert("submitted exactly once", ok && submitted.length === 1, JSON.stringify(submitted));
+  assert("sent text is Russian (Cyrillic)", /[\u0400-\u04FF]/.test(sent) && sent.indexOf("推中路") === -1, sent);
+  assert("command prefix not leaked", sent.indexOf("//") === -1 && sent.indexOf("sd") === -1, sent);
+
+  // 短形式 + 未知语言的显式指令不发送
+  input.text = "//ja 集合打团";
+  globalThis.LCTOnChatSubmit();
+  const okJa = await waitFor(() => submitted.length >= 2, 30000);
+  await sleep(400);
+  const sentJa = submitted[1] || "";
+  assert("short form //ja translated to Japanese", okJa && /[\u3040-\u30ff]/.test(sentJa) && sentJa.indexOf("集合打团") === -1, sentJa);
+
+  const before = submitted.length;
+  input.text = "//sd 火星语 不该发出去";
+  globalThis.LCTOnChatSubmit();
+  await sleep(1200);
+  assert("unknown language -> nothing submitted", submitted.length === before, JSON.stringify(submitted));
+  globalThis.$.DispatchEvent = origDispatch;
+}
+
+async function test7c_prefixUsesSettings() {
+  console.log("\n[7c] //<unknown token> <body> -> strip prefix, then translate body per settings");
+  const env = freshEnv(CFG.outgoingTranslation); // outgoing=translation, target=zh-Hans
+  const input = env.contextPanel.FindChildTraverse("ChatInput") ||
+    env.contextPanel.addChild(new MockPanel("ChatInput"));
+  const submitted = [];
+  const origDispatch = globalThis.$.DispatchEvent;
+  globalThis.$.DispatchEvent = (name, panel) => {
+    if ((name === "CitadelChatInputSubmitted" || name === "CitadelChatTextSubmitted") && panel) {
+      submitted.push(String(panel.text || ""));
+    }
+    origDispatch(name, panel);
+  };
+
+  input.text = "//随便 hello can you push mid";
+  globalThis.LCTOnChatSubmit();
+  const ok = await waitFor(() => submitted.length >= 1, 30000);
+  await sleep(300);
+  const sent = submitted[0] || "";
+  assert("body translated to Chinese per settings", ok && /[\u4e00-\u9fff]/.test(sent), sent);
+  assert("prefix and raw body not leaked", sent.indexOf("//") === -1 && sent.indexOf("随便") === -1 && sent.indexOf("hello") === -1, sent);
+  globalThis.$.DispatchEvent = origDispatch;
+}
+
+async function test7d_prefixUsesSettingsOff() {
+  console.log("\n[7d] //<unknown token> <body> with outgoing=off -> stripped body sent untranslated");
+  const env = freshEnv(CFG.translationOnly);
+  const input = env.contextPanel.FindChildTraverse("ChatInput") ||
+    env.contextPanel.addChild(new MockPanel("ChatInput"));
+  const submitted = [];
+  const origDispatch = globalThis.$.DispatchEvent;
+  globalThis.$.DispatchEvent = (name, panel) => {
+    if ((name === "CitadelChatInputSubmitted" || name === "CitadelChatTextSubmitted") && panel) {
+      submitted.push(String(panel.text || ""));
+    }
+    origDispatch(name, panel);
+  };
+
+  input.text = "//随便 hello there";
+  globalThis.LCTOnChatSubmit();
+  const ok = await waitFor(() => submitted.length >= 1, 8000);
+  await sleep(300);
+  assert("outgoing=off -> stripped body sent untranslated", ok && submitted.length === 1 && submitted[0] === "hello there", JSON.stringify(submitted));
+  globalThis.$.DispatchEvent = origDispatch;
+}
+
 async function test8_consecutiveIncoming() {
   console.log("\n[8] rapid consecutive incoming messages -> both translated, no cross-contamination");
   const env = freshEnv(CFG.translationOnly);
@@ -815,6 +900,9 @@ async function main() {
   await test5_pingBubbleKept();
   await test6_ownMessageSkipped();
   await test7_consecutiveOutgoing();
+  await test7b_langOverride();
+  await test7c_prefixUsesSettings();
+  await test7d_prefixUsesSettingsOff();
   await test8_consecutiveIncoming();
   await test8b_duplicateTextDedup();
   await test9_hudTopBarTranslation();
