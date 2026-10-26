@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <!--
   Babel Tower: Deadlock 聊天布局覆盖
   本文件以原版 panorama/layout/chat.xml 的反编译重建结构为基础(Valve 素材,
@@ -77,214 +77,294 @@
 			</Button>
 			<Label id="LCTOutgoingHint" class="LCTOutgoingHint" text="" />
 		</Panel>
-		<!-- Babel Tower 设置面板(默认隐藏,居中弹窗;ESC 关闭)
-     第 84 版:常用 / 服务商 / 高级 三个标签页;行结构仍是「标签在上 + 控件在下」 -->
+		<!-- Babel Tower 设置面板(默认隐藏、居中弹窗;ESC 关闭)
+     第 86 版:回到第一版 800×620 视觉 —— 左导航、金色主色、行内标题/说明 + 右侧控件 -->
 		<Panel id="LCTSettingsPanel" class="LCTSettingsPanel" oncancel="LCTCloseSettings();">
 			<Panel class="LCTSettingsHeader">
-				<Panel class="LCTHeaderTitleGroup">
-					<Label class="LCTPanelTitle" text="DeadlockLingua" />
-					<Label class="LCTPanelSub" text="聊天翻译设置" />
+				<Panel class="LCTBrandMark"><Label class="LCTBrandMarkText" text="DL" /></Panel>
+				<Panel class="LCTBrandText">
+					<Label class="LCTBrandName" text="DeadlockLingua" />
+					<Label class="LCTBrandSub" text="CHAT TRANSLATION" />
 				</Panel>
-			</Panel>
-
-			<Panel class="LCTTabBar">
-				<Button id="LCTTabCommon" class="LCTTab LCTTabActive" onactivate="LCTShowTab('common');">
-					<Label text="常用" />
-				</Button>
-				<Button id="LCTTabService" class="LCTTab" onactivate="LCTShowTab('service');">
-					<Label text="服务商" />
-				</Button>
-				<Button id="LCTTabAdvanced" class="LCTTab" onactivate="LCTShowTab('advanced');">
-					<Label text="高级" />
+				<Panel class="LCTHeaderSpacer" />
+				<Label class="LCTVersion" text="v2.1.0" />
+				<Button id="LCTCloseBtn" class="LCTHeaderClose" onactivate="LCTCloseSettings();">
+					<Label text="X" />
 				</Button>
 			</Panel>
 
-			<Panel class="LCTStatusBar">
-				<Label id="LCTStatusLabel" class="LCTStatusLabel" text="" />
-				<Panel class="LCTBridgeWrap">
-					<Label id="LCTBridgeDot" class="LCTBridgeDot" text="●" />
-					<Label id="LCTBridgeStatus" class="LCTBridgeStatus" text="桥状态:未知" />
-				</Panel>
-			</Panel>
-
-			<Panel class="LCTSettingsBody">
-				<!-- 常用 -->
-				<Panel id="LCTPageCommon" class="LCTSettingsPage LCTVisible">
-					<Label class="LCTSectionTitle LCTSectionTitleFirst" text="翻译" />
-					<Panel class="LCTSettingsRow">
-						<Label class="LCTRowLabel" text="启用翻译" />
-						<Panel class="LCTFieldCol">
-							<Panel class="LCTToggleWrap">
-								<Button id="LCTEnabled" class="LCTToggle" onactivate="LCTOnToggle('enabled');" />
-								<Label id="LCTEnabledLabel" class="LCTToggleValue" text="否" hittest="false" />
-							</Panel>
-						</Panel>
-					</Panel>
-					<Label class="LCTSectionTitle" text="语言与显示" />
-					<Panel class="LCTSettingsRow">
-						<Label class="LCTRowLabel" text="目标语言" />
-						<Panel class="LCTFieldCol">
-							<Panel class="LCTSelectWrap">
-								<Button id="LCTTargetLangSelect" class="LCTSelect" onactivate="LCTToggleMenu('targetLanguage');" />
-								<Label id="LCTTargetLangSelectLabel" class="LCTSelectValue" text="" hittest="false" />
-							</Panel>
-							<Panel id="LCTTargetLangMenu" class="LCTSelectMenu">
-								<Button class="LCTMenuOption" onactivate="LCTPickLang('targetLanguage','zh-Hans');;"><Label text="简体中文 (zh-Hans)" /></Button>
-								<Button class="LCTMenuOption" onactivate="LCTPickLang('targetLanguage','zh-Hant');;"><Label text="繁體中文 (zh-Hant)" /></Button>
-								<Button class="LCTMenuOption" onactivate="LCTPickLang('targetLanguage','en');;"><Label text="English 英语 (en)" /></Button>
-								<Button class="LCTMenuOption" onactivate="LCTPickLang('targetLanguage','ja');;"><Label text="日本語 日语 (ja)" /></Button>
-								<Button class="LCTMenuOption" onactivate="LCTPickLang('targetLanguage','ko');;"><Label text="한국어 韩语 (ko)" /></Button>
-								<Button class="LCTMenuOption" onactivate="LCTPickLang('targetLanguage','fr');;"><Label text="Français 法语 (fr)" /></Button>
-								<Button class="LCTMenuOption" onactivate="LCTPickLang('targetLanguage','de');;"><Label text="Deutsch 德语 (de)" /></Button>
-								<Button class="LCTMenuOption" onactivate="LCTPickLang('targetLanguage','es');;"><Label text="Español 西语 (es)" /></Button>
-								<Button class="LCTMenuOption" onactivate="LCTPickLang('targetLanguage','custom');;"><Label text="自定义(手输语言代码)" /></Button>
-							</Panel>
-							<TextEntry id="LCTTargetLangCustom" class="LCTInput LCTCustomInput" text="" maxchars="32" />
-						</Panel>
-					</Panel>
-					<Panel class="LCTSettingsRow">
-						<Label class="LCTRowLabel" text="显示模式" />
-						<Panel class="LCTFieldCol">
-							<Panel class="LCTSelectWrap">
-								<Button id="LCTDisplayModeSelect" class="LCTSelect" onactivate="LCTToggleMenu('displayMode');" />
-								<Label id="LCTDisplayModeSelectLabel" class="LCTSelectValue" text="" hittest="false" />
-							</Panel>
-							<Panel id="LCTDisplayModeMenu" class="LCTSelectMenu">
-								<Button class="LCTMenuOption" onactivate="LCTPickOption('displayMode','bilingual');;"><Label text="双语(原文 + 译文)" /></Button>
-								<Button class="LCTMenuOption" onactivate="LCTPickOption('displayMode','translation_only');;"><Label text="仅译文" /></Button>
-							</Panel>
-						</Panel>
-					</Panel>
-					<Label class="LCTSectionTitle" text="发送前翻译" />
-					<Panel class="LCTSettingsRow">
-						<Label class="LCTRowLabel" text="发送前翻译" />
-						<Panel class="LCTFieldCol">
-							<Panel class="LCTSelectWrap">
-								<Button id="LCTOutgoingSelect" class="LCTSelect" onactivate="LCTToggleMenu('outgoing');" />
-								<Label id="LCTOutgoingSelectLabel" class="LCTSelectValue" text="" hittest="false" />
-							</Panel>
-							<Panel id="LCTOutgoingMenu" class="LCTSelectMenu">
-								<Button class="LCTMenuOption" onactivate="LCTPickOption('outgoing','off');;"><Label text="关(发原文)" /></Button>
-								<Button class="LCTMenuOption" onactivate="LCTPickOption('outgoing','translation');;"><Label text="仅译文" /></Button>
-								<Button class="LCTMenuOption" onactivate="LCTPickOption('outgoing','bilingual');;"><Label text="双语(原文 | 译文)" /></Button>
-							</Panel>
-						</Panel>
-					</Panel>
-					<Panel class="LCTSettingsRow" id="LCTRowOutgoingTarget">
-						<Label class="LCTRowLabel" text="发送目标语言" />
-						<Panel class="LCTFieldCol">
-							<Panel class="LCTSelectWrap">
-								<Button id="LCTOutgoingTargetSelect" class="LCTSelect" onactivate="LCTToggleMenu('outgoingTarget');" />
-								<Label id="LCTOutgoingTargetSelectLabel" class="LCTSelectValue" text="" hittest="false" />
-							</Panel>
-							<Panel id="LCTOutgoingTargetMenu" class="LCTSelectMenu">
-								<Button class="LCTMenuOption" onactivate="LCTPickLang('outgoingTarget','zh-Hans');;"><Label text="简体中文 (zh-Hans)" /></Button>
-								<Button class="LCTMenuOption" onactivate="LCTPickLang('outgoingTarget','zh-Hant');;"><Label text="繁體中文 (zh-Hant)" /></Button>
-								<Button class="LCTMenuOption" onactivate="LCTPickLang('outgoingTarget','en');;"><Label text="English 英语 (en)" /></Button>
-								<Button class="LCTMenuOption" onactivate="LCTPickLang('outgoingTarget','ja');;"><Label text="日本語 日语 (ja)" /></Button>
-								<Button class="LCTMenuOption" onactivate="LCTPickLang('outgoingTarget','ko');;"><Label text="한국어 韩语 (ko)" /></Button>
-								<Button class="LCTMenuOption" onactivate="LCTPickLang('outgoingTarget','fr');;"><Label text="Français 法语 (fr)" /></Button>
-								<Button class="LCTMenuOption" onactivate="LCTPickLang('outgoingTarget','de');;"><Label text="Deutsch 德语 (de)" /></Button>
-								<Button class="LCTMenuOption" onactivate="LCTPickLang('outgoingTarget','es');;"><Label text="Español 西语 (es)" /></Button>
-								<Button class="LCTMenuOption" onactivate="LCTPickLang('outgoingTarget','custom');;"><Label text="自定义(手输语言代码)" /></Button>
-							</Panel>
-							<TextEntry id="LCTOutgoingTargetCustom" class="LCTInput LCTCustomInput" text="" maxchars="32" />
-						</Panel>
+			<Panel class="LCTMain">
+				<Panel class="LCTNav">
+					<Button id="LCTTabCommon" class="LCTNavItem LCTTabActive" onactivate="LCTShowTab('common');">
+						<Label class="LCTNavLabel" text="通用" />
+					</Button>
+					<Button id="LCTTabService" class="LCTNavItem" onactivate="LCTShowTab('service');">
+						<Label class="LCTNavLabel" text="翻译服务" />
+						<Label id="LCTNavProvider" class="LCTNavTag" text="OpenAI" />
+					</Button>
+					<Button id="LCTTabAdvanced" class="LCTNavItem" onactivate="LCTShowTab('advanced');">
+						<Label class="LCTNavLabel" text="高级" />
+					</Button>
+					<Panel class="LCTNavSpacer" />
+					<Panel class="LCTNavFoot">
+						<Label class="LCTNavOk" text="✓" />
+						<Label id="LCTStatusLabel" class="LCTNavStatus" text="改完点保存" />
 					</Panel>
 				</Panel>
 
-				<!-- 服务商 -->
-				<Panel id="LCTPageService" class="LCTSettingsPage">
-					<Label class="LCTSectionTitle LCTSectionTitleFirst" text="服务商" />
-					<Panel class="LCTSettingsRow">
-						<Label class="LCTRowLabel" text="服务商" />
-						<Panel class="LCTFieldCol">
-							<Panel class="LCTSelectWrap">
-								<Button id="LCTProviderSelect" class="LCTSelect" onactivate="LCTToggleMenu('provider');" />
-								<Label id="LCTProviderSelectLabel" class="LCTSelectValue" text="" hittest="false" />
+				<Panel class="LCTPages">
+					<!-- 通用 -->
+					<Panel id="LCTPageCommon" class="LCTSettingsPage LCTVisible">
+						<Label class="LCTSectionTitle LCTSectionTitleFirst" text="显示" />
+						<Panel class="LCTCard">
+							<Panel class="LCTSettingsRow">
+								<Panel class="LCTRowText">
+									<Label class="LCTRowLabel" text="启用聊天翻译" />
+									<Label class="LCTRowDesc" text="关闭后不再扫描与翻译收到的消息" />
+								</Panel>
+								<Panel class="LCTFieldCol">
+									<Panel class="LCTToggleWrap">
+										<Button id="LCTEnabled" class="LCTToggle LCTSwitch" onactivate="LCTOnToggle('enabled');">
+											<Panel class="LCTKnob" hittest="false" />
+										</Button>
+										<Label id="LCTEnabledLabel" class="LCTToggleValue" text="否" hittest="false" />
+									</Panel>
+								</Panel>
 							</Panel>
-							<Panel id="LCTProviderMenu" class="LCTSelectMenu">
-								<Button class="LCTMenuOption" onactivate="LCTPickProvider('bing');;"><Label text="bing(免 Key)" /></Button>
-								<Button class="LCTMenuOption" onactivate="LCTPickProvider('microsoft');;"><Label text="microsoft(Azure Key)" /></Button>
-								<Button class="LCTMenuOption" onactivate="LCTPickProvider('openai');;"><Label text="OpenAI 兼容(自定义端点)" /></Button>
-								<Button class="LCTMenuOption" onactivate="LCTPickProvider('deepl');;"><Label text="DeepL(需 Key)" /></Button>
-								<Button class="LCTMenuOption" onactivate="LCTPickProvider('google');;"><Label text="Google Cloud(需 Key)" /></Button>
+							<Panel class="LCTSettingsRow">
+								<Panel class="LCTRowText">
+									<Label class="LCTRowLabel" text="目标语言" />
+									<Label class="LCTRowDesc" text="外语消息翻译成此语言" />
+								</Panel>
+								<Panel class="LCTFieldCol">
+									<Panel class="LCTSelectWrap">
+										<Button id="LCTTargetLangSelect" class="LCTSelect" onactivate="LCTToggleMenu('targetLanguage');" />
+										<Label id="LCTTargetLangSelectLabel" class="LCTSelectValue" text="" hittest="false" />
+										<Label class="LCTChevron" text="▾" hittest="false" />
+									</Panel>
+									<Panel id="LCTTargetLangMenu" class="LCTSelectMenu">
+										<Button class="LCTMenuOption" onactivate="LCTPickLang('targetLanguage','zh-Hans');;"><Label text="简体中文 (zh-Hans)" /></Button>
+										<Button class="LCTMenuOption" onactivate="LCTPickLang('targetLanguage','zh-Hant');;"><Label text="繁體中文 (zh-Hant)" /></Button>
+										<Button class="LCTMenuOption" onactivate="LCTPickLang('targetLanguage','en');;"><Label text="English 英语 (en)" /></Button>
+										<Button class="LCTMenuOption" onactivate="LCTPickLang('targetLanguage','ja');;"><Label text="日本語 日语 (ja)" /></Button>
+										<Button class="LCTMenuOption" onactivate="LCTPickLang('targetLanguage','ko');;"><Label text="한국어 韩语 (ko)" /></Button>
+										<Button class="LCTMenuOption" onactivate="LCTPickLang('targetLanguage','fr');;"><Label text="Français 法语 (fr)" /></Button>
+										<Button class="LCTMenuOption" onactivate="LCTPickLang('targetLanguage','de');;"><Label text="Deutsch 德语 (de)" /></Button>
+										<Button class="LCTMenuOption" onactivate="LCTPickLang('targetLanguage','es');;"><Label text="Español 西语 (es)" /></Button>
+										<Button class="LCTMenuOption" onactivate="LCTPickLang('targetLanguage','custom');;"><Label text="自定义(手输语言代码)" /></Button>
+									</Panel>
+									<TextEntry id="LCTTargetLangCustom" class="LCTInput LCTCustomInput" text="" maxchars="32" />
+								</Panel>
+							</Panel>
+							<Panel class="LCTSettingsRow">
+								<Panel class="LCTRowText">
+									<Label class="LCTRowLabel" text="译文显示" />
+									<Label class="LCTRowDesc" text="保留原文或只显示译文" />
+								</Panel>
+								<Panel class="LCTFieldCol">
+									<Panel class="LCTSeg">
+										<Button id="LCTSegDisplayBilingual" class="LCTSegBtn" onactivate="LCTPickOption('displayMode','bilingual');">
+											<Label text="双语" />
+										</Button>
+										<Button id="LCTSegDisplayTranslationOnly" class="LCTSegBtn" onactivate="LCTPickOption('displayMode','translation_only');">
+											<Label text="仅译文" />
+										</Button>
+									</Panel>
+								</Panel>
+							</Panel>
+							<Panel class="LCTSettingsRow">
+								<Panel class="LCTRowText">
+									<Label class="LCTRowLabel" text="翻译自己的消息" />
+									<Label class="LCTRowDesc" text="队内聊天里自己的发言也显示译文" />
+								</Panel>
+								<Panel class="LCTFieldCol">
+									<Panel class="LCTToggleWrap">
+										<Button id="LCTTranslateOwn" class="LCTToggle LCTSwitch" onactivate="LCTOnToggle('translateOwn');">
+											<Panel class="LCTKnob" hittest="false" />
+										</Button>
+										<Label id="LCTTranslateOwnLabel" class="LCTToggleValue" text="否" hittest="false" />
+									</Panel>
+								</Panel>
 							</Panel>
 						</Panel>
-					</Panel>
-					<Panel class="LCTSettingsRow" id="LCTRowApiKey">
-						<Label class="LCTRowLabel" text="API Key" />
-						<Panel class="LCTFieldCol">
-							<TextEntry id="LCTApiKey" class="LCTInput" text="" maxchars="256" />
-							<Label id="LCTKeyState" class="LCTKeyState" text="未配置" />
-						</Panel>
-					</Panel>
-					<Panel class="LCTSettingsRow" id="LCTRowRegion">
-						<Label class="LCTRowLabel" text="区域(Microsoft,可选)" />
-						<Panel class="LCTFieldCol">
-							<TextEntry id="LCTRegion" class="LCTInput" text="" maxchars="64" />
-						</Panel>
-					</Panel>
-					<Panel class="LCTSettingsRow" id="LCTRowOpenaiBase">
-						<Label class="LCTRowLabel" text="Base URL(OpenAI 兼容)" />
-						<Panel class="LCTFieldCol">
-							<TextEntry id="LCTOpenaiBaseUrl" class="LCTInput" text="" maxchars="256" />
-						</Panel>
-					</Panel>
-					<Panel class="LCTSettingsRow" id="LCTRowOpenaiModel">
-						<Label class="LCTRowLabel" text="模型名(gpt-4o-mini / llama3)" />
-						<Panel class="LCTFieldCol">
-							<TextEntry id="LCTOpenaiModel" class="LCTInput" text="" maxchars="128" />
-						</Panel>
-					</Panel>
-					<Panel class="LCTSettingsRow" id="LCTRowDeeplEndpoint">
-						<Label class="LCTRowLabel" text="DeepL 端点(free / pro)" />
-						<Panel class="LCTFieldCol">
-							<TextEntry id="LCTDeeplEndpoint" class="LCTInput" text="" maxchars="256" />
-						</Panel>
-					</Panel>
-					<Label class="LCTSectionTitle" text="失败回退" />
-					<Panel class="LCTSettingsRow" id="LCTRowFallback">
-						<Label class="LCTRowLabel" text="失败自动回退(逗号分隔)" />
-						<Panel class="LCTFieldCol">
-							<TextEntry id="LCTFallback" class="LCTInput" text="" maxchars="256" />
-						</Panel>
-					</Panel>
-				</Panel>
 
-				<!-- 高级 -->
-				<Panel id="LCTPageAdvanced" class="LCTSettingsPage">
-					<Label class="LCTSectionTitle LCTSectionTitleFirst" text="高级" />
-					<Panel class="LCTSettingsRow">
-						<Label class="LCTRowLabel" text="翻译自己的消息" />
-						<Panel class="LCTFieldCol">
-							<Panel class="LCTToggleWrap">
-								<Button id="LCTTranslateOwn" class="LCTToggle" onactivate="LCTOnToggle('translateOwn');" />
-								<Label id="LCTTranslateOwnLabel" class="LCTToggleValue" text="否" hittest="false" />
+						<Label class="LCTSectionTitle" text="发送" />
+						<Panel class="LCTCard">
+							<Panel class="LCTSettingsRow">
+								<Panel class="LCTRowText">
+									<Label class="LCTRowLabel" text="发送前翻译" />
+									<Label class="LCTRowDesc" text="按 Enter 前先把内容翻成对方语言" />
+								</Panel>
+								<Panel class="LCTFieldCol">
+									<Panel class="LCTSeg">
+										<Button id="LCTSegOutgoingOff" class="LCTSegBtn" onactivate="LCTPickOption('outgoing','off');">
+											<Label text="关" />
+										</Button>
+										<Button id="LCTSegOutgoingTranslation" class="LCTSegBtn" onactivate="LCTPickOption('outgoing','translation');">
+											<Label text="只发译文" />
+										</Button>
+										<Button id="LCTSegOutgoingBilingual" class="LCTSegBtn" onactivate="LCTPickOption('outgoing','bilingual');">
+											<Label text="双语" />
+										</Button>
+									</Panel>
+								</Panel>
+							</Panel>
+							<Panel class="LCTSettingsRow" id="LCTRowOutgoingTarget">
+								<Panel class="LCTRowText">
+									<Label class="LCTRowLabel" text="发送目标语言" />
+									<Label class="LCTRowDesc" text="仅在「发送前翻译」开启时使用" />
+								</Panel>
+								<Panel class="LCTFieldCol">
+									<Panel class="LCTSelectWrap">
+										<Button id="LCTOutgoingTargetSelect" class="LCTSelect" onactivate="LCTToggleMenu('outgoingTarget');" />
+										<Label id="LCTOutgoingTargetSelectLabel" class="LCTSelectValue" text="" hittest="false" />
+										<Label class="LCTChevron" text="▾" hittest="false" />
+									</Panel>
+									<Panel id="LCTOutgoingTargetMenu" class="LCTSelectMenu">
+										<Button class="LCTMenuOption" onactivate="LCTPickLang('outgoingTarget','zh-Hans');;"><Label text="简体中文 (zh-Hans)" /></Button>
+										<Button class="LCTMenuOption" onactivate="LCTPickLang('outgoingTarget','zh-Hant');;"><Label text="繁體中文 (zh-Hant)" /></Button>
+										<Button class="LCTMenuOption" onactivate="LCTPickLang('outgoingTarget','en');;"><Label text="English 英语 (en)" /></Button>
+										<Button class="LCTMenuOption" onactivate="LCTPickLang('outgoingTarget','ja');;"><Label text="日本語 日语 (ja)" /></Button>
+										<Button class="LCTMenuOption" onactivate="LCTPickLang('outgoingTarget','ko');;"><Label text="한국어 韩语 (ko)" /></Button>
+										<Button class="LCTMenuOption" onactivate="LCTPickLang('outgoingTarget','fr');;"><Label text="Français 法语 (fr)" /></Button>
+										<Button class="LCTMenuOption" onactivate="LCTPickLang('outgoingTarget','de');;"><Label text="Deutsch 德语 (de)" /></Button>
+										<Button class="LCTMenuOption" onactivate="LCTPickLang('outgoingTarget','es');;"><Label text="Español 西语 (es)" /></Button>
+										<Button class="LCTMenuOption" onactivate="LCTPickLang('outgoingTarget','custom');;"><Label text="自定义(手输语言代码)" /></Button>
+									</Panel>
+									<TextEntry id="LCTOutgoingTargetCustom" class="LCTInput LCTCustomInput" text="" maxchars="32" />
+								</Panel>
+							</Panel>
+						</Panel>
+
+						<Panel class="LCTTip">
+							<Label class="LCTKbd" text="ESC" />
+							<Label class="LCTTipText" text="打开菜单 → 翻译设置;所有更改保存后生效,关闭面板不会中断翻译。" />
+						</Panel>
+					</Panel>
+
+					<!-- 翻译服务 -->
+					<Panel id="LCTPageService" class="LCTSettingsPage">
+						<Label class="LCTSectionTitle LCTSectionTitleFirst" text="服务商" />
+						<Panel class="LCTProvRow">
+							<Button id="LCTProvBing" class="LCTProvCard" onactivate="LCTPickProvider('bing');">
+								<Label class="LCTProvName" text="Bing" />
+								<Label id="LCTProvBingState" class="LCTProvState" text="免 Key" />
+								<Label class="LCTProvCheck" text="✓" />
+							</Button>
+							<Button id="LCTProvMicrosoft" class="LCTProvCard" onactivate="LCTPickProvider('microsoft');">
+								<Label class="LCTProvName" text="Microsoft" />
+								<Label id="LCTProvMicrosoftState" class="LCTProvState" text="未配置" />
+								<Label class="LCTProvCheck" text="✓" />
+							</Button>
+							<Button id="LCTProvOpenAI" class="LCTProvCard" onactivate="LCTPickProvider('openai');">
+								<Label class="LCTProvName" text="OpenAI" />
+								<Label id="LCTProvOpenAIState" class="LCTProvState" text="未配置" />
+								<Label class="LCTProvCheck" text="✓" />
+							</Button>
+							<Button id="LCTProvDeepL" class="LCTProvCard" onactivate="LCTPickProvider('deepl');">
+								<Label class="LCTProvName" text="DeepL" />
+								<Label id="LCTProvDeepLState" class="LCTProvState" text="未配置" />
+								<Label class="LCTProvCheck" text="✓" />
+							</Button>
+							<Button id="LCTProvGoogle" class="LCTProvCard" onactivate="LCTPickProvider('google');">
+								<Label class="LCTProvName" text="Google" />
+								<Label id="LCTProvGoogleState" class="LCTProvState" text="未配置" />
+								<Label class="LCTProvCheck" text="✓" />
+							</Button>
+						</Panel>
+
+						<Panel id="LCTCredSection" class="LCTSectionWrap">
+							<Label class="LCTSectionTitle" text="凭证" />
+						<Panel class="LCTCard">
+							<Panel id="LCTRowApiKey" class="LCTCred">
+								<Panel class="LCTCredHead">
+									<Label class="LCTCredTitle" text="API Key" />
+									<Label id="LCTKeyState" class="LCTPill" text="未配置" />
+									<Label class="LCTCredNote" text="仅存本机 config/config.json" />
+								</Panel>
+								<Panel class="LCTKeyLine">
+									<TextEntry id="LCTApiKey" class="LCTInput LCTKeyInput" text="" maxchars="256" />
+									<Button id="LCTShowKey" class="LCTGhost" onactivate="LCTShowKey();">
+										<Label id="LCTShowKeyLabel" text="显示" />
+									</Button>
+								</Panel>
+								<Panel class="LCTCredFields">
+									<Panel id="LCTRowOpenaiBase" class="LCTField LCTFieldHalf">
+										<Label class="LCTFieldLabel" text="Base URL" />
+										<TextEntry id="LCTOpenaiBaseUrl" class="LCTInput" text="" maxchars="256" />
+									</Panel>
+									<Panel id="LCTRowOpenaiModel" class="LCTField LCTFieldHalf">
+										<Label class="LCTFieldLabel" text="模型" />
+										<TextEntry id="LCTOpenaiModel" class="LCTInput" text="" maxchars="128" />
+									</Panel>
+								</Panel>
+								<Panel id="LCTRowRegion" class="LCTField">
+									<Label class="LCTFieldLabel" text="区域(Microsoft,可选)" />
+									<TextEntry id="LCTRegion" class="LCTInput" text="" maxchars="64" />
+								</Panel>
+								<Panel id="LCTRowDeeplEndpoint" class="LCTField">
+									<Label class="LCTFieldLabel" text="DeepL 端点(free / pro)" />
+									<TextEntry id="LCTDeeplEndpoint" class="LCTInput" text="" maxchars="256" />
+								</Panel>
+								<Label class="LCTCredHint" text="OpenAI 兼容接口可接 DeepSeek、Ollama、LM Studio、OneAPI;Base URL 需带 /v1。" />
+							</Panel>
+						</Panel>
+						</Panel>
+
+						<Label class="LCTSectionTitle" text="失败回退" />
+						<Panel class="LCTCard">
+							<Panel id="LCTRowFallback" class="LCTSettingsRow">
+								<Panel class="LCTRowText">
+									<Label class="LCTRowLabel" text="主服务商失败时自动切换" />
+									<Label class="LCTRowDesc" text="逗号分隔,按顺序尝试;只使用已配置 Key 的服务商" />
+								</Panel>
+								<Panel class="LCTFieldCol">
+									<TextEntry id="LCTFallback" class="LCTInput" text="" maxchars="256" />
+								</Panel>
 							</Panel>
 						</Panel>
 					</Panel>
-					<Panel class="LCTSettingsRow" id="LCTRowTimeout">
-						<Label class="LCTRowLabel" text="超时(毫秒)" />
-						<Panel class="LCTFieldCol">
-							<TextEntry id="LCTTimeout" class="LCTInput" text="15000" maxchars="16" />
-						</Panel>
-					</Panel>
-					<Panel class="LCTSettingsRow">
-						<Label class="LCTRowLabel" text="强制翻译(已是目标语言也翻)" />
-						<Panel class="LCTFieldCol">
-							<Panel class="LCTToggleWrap">
-								<Button id="LCTForce" class="LCTToggle" onactivate="LCTOnToggle('force');" />
-								<Label id="LCTForceLabel" class="LCTToggleValue" text="否" hittest="false" />
+
+					<!-- 高级 -->
+					<Panel id="LCTPageAdvanced" class="LCTSettingsPage">
+						<Label class="LCTSectionTitle LCTSectionTitleFirst" text="高级" />
+						<Panel class="LCTCard">
+							<Panel class="LCTSettingsRow" id="LCTRowTimeout">
+								<Panel class="LCTRowText">
+									<Label class="LCTRowLabel" text="超时" />
+									<Label class="LCTRowDesc" text="单次翻译请求的超时时间,默认 15000 毫秒" />
+								</Panel>
+								<Panel class="LCTFieldCol">
+									<TextEntry id="LCTTimeout" class="LCTInput" text="15000" maxchars="16" />
+								</Panel>
 							</Panel>
-						</Panel>
-					</Panel>
-					<Panel class="LCTSettingsRow">
-						<Label class="LCTRowLabel" text="记录聊天日志" />
-						<Panel class="LCTFieldCol">
-							<Panel class="LCTToggleWrap">
-								<Button id="LCTChatLog" class="LCTToggle" onactivate="LCTOnToggle('chatLog');" />
-								<Label id="LCTChatLogLabel" class="LCTToggleValue" text="否" hittest="false" />
+							<Panel class="LCTSettingsRow">
+								<Panel class="LCTRowText">
+									<Label class="LCTRowLabel" text="强制翻译" />
+									<Label class="LCTRowDesc" text="已是目标语言也再翻一次" />
+								</Panel>
+								<Panel class="LCTFieldCol">
+									<Panel class="LCTToggleWrap">
+										<Button id="LCTForce" class="LCTToggle LCTSwitch" onactivate="LCTOnToggle('force');">
+											<Panel class="LCTKnob" hittest="false" />
+										</Button>
+										<Label id="LCTForceLabel" class="LCTToggleValue" text="否" hittest="false" />
+									</Panel>
+								</Panel>
+							</Panel>
+							<Panel class="LCTSettingsRow">
+								<Panel class="LCTRowText">
+									<Label class="LCTRowLabel" text="记录聊天日志" />
+									<Label class="LCTRowDesc" text="把原文/译文写入 logs/chat,便于回看" />
+								</Panel>
+								<Panel class="LCTFieldCol">
+									<Panel class="LCTToggleWrap">
+										<Button id="LCTChatLog" class="LCTToggle LCTSwitch" onactivate="LCTOnToggle('chatLog');">
+											<Panel class="LCTKnob" hittest="false" />
+										</Button>
+										<Label id="LCTChatLogLabel" class="LCTToggleValue" text="否" hittest="false" />
+									</Panel>
+								</Panel>
 							</Panel>
 						</Panel>
 					</Panel>
@@ -292,15 +372,20 @@
 			</Panel>
 
 			<Panel class="LCTSettingsFooter">
-				<Button id="LCTSaveBtn" class="LCTBtn LCTBtnSave" onactivate="LCTSave();">
+				<Panel class="LCTFootStatus">
+					<Label id="LCTBridgeDot" class="LCTFootDot" text="●" />
+					<Label id="LCTBridgeStatus" class="LCTBridgeStatus" text="桥状态:未知" />
+				</Panel>
+				<Label class="LCTFootNote" text="端口 8791 · 配置仅存本机" />
+				<Panel class="LCTFooterSpacer" />
+				<Button id="LCTTestBtn" class="LCTGhost" onactivate="LCTTest();">
+					<Label text="测试连接" />
+				</Button>
+				<Button id="LCTSaveBtn" class="LCTGhost" onactivate="LCTSave();">
 					<Label text="保存" />
 				</Button>
-				<Button id="LCTTestBtn" class="LCTBtn LCTBtnTest" onactivate="LCTTest();">
-					<Label text="测试桥" />
-				</Button>
-				<Panel class="LCTFooterSpacer" />
-				<Button id="LCTCloseBtn" class="LCTBtn LCTCloseBtn" onactivate="LCTCloseSettings();">
-					<Label text="X" />
+				<Button id="LCTFinishBtn" class="LCTPrimary" onactivate="LCTSaveAndClose();">
+					<Label text="完成并关闭" />
 				</Button>
 			</Panel>
 		</Panel>

@@ -652,3 +652,798 @@
   margin-right: 6px;
   color: #6b7684;
 }
+
+
+/* ============================================================
+   第 86 版:回到第一版 800×620 视觉
+   左导航 / 金色主色 / 行内标题+说明 / 右侧控件 / 服务商卡片
+   ============================================================ */
+.LCTSettingsPanel {
+  width: 800px;
+  height: 620px;
+  background: linear-gradient( 180deg, #121820 0%, #0d1217 55%, #0a0e12 100% );
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  border-top: 1px solid rgba(231, 185, 107, 0.38);
+  border-radius: 8px;
+  box-shadow: rgba(0, 0, 0, 0.55) 0px 24px 60px 0px;
+  flow-children: down;
+  color: #ece6da;
+}
+
+.LCTSettingsHeader {
+  width: 100%;
+  height: 62px;
+  flow-children: right;
+  padding: 0px 18px;
+  background: linear-gradient( 180deg, rgba(255, 255, 255, 0.025), rgba(255, 255, 255, 0) );
+  border-bottom: 1px solid rgba(255, 255, 255, 0.065);
+}
+
+.LCTBrandMark {
+  width: 30px;
+  height: 30px;
+  border: 1px solid rgba(231, 185, 107, 0.5);
+  border-radius: 8px;
+  background-color: rgba(231, 185, 107, 0.08);
+  flow-children: none;
+  vertical-align: center;
+}
+
+.LCTBrandMarkText {
+  horizontal-align: center;
+  vertical-align: center;
+  color: #e7b96b;
+  font-size: 10px;
+  font-weight: bold;
+  letter-spacing: 0.6px;
+}
+
+.LCTBrandText {
+  flow-children: down;
+  margin-left: 11px;
+  vertical-align: center;
+}
+
+.LCTBrandName {
+  color: #f4eee2;
+  font-size: 15px;
+  font-weight: bold;
+  letter-spacing: 0.4px;
+}
+
+.LCTBrandSub {
+  color: #6b7480;
+  font-size: 9.5px;
+  letter-spacing: 1.6px;
+}
+
+.LCTHeaderSpacer {
+  width: fill-parent-flow( 1 );
+  height: 1px;
+}
+
+.LCTVersion {
+  color: #929ca8;
+  font-size: 10.5px;
+  border: 1px solid rgba(255, 255, 255, 0.065);
+  border-radius: 20px;
+  padding: 4px 10px;
+  margin-right: 10px;
+  vertical-align: center;
+}
+
+.LCTHeaderClose {
+  width: 30px;
+  height: 30px;
+  border-radius: 6px;
+  background-color: transparent;
+  border: 0px solid transparent;
+  vertical-align: center;
+}
+
+.LCTHeaderClose:hover {
+  background-color: rgba(255, 255, 255, 0.05);
+}
+
+.LCTHeaderClose Label {
+  horizontal-align: center;
+  vertical-align: middle;
+  color: #9aa3ad;
+  font-size: 15px;
+  font-weight: bold;
+}
+
+.LCTHeaderClose:hover Label {
+  color: #ffffff;
+}
+
+/* 主体:左导航 + 页面 */
+.LCTMain {
+  width: 100%;
+  height: fill-parent-flow( 1 );
+  flow-children: right;
+}
+
+.LCTNav {
+  width: 186px;
+  height: 100%;
+  flow-children: down;
+  padding: 14px 10px 12px 10px;
+  background-color: rgba(0, 0, 0, 0.12);
+  border-right: 1px solid rgba(255, 255, 255, 0.065);
+}
+
+.LCTNavItem {
+  width: 100%;
+  height: 42px;
+  flow-children: right;
+  padding: 0px 12px;
+  margin-bottom: 3px;
+  border-radius: 7px;
+  border-left: 2px solid transparent;
+  background-color: transparent;
+  border-top: 0px solid transparent;
+  border-right: 0px solid transparent;
+  border-bottom: 0px solid transparent;
+}
+
+.LCTNavItem:hover {
+  background-color: rgba(255, 255, 255, 0.035);
+}
+
+.LCTNavItem.LCTTabActive {
+  background-color: rgba(255, 255, 255, 0.055);
+  border-left: 2px solid #e7b96b;
+}
+
+.LCTNavLabel {
+  width: fill-parent-flow( 1 );
+  vertical-align: middle;
+  color: #9aa4af;
+  font-size: 13px;
+  letter-spacing: 0.2px;
+}
+
+.LCTNavItem.LCTTabActive .LCTNavLabel {
+  color: #f3ecdd;
+  font-weight: bold;
+}
+
+.LCTNavTag {
+  vertical-align: middle;
+  color: #6b7480;
+  font-size: 9.5px;
+  border: 1px solid rgba(255, 255, 255, 0.065);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
+.LCTNavItem.LCTTabActive .LCTNavTag {
+  color: #e7b96b;
+  border: 1px solid rgba(231, 185, 107, 0.35);
+}
+
+.LCTNavSpacer {
+  width: 100%;
+  height: fill-parent-flow( 1 );
+}
+
+.LCTNavFoot {
+  width: 100%;
+  flow-children: right;
+  padding: 10px 10px 2px 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.065);
+}
+
+.LCTNavOk {
+  color: #e7b96b;
+  font-size: 9px;
+  margin-right: 7px;
+  vertical-align: center;
+}
+
+.LCTNavStatus {
+  width: fill-parent-flow( 1 );
+  vertical-align: center;
+  color: #6b7480;
+  font-size: 10px;
+  text-overflow: shrink;
+  white-space: nowrap;
+}
+
+.LCTPages {
+  width: fill-parent-flow( 1 );
+  height: 100%;
+  flow-children: down;
+}
+
+.LCTSettingsPage {
+  width: 100%;
+  height: 100%;
+  flow-children: down;
+  overflow: squish scroll;
+  padding: 18px 22px 16px 22px;
+  visibility: collapse;
+}
+
+.LCTSettingsPage.LCTVisible {
+  visibility: visible;
+}
+
+.LCTSectionTitle {
+  width: 100%;
+  color: #8d97a3;
+  font-size: 10.5px;
+  font-weight: normal;
+  letter-spacing: 1px;
+  margin: 0px 0px 8px 2px;
+  padding: 0px 0px 8px 0px;
+  border-top: 0px solid transparent;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.065);
+}
+
+.LCTSectionTitleFirst {
+  border-top: 0px solid transparent;
+  padding-top: 0px;
+}
+
+.LCTCard {
+  width: 100%;
+  flow-children: down;
+  background-color: #151b22;
+  border: 1px solid rgba(255, 255, 255, 0.065);
+  border-radius: 8px;
+  margin-bottom: 16px;
+}
+
+/* 行:左标题/说明 + 右控件 */
+.LCTSettingsRow {
+  width: 100%;
+  min-height: 54px;
+  flow-children: right;
+  padding: 9px 16px;
+  margin-bottom: 0px;
+  border-left: 0px solid transparent;
+  border-top: 1px solid rgba(255, 255, 255, 0.045);
+  border-radius: 0px;
+  background-color: transparent;
+}
+
+.LCTSettingsRow:hover {
+  background-color: rgba(255, 255, 255, 0.02);
+  border-left: 0px solid transparent;
+}
+
+.LCTRowText {
+  width: fill-parent-flow( 1 );
+  flow-children: down;
+  vertical-align: center;
+}
+
+.LCTRowLabel {
+  color: #ece6da;
+  font-size: 13px;
+  font-weight: normal;
+  letter-spacing: 0px;
+  margin-bottom: 3px;
+}
+
+.LCTRowDesc {
+  color: #6b7480;
+  font-size: 10.5px;
+  line-height: 1.3;
+}
+
+.LCTFieldCol {
+  width: 300px;
+  flow-children: down;
+  vertical-align: center;
+}
+
+/* 开关 */
+.LCTToggleWrap {
+  width: 100%;
+  height: 24px;
+  flow-children: none;
+}
+
+.LCTToggle.LCTSwitch {
+  width: 42px;
+  height: 22px;
+  min-width: 0px;
+  padding: 0px;
+  border-radius: 11px;
+  background-color: #2a323b;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  vertical-align: center;
+}
+
+.LCTToggle.LCTSwitch.LCTOn {
+  background-color: #e7b96b;
+  border: 1px solid #e7b96b;
+}
+
+.LCTKnob {
+  width: 16px;
+  height: 16px;
+  border-radius: 8px;
+  background-color: #7d8792;
+  horizontal-align: left;
+  vertical-align: center;
+  margin-left: 3px;
+}
+
+.LCTToggle.LCTSwitch.LCTOn .LCTKnob {
+  horizontal-align: right;
+  margin-right: 3px;
+  margin-left: 0px;
+  background-color: #14181d;
+}
+
+.LCTToggleValue {
+  visibility: collapse;
+}
+
+/* 分段按钮 */
+.LCTSeg {
+  width: fit-children;
+  height: 30px;
+  flow-children: right;
+  padding: 2px;
+  background-color: #0d1217;
+  border: 1px solid rgba(255, 255, 255, 0.065);
+  border-radius: 7px;
+}
+
+.LCTSegBtn {
+  height: 26px;
+  padding: 0px 13px;
+  margin-right: 2px;
+  border-radius: 5px;
+  background-color: transparent;
+  border: 0px solid transparent;
+}
+
+.LCTSegBtn Label {
+  vertical-align: middle;
+  color: #98a2ad;
+  font-size: 12px;
+}
+
+.LCTSegBtn:hover {
+  background-color: rgba(255, 255, 255, 0.04);
+}
+
+.LCTSegBtn.LCTSegOn {
+  background-color: rgba(231, 185, 107, 0.14);
+  box-shadow: inset 0px 0px 0px 1px rgba(231, 185, 107, 0.28);
+}
+
+.LCTSegBtn.LCTSegOn Label {
+  color: #e7b96b;
+}
+
+/* 下拉 */
+.LCTSelectWrap {
+  width: 176px;
+  height: 32px;
+  flow-children: none;
+}
+
+.LCTSelect {
+  width: 100%;
+  height: 32px;
+  padding: 0px;
+  background-color: #0d1217;
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  border-radius: 7px;
+}
+
+.LCTSelect:hover {
+  border: 1px solid rgba(231, 185, 107, 0.4);
+}
+
+.LCTSelectValue {
+  horizontal-align: left;
+  vertical-align: center;
+  width: 100%;
+  text-align: left;
+  padding-left: 12px;
+  color: #ece6da;
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+
+.LCTChevron {
+  horizontal-align: right;
+  vertical-align: center;
+  margin-right: 12px;
+  color: #7b8591;
+  font-size: 10px;
+}
+
+.LCTSelectMenu {
+  width: 176px;
+  margin-top: 4px;
+  background-color: #0d1217;
+  border: 1px solid rgba(231, 185, 107, 0.25);
+  border-radius: 6px;
+  padding: 3px;
+}
+
+/* 输入框 */
+.LCTInput {
+  height: 32px;
+  background-color: #0c1116;
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  border-radius: 6px;
+  color: #ece6da;
+  font-size: 12.5px;
+  padding: 0px 10px;
+}
+
+.LCTInput:hover {
+  border: 1px solid rgba(231, 185, 107, 0.4);
+}
+
+.LCTCustomInput {
+  margin-top: 6px;
+}
+
+/* 服务商卡片 */
+.LCTProvRow {
+  width: 100%;
+  height: 68px;
+  flow-children: right;
+  margin-bottom: 16px;
+}
+
+.LCTProvCard {
+  width: fill-parent-flow( 1 );
+  height: 68px;
+  flow-children: down;
+  padding: 9px 10px;
+  margin-right: 8px;
+  background-color: #151b22;
+  border: 1px solid rgba(255, 255, 255, 0.065);
+  border-radius: 8px;
+}
+
+.LCTProvCard:hover {
+  border: 1px solid rgba(231, 185, 107, 0.3);
+}
+
+.LCTProvName {
+  color: #e6e0d4;
+  font-size: 12px;
+  font-weight: bold;
+  letter-spacing: 0.2px;
+}
+
+.LCTProvState {
+  color: #6b7480;
+  font-size: 9.5px;
+  margin-top: 6px;
+}
+
+.LCTProvCheck {
+  horizontal-align: right;
+  vertical-align: top;
+  color: #e7b96b;
+  font-size: 10px;
+  font-weight: bold;
+  visibility: collapse;
+}
+
+.LCTProvCard.LCTProvOn {
+  border: 1px solid rgba(231, 185, 107, 0.55);
+  background: linear-gradient( 180deg, rgba(231, 185, 107, 0.12), rgba(231, 185, 107, 0.04) );
+}
+
+.LCTProvCard.LCTProvOn .LCTProvName {
+  color: #e7b96b;
+}
+
+.LCTProvCard.LCTProvOn .LCTProvCheck {
+  visibility: visible;
+}
+
+/* 凭据卡 */
+.LCTCred {
+  width: 100%;
+  flow-children: down;
+  padding: 12px 16px 14px 16px;
+}
+
+.LCTCredHead {
+  width: 100%;
+  height: 24px;
+  flow-children: right;
+}
+
+.LCTCredTitle {
+  color: #dcd6ca;
+  font-size: 12px;
+  vertical-align: center;
+}
+
+.LCTPill {
+  color: #79c99e;
+  background-color: rgba(121, 201, 158, 0.08);
+  border: 1px solid rgba(121, 201, 158, 0.3);
+  border-radius: 20px;
+  padding: 2px 8px;
+  font-size: 9.5px;
+  margin-left: 8px;
+  vertical-align: center;
+}
+
+.LCTCredNote {
+  width: fill-parent-flow( 1 );
+  text-align: right;
+  color: #6b7480;
+  font-size: 9.5px;
+  vertical-align: center;
+}
+
+.LCTKeyLine {
+  width: 100%;
+  height: 34px;
+  flow-children: right;
+  margin-top: 8px;
+}
+
+.LCTKeyInput {
+  width: fill-parent-flow( 1 );
+  height: 34px;
+  letter-spacing: 2px;
+  margin-right: 8px;
+}
+
+.LCTGhost {
+  height: 34px;
+  padding: 0px 12px;
+  background-color: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  border-radius: 6px;
+}
+
+.LCTGhost:hover {
+  background-color: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(231, 185, 107, 0.4);
+}
+
+.LCTGhost Label {
+  vertical-align: middle;
+  color: #b9c2cc;
+  font-size: 11px;
+}
+
+.LCTCredFields {
+  width: 100%;
+  flow-children: right;
+  margin-top: 10px;
+}
+
+.LCTField {
+  width: fill-parent-flow( 1 );
+  flow-children: down;
+  margin-right: 10px;
+  margin-top: 10px;
+}
+
+.LCTFieldLabel {
+  color: #6b7480;
+  font-size: 10px;
+  margin-bottom: 4px;
+}
+
+.LCTCredHint {
+  width: 100%;
+  color: #6b7480;
+  font-size: 9.5px;
+  margin-top: 9px;
+  line-height: 1.4;
+}
+
+/* 提示条 */
+.LCTTip {
+  width: 100%;
+  min-height: 38px;
+  flow-children: right;
+  padding: 9px 14px;
+  margin-top: 16px;
+  border: 1px dashed rgba(255, 255, 255, 0.11);
+  border-radius: 8px;
+}
+
+.LCTKbd {
+  color: #e7b96b;
+  font-size: 10px;
+  border: 1px solid rgba(231, 185, 107, 0.35);
+  border-radius: 4px;
+  background-color: rgba(231, 185, 107, 0.07);
+  padding: 1px 6px;
+  margin-right: 10px;
+  vertical-align: center;
+}
+
+.LCTTipText {
+  width: fill-parent-flow( 1 );
+  color: #6b7480;
+  font-size: 10.5px;
+  vertical-align: center;
+}
+
+/* 页脚 */
+.LCTSettingsFooter {
+  width: 100%;
+  height: 60px;
+  flow-children: right;
+  padding: 0px 18px;
+  border-top: 1px solid rgba(255, 255, 255, 0.065);
+  background-color: rgba(0, 0, 0, 0.18);
+}
+
+.LCTFootStatus {
+  flow-children: right;
+  vertical-align: center;
+}
+
+.LCTFootDot {
+  color: #79c99e;
+  font-size: 9px;
+  margin-right: 7px;
+  vertical-align: center;
+}
+
+.LCTBridgeStatus {
+  color: #9aa4af;
+  font-size: 10.5px;
+  vertical-align: center;
+}
+
+.LCTFootNote {
+  color: #6b7480;
+  font-size: 9.5px;
+  margin-left: 12px;
+  vertical-align: center;
+}
+
+.LCTFooterSpacer {
+  width: fill-parent-flow( 1 );
+  height: 1px;
+}
+
+.LCTSettingsFooter .LCTGhost {
+  margin-left: 8px;
+}
+
+.LCTPrimary {
+  height: 34px;
+  padding: 0px 20px;
+  margin-left: 8px;
+  border-radius: 6px;
+  background: linear-gradient( 180deg, #ecc47c, #d9a955 );
+  border: 1px solid rgba(255, 236, 200, 0.55);
+}
+
+.LCTPrimary:hover {
+  background: linear-gradient( 180deg, #f2cf8b, #e0b565 );
+}
+
+.LCTPrimary Label {
+  vertical-align: middle;
+  color: #1a1409;
+  font-size: 12px;
+  font-weight: bold;
+  letter-spacing: 0.4px;
+}
+
+
+.LCTSectionWrap {
+  width: 100%;
+  flow-children: down;
+}
+
+.LCTPill.LCTPillOff {
+  color: #6b7480;
+  background-color: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.065);
+}
+
+
+/* Panorama 修正:行内控件右对齐;线性渐变用引擎语法 */
+.LCTToggleWrap {
+  width: 42px;
+  horizontal-align: right;
+}
+
+.LCTSeg {
+  horizontal-align: right;
+}
+
+.LCTSelectWrap {
+  horizontal-align: right;
+}
+
+.LCTToggle.LCTSwitch {
+  flow-children: none;
+}
+
+.LCTSettingsPanel {
+  background-color: gradient( linear, 0% 0%, 0% 100%, from( #121820 ), color-stop( 0.55, #0d1217 ), to( #0a0e12 ) );
+}
+
+.LCTSettingsHeader {
+  background-color: rgba(255, 255, 255, 0.025);
+}
+
+.LCTProvCard.LCTProvOn {
+  background-color: rgba(231, 185, 107, 0.07);
+}
+
+.LCTPrimary {
+  background-color: #e7b96b;
+}
+
+.LCTPrimary:hover {
+  background-color: #f0c97e;
+}
+
+
+.LCTField {
+  width: 100%;
+  margin-right: 0px;
+  margin-top: 10px;
+}
+
+.LCTFieldHalf {
+  width: fill-parent-flow( 1 );
+  margin-right: 10px;
+}
+
+
+/* 关键属性重述:避免浏览器式 background:linear-gradient 导致整条规则被引擎丢弃 */
+.LCTSettingsPanel {
+  width: 800px;
+  height: 620px;
+  flow-children: down;
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  border-top: 1px solid rgba(231, 185, 107, 0.38);
+  border-radius: 8px;
+  box-shadow: rgba(0, 0, 0, 0.55) 0px 24px 60px 0px;
+  background-color: gradient( linear, 0% 0%, 0% 100%, from( #121820 ), color-stop( 0.55, #0d1217 ), to( #0a0e12 ) );
+}
+
+.LCTSettingsHeader {
+  width: 100%;
+  height: 62px;
+  flow-children: right;
+  padding: 0px 18px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.065);
+  background-color: rgba(255, 255, 255, 0.025);
+}
+
+.LCTProvCard.LCTProvOn {
+  border: 1px solid rgba(231, 185, 107, 0.55);
+  background-color: rgba(231, 185, 107, 0.07);
+}
+
+.LCTSegBtn.LCTSegOn {
+  background-color: rgba(231, 185, 107, 0.14);
+  border: 1px solid rgba(231, 185, 107, 0.28);
+}
+
+.LCTPrimary {
+  height: 34px;
+  padding: 0px 20px;
+  margin-left: 8px;
+  border-radius: 6px;
+  background-color: #e7b96b;
+  border: 1px solid rgba(255, 236, 200, 0.55);
+}
+
+.LCTPrimary:hover {
+  background-color: #f0c97e;
+}

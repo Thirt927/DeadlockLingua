@@ -6452,8 +6452,12 @@ function injectTranslation(row, sig, text) {
     const prov = State.cfg.provider || "bing";
     let text = "未配置";
     if (prov === "bing") text = "免 Key";
-    else if ((State.cfg._providerKeys || {})[prov]) text = "已配置";
+    else if ((State.cfg._providerKeys || {})[prov]) text = "已保存";
     try { label.text = text; } catch (e) {}
+    try {
+      if (text === "未配置") label.AddClass("LCTPillOff");
+      else label.RemoveClass("LCTPillOff");
+    } catch (e) {}
   }
 
   // 启动时从桥同步 config.json 的 UI 设置(失败重试,避免桥尚未就绪时丢同步)
@@ -6524,6 +6528,9 @@ function injectTranslation(row, sig, text) {
     // UI 偏好在开机时已由 `op=ui`(254B)同步进来,这里无需再问桥,所以面板是秒开的。
     // 端点类字段(region / baseUrl / model / deeplEndpoint)刻意留空:空值保存时不下发,
     // 就不会把 config.json 里已配好的端点清掉(见 collectPanelConfig)。
+    keyVisible = false;
+    const showKeyLabel = findChild(panel, "LCTShowKeyLabel");
+    if (showKeyLabel) { try { showKeyLabel.text = "显示"; } catch (e) {} }
     if ((State.cfg._providerKeys || {})[State.cfg.provider || "bing"]) {
       setFieldText("LCTApiKey", "********");
     }
@@ -6538,7 +6545,7 @@ function injectTranslation(row, sig, text) {
     try {
       if (hasClass(panel, SETTINGS_VISIBLE_CLASS)) {
         let focused = "";
-        const focusId = settingsTab === "service" ? "LCTProviderSelect" : (settingsTab === "advanced" ? "LCTTimeout" : "LCTEnabled");
+        const focusId = settingsTab === "service" ? "LCTApiKey" : (settingsTab === "advanced" ? "LCTTimeout" : "LCTEnabled");
         const first = findChild(panel, focusId) || findChild(panel, "LCTEnabled");
         if (first && first.SetFocus) { first.SetFocus(); focused = "panel-first"; }
         else if (panel.SetFocus) { panel.SetFocus(); focused = "panel"; }
@@ -6570,6 +6577,7 @@ function injectTranslation(row, sig, text) {
   let uiAdvancedOpen = true;
   let settingsOpen = false;
   let settingsTab = "common";
+  let keyVisible = false;
 
   // 常用 / 服务商 / 高级 标签页切换
   function LCTShowTab(tab) {
@@ -6593,6 +6601,7 @@ function injectTranslation(row, sig, text) {
     settingsTab = tab;
     if (tab === "service") {
       syncProviderRows();
+      syncProviderCards();
     } else if (tab === "advanced") {
       setStatus("高级选项一般保持默认");
     } else {
@@ -6685,16 +6694,15 @@ function injectTranslation(row, sig, text) {
     setFieldText("LCTTargetLangCustom", "");
     setFieldText("LCTOutgoingTargetCustom", "");
     setFieldText("LCTTimeout", String(State.cfg.timeoutMs || 15000));
-    setSelectText("LCTProviderSelect", labelFor(PROVIDER_OPTIONS, State.cfg.provider || "bing"));
     syncProviderRows();
+    syncProviderCards();
     setSelectText("LCTTargetLangSelect", labelFor(LANGUAGE_OPTIONS, State.cfg.targetLanguage || "zh-Hans"));
-    setSelectText("LCTDisplayModeSelect", labelFor(DISPLAY_MODES, State.cfg.displayMode || "bilingual"));
-    setSelectText("LCTOutgoingSelect", labelFor(OUTGOING_MODES, State.cfg.outgoing || "off"));
     setSelectText("LCTOutgoingTargetSelect", labelFor(LANGUAGE_OPTIONS, State.cfg.outgoingTarget || "en"));
     setToggleText("LCTEnabled", !!State.cfg.enabled);
     setToggleText("LCTForce", !!State.cfg.force);
     setToggleText("LCTTranslateOwn", State.cfg.translateOwn !== false);
     setToggleText("LCTChatLog", State.cfg.chatLog !== false);
+    syncSegments();
     syncCustomInputs();
     closeSelectMenus();
     setStatus("");
@@ -6806,9 +6814,94 @@ function injectTranslation(row, sig, text) {
         if (on) label.AddClass("LCTOn");
         else label.RemoveClass("LCTOn");
       } catch (e) {}
-    } else {
-      diagLog("tg_" + id, "PANORAMA: setToggleText 找不到 " + id + "Label");
     }
+    // 第一版开关是轨道 + 圆点:状态类加在 Button 上,Label 只做无头状态位
+    const toggle = findChild(panel, id);
+    if (toggle) {
+      try {
+        if (on) toggle.AddClass("LCTOn");
+        else toggle.RemoveClass("LCTOn");
+      } catch (e) {}
+    } else {
+      diagLog("tg_" + id, "PANORAMA: setToggleText 找不到 " + id);
+    }
+  }
+
+  function syncSegments() {
+    const root = getRoot();
+    const setSeg = function (id, on) {
+      const b = findChild(root, id);
+      if (!b) return;
+      try {
+        if (on) b.AddClass("LCTSegOn");
+        else b.RemoveClass("LCTSegOn");
+      } catch (e) {}
+    };
+    const d = State.cfg.displayMode || "bilingual";
+    setSeg("LCTSegDisplayBilingual", d === "bilingual");
+    setSeg("LCTSegDisplayTranslationOnly", d === "translation_only");
+    const o = State.cfg.outgoing || "off";
+    setSeg("LCTSegOutgoingOff", o === "off");
+    setSeg("LCTSegOutgoingTranslation", o === "translation");
+    setSeg("LCTSegOutgoingBilingual", o === "bilingual");
+  }
+
+  function syncProviderCards() {
+    const root = getRoot();
+    const p = State.cfg.provider || "bing";
+    const keys = State.cfg._providerKeys || {};
+    const defs = [
+      ["bing", "LCTProvBing", "LCTProvBingState", "Bing"],
+      ["microsoft", "LCTProvMicrosoft", "LCTProvMicrosoftState", "Microsoft"],
+      ["openai", "LCTProvOpenAI", "LCTProvOpenAIState", "OpenAI"],
+      ["deepl", "LCTProvDeepL", "LCTProvDeepLState", "DeepL"],
+      ["google", "LCTProvGoogle", "LCTProvGoogleState", "Google"],
+    ];
+    for (let i = 0; i < defs.length; i += 1) {
+      const value = defs[i][0];
+      const card = findChild(root, defs[i][1]);
+      const state = findChild(root, defs[i][2]);
+      if (card) {
+        try {
+          if (value === p) card.AddClass("LCTProvOn");
+          else card.RemoveClass("LCTProvOn");
+        } catch (e) {}
+      }
+      if (state) {
+        const text = value === "bing" ? "免 Key" : (keys[value] ? "已配置" : "未配置");
+        try { state.text = text; } catch (e) {}
+      }
+    }
+    const nav = findChild(root, "LCTNavProvider");
+    if (nav) {
+      for (let i = 0; i < defs.length; i += 1) {
+        if (defs[i][0] === p) { try { nav.text = defs[i][3]; } catch (e) {} }
+      }
+    }
+  }
+
+  function LCTShowKey() {
+    const field = findChild(getRoot(), "LCTApiKey");
+    const btnLabel = findChild(getRoot(), "LCTShowKeyLabel");
+    const key = (State.cfg._providerKeys || {})[State.cfg.provider || "bing"] || "";
+    if (!field) return;
+    if (!key) {
+      setStatus("当前服务商没有已保存的 Key");
+      return;
+    }
+    keyVisible = !keyVisible;
+    setFieldText("LCTApiKey", keyVisible ? key : "********");
+    if (btnLabel) {
+      try { btnLabel.text = keyVisible ? "隐藏" : "显示"; } catch (e) {}
+    }
+  }
+
+  function LCTSaveAndClose() {
+    try { LCTSave(); } catch (e) {}
+    try {
+      settingsOpen = false;
+      closeSettingsPanel();
+    } catch (e) {}
   }
 
   function LCTOnToggle(which) {
@@ -6848,6 +6941,7 @@ function injectTranslation(row, sig, text) {
       } catch (e) {}
     };
     // 高级设置整体折叠:收起时连服务商专属行一起隐藏,展开后才按服务商显示
+    setRow("LCTCredSection", p !== "bing");
     setRow("LCTRowApiKey", uiAdvancedOpen && (p === "microsoft" || p === "openai" || p === "deepl" || p === "google"));
     setRow("LCTRowRegion", uiAdvancedOpen && p === "microsoft");
     setRow("LCTRowOpenaiBase", uiAdvancedOpen && p === "openai");
@@ -6874,6 +6968,9 @@ function injectTranslation(row, sig, text) {
     markUiTouched("provider");
     State.cfg.provider = value;
     syncPanelFromConfig();
+    keyVisible = false;
+    const showKeyLabel = findChild(getRoot(), "LCTShowKeyLabel");
+    if (showKeyLabel) { try { showKeyLabel.text = "显示"; } catch (e) {} }
     // 该服务商已配置 Key:回填占位符,避免面板显示空白
     if ((State.cfg._providerKeys || {})[value]) setFieldText("LCTApiKey", "********");
     updateKeyStateLabel();
@@ -6954,14 +7051,13 @@ function injectTranslation(row, sig, text) {
     markUiTouched(field);
     if (field === "displayMode") {
       State.cfg.displayMode = value;
-      setSelectText("LCTDisplayModeSelect", labelFor(DISPLAY_MODES, value));
     } else if (field === "outgoing") {
       State.cfg.outgoing = value;
-      setSelectText("LCTOutgoingSelect", labelFor(OUTGOING_MODES, value));
     } else return;
-    // 只刷新行显隐,不再整体 syncPanelFromConfig —— 后者会清空 Key/端点输入框,
+    // 只刷新行显隐/分段高亮,不再整体 syncPanelFromConfig —— 后者会清空 Key/端点输入框,
     // 用户在面板里改选项后再点保存会静默丢输入。
     syncProviderRows();
+    syncSegments();
     saveUiConfig();
     closeSelectMenus();
     diagLog("pickopt", "PANORAMA: pickOption: " + field + " -> " + value);
@@ -7227,6 +7323,8 @@ function injectTranslation(row, sig, text) {
   exportGlobal("LCTSave", LCTSave);
   exportGlobal("LCTTest", LCTTest);
   exportGlobal("LCTShowTab", LCTShowTab);
+  exportGlobal("LCTShowKey", LCTShowKey);
+  exportGlobal("LCTSaveAndClose", LCTSaveAndClose);
   exportGlobal("LCTEscapeOpenSettings", openEscapeSettings);
 
   exportGlobal("LCTRowHovered", function (panel) {
