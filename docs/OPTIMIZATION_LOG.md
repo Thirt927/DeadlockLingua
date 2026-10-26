@@ -2130,3 +2130,24 @@ ode -e "JSON.parse(...)" 通过)。
 - **改动内容**: 新增 `hasLetterChar()`,按码位枚举拉丁/拉丁扩展/希腊/西里尔/希伯来/阿拉伯/天城文/泰文/假名/中文/韩文的字母区段;`shouldSkip()` 改为 `!hasLetterChar(text)`。
 - **验证方式**: `node --check` 通过;离线比对 `нет` / `ты коч братан` / `как дела у команды` / `こんにちは` / `안녕` / `مرحبا` / `γεια` 均判定含字母,`!!!` / `123 456` / `👍👍` / `...` 仍跳过;桥端 `POST /api/v1/translate` 对俄语实测返回中文译文;`build.ps1` 编译成功,`dist/pak22_dir.vpk`(364,542 字节)已部署到 addons。
 - **仍需用户测试**: 重启 Deadlock 进对局,确认俄语/其他语种聊天出现中文译文。
+
+
+## 2026-10-26: /tr 面板回到第一版 800×620 视觉（第 86 版，覆盖第 84 版标签页）
+
+- **背景**: 用户明确第一版 800×620 视觉（左导航、金色主色、行内「标题/说明 + 右侧控件」、轨道开关、分段按钮、服务商卡片、底部「测试连接 / 完成并关闭」）比第 84 版 600×640 标签页好看；仓库已经有 ESC 入口，需要在现有实现上改回第一版。
+- **方案**: 面板改 800×620；左侧 186px 导航（通用 / 翻译服务 / 高级）；右侧页面滚动；行改为左文右控件（标签+说明在左，控件列 300px）；开关改轨道+圆点；译文显示/发送前翻译改分段；服务商改 5 张卡片；凭证卡带显示 Key；底部测试/保存/完成并关闭。
+- **改动文件**:
+  - `mod/panorama/layout/chat.xml`: 重写面板为 header + left nav + pages + footer；新增服务商卡片、分段按钮、轨道开关、凭证卡、`LCTCredSection`。
+  - `mod/panorama/styles/lingua_chat.css`: 追加第 86 版视觉覆盖（800×620、左导航、金色、卡片、两栏行、开关、分段、服务商卡、凭证卡、页脚）；关键属性在文件末尾重述，避免浏览器式 `background: linear-gradient` 被引擎整条丢弃。
+  - `mod/panorama/scripts/lingua_chat.js`: `setToggleText` 同步 Button 的 `LCTOn`；新增 `syncSegments` / `syncProviderCards` / `LCTShowKey` / `LCTSaveAndClose`；`syncProviderRows` 增加 `LCTCredSection` 显隐；`LCTShowTab` 服务商页同步卡片。
+  - `docs/ui/panel-v1-general.png` / `panel-v1-service.png` / `settings-mockups-v1.html`: 第一版设计参考（从归档分支取回）；删除第 84 版 `panel-tabbed.*` 预览。
+  - `CHANGELOG.md`: 更新 Unreleased 面板条目与实机验证项。
+- **验证方式**:
+  - XML 解析、`node --check` 通过；
+  - `scripts/lingua_chat_simtest.js` 58/0；`scripts/test_steamid_roster.js` 3/0；
+  - 未构建 VPK、未实机（本机无游戏与 CSDK）。
+- **仍需用户测试**:
+  - 800×620 在游戏字体下是否一屏/滚动合适；两栏行标题与右侧控件是否垂直对齐；
+  - 左导航 active、服务商卡片选中/已配置状态、Key 显示/隐藏；
+  - 分段按钮与开关状态是否即时更新；
+  - 底部「完成并关闭」是否保存后关闭，右上角 X 是否被 HUD 挡（ESC 入口下应可点）。

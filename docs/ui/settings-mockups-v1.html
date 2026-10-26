@@ -1,0 +1,944 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>DeadlockLingua 设置界面 · 现状与优化稿</title>
+<style>
+  /* ============================================================
+     说明:本文件是 1:1 复刻 mod/panorama/styles/lingua_chat.css +
+     mod/panorama/layout/chat.xml 的浏览器版示意图,不是游戏截图。
+     Panorama 的 gradient()/flow-children/fill-parent-flow 已换成
+     等价的 linear-gradient / flex,尺寸、字号、颜色保持原值。
+     ============================================================ */
+
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; width: 1280px; height: 720px;
+    overflow: hidden; background: #07090b;
+    font-family: "Bahnschrift", "Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .stage {
+    position: relative; width: 1280px; height: 720px; overflow: hidden;
+    background:
+      radial-gradient(900px 520px at 50% 34%, #1a2129 0%, rgba(20,26,32,0.55) 42%, rgba(8,11,14,0) 72%),
+      linear-gradient(180deg, #0b0f13 0%, #06080a 100%);
+  }
+  .stage::after {
+    content: ""; position: absolute; inset: 0; pointer-events: none;
+    background: radial-gradient(120% 100% at 50% 45%, rgba(0,0,0,0) 55%, rgba(0,0,0,0.55) 100%);
+  }
+
+  /* ============================================================
+     A. 现状(按 lingua_chat.css 原值)
+     ============================================================ */
+  .cur-panel {
+    position: absolute; left: 310px; top: 60px;
+    width: 660px; height: 600px;
+    display: flex; flex-direction: column;
+    background: linear-gradient(180deg, #141a20 0%, #0e1318 48%, #0a0d10 100%);
+    border: 1px solid rgba(255, 252, 244, 0.08);
+    border-radius: 6px;
+    box-shadow: rgba(0, 0, 0, 0.45) 0px 16px 34px 0px;
+    z-index: 10;
+  }
+  .cur-header {
+    flex: 0 0 50px; display: flex; align-items: center;
+    padding: 0 15px;
+    background: linear-gradient(180deg, #1b2128 0%, #13181d 100%);
+    border-bottom: 1px solid rgba(255, 252, 244, 0.06);
+    position: relative;
+  }
+  .cur-title { font-size: 18px; color: #fff; font-weight: 700; letter-spacing: 1px; }
+  .cur-close {
+    position: absolute; right: 15px; top: 9px;
+    width: 32px; height: 32px; border: 0; background: transparent;
+    border-radius: 4px; color: #a39c8e; font-size: 15px; font-weight: 700;
+    font-family: inherit; cursor: pointer;
+  }
+  .cur-body { flex: 1 1 auto; min-height: 0; }
+  .cur-list {
+    width: 100%; height: 100%;
+    overflow: hidden;
+    padding: 12px 16px;
+    display: flex; flex-direction: column;
+  }
+  .cur-row { width: 100%; padding: 5px 8px; margin-bottom: 2px; border-radius: 6px; }
+  .cur-row:hover { background: linear-gradient(90deg, rgba(102,204,153,0.05), rgba(102,204,153,0)); }
+  .cur-label {
+    color: #cde5db; font-size: 13px; font-weight: 700;
+    letter-spacing: 0.3px; margin-bottom: 4px;
+    line-height: 1.25;
+  }
+  .cur-input {
+    width: 100%; height: 28px; display: block;
+    background: linear-gradient(180deg, #1c1f24 0%, #14171b 100%);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 4px; color: #e8e2d6; font-size: 14px;
+    padding: 0 8px; font-family: inherit;
+  }
+  .cur-toggle, .cur-select {
+    height: 28px; padding: 2px 12px;
+    background: #20242a; border: 0; border-radius: 4px;
+    color: #c9c2b4; font-size: 14px; font-weight: 700;
+    font-family: inherit; cursor: pointer;
+  }
+  .cur-toggle { min-width: 68px; }
+  .cur-select { min-width: 200px; text-align: center; }
+  .cur-hint { color: #6b7684; font-size: 11px; margin-left: 8px; margin-top: 2px; }
+  .cur-status {
+    flex: 0 0 30px; position: relative;
+    padding: 0 15px;
+    background: rgba(13, 17, 21, 0.85);
+    border-bottom: 1px solid rgba(255, 252, 244, 0.06);
+    overflow: hidden;
+  }
+  .cur-status-label {
+    color: #9fb4d0; font-size: 12px; line-height: 1.2;
+    padding-top: 2px;
+  }
+  .cur-bridge {
+    position: absolute; right: 15px; top: 0; height: 30px;
+    display: flex; align-items: center;
+    color: #7fd8a8; font-size: 12px; white-space: nowrap;
+  }
+  .cur-footer {
+    flex: 0 0 56px; display: flex; align-items: center;
+    padding: 0 15px;
+    background: linear-gradient(180deg, #13181d 0%, #0d1115 100%);
+    border-top: 1px solid rgba(255, 252, 244, 0.06);
+  }
+  .cur-btn {
+    height: 28px; min-width: 68px; padding: 2px 12px;
+    border: 0; border-radius: 4px; font-family: inherit;
+    font-size: 14px; font-weight: 700; color: #fff; cursor: pointer;
+  }
+  .cur-btn.save { background: #2f5d3a; }
+  .cur-btn.test { background: #2a4a6b; }
+  .cur-footer .cur-hint { color: #6b7684; font-size: 11px; margin-left: 8px; }
+
+  /* ============================================================
+     B. 优化稿
+     ============================================================ */
+  .app {
+    --bg: #0b0e12;
+    --panel: #10151a;
+    --surface: #151b22;
+    --surface-2: #1a212a;
+    --line: rgba(255, 255, 255, 0.065);
+    --line-strong: rgba(255, 255, 255, 0.11);
+    --text: #ece6da;
+    --muted: #929ca8;
+    --dim: #6b7480;
+    --gold: #e7b96b;
+    --gold-soft: rgba(231, 185, 107, 0.10);
+    --green: #79c99e;
+    --red: #e28374;
+
+    position: absolute; left: 240px; top: 50px;
+    width: 800px; height: 620px;
+    display: flex; flex-direction: column;
+    background: linear-gradient(180deg, #121820 0%, #0d1217 55%, #0a0e12 100%);
+    border: 1px solid var(--line-strong);
+    border-top: 1px solid rgba(231, 185, 107, 0.38);
+    border-radius: 8px;
+    box-shadow: rgba(0, 0, 0, 0.55) 0px 24px 60px 0px, inset 0 1px 0 rgba(255,255,255,0.04);
+    z-index: 20;
+    color: var(--text);
+  }
+  .app-header {
+    flex: 0 0 62px; display: flex; align-items: center;
+    padding: 0 18px;
+    border-bottom: 1px solid var(--line);
+    background: linear-gradient(180deg, rgba(255,255,255,0.025), rgba(255,255,255,0));
+    position: relative;
+  }
+  .brand-mark {
+    width: 30px; height: 30px; border-radius: 8px;
+    border: 1px solid rgba(231,185,107,0.5);
+    background: rgba(231,185,107,0.08);
+    display: flex; align-items: center; justify-content: center;
+    color: var(--gold); font-size: 10px; font-weight: 700; letter-spacing: 0.6px;
+  }
+  .brand-text { margin-left: 11px; display: flex; flex-direction: column; gap: 2px; }
+  .brand-name { font-size: 15px; font-weight: 700; letter-spacing: 0.4px; color: #f4eee2; }
+  .brand-sub { font-size: 9.5px; letter-spacing: 1.6px; color: var(--dim); text-transform: uppercase; }
+  .app-header .spacer { flex: 1; }
+  .hd-chip {
+    font-size: 10.5px; color: var(--muted);
+    border: 1px solid var(--line); border-radius: 20px;
+    padding: 4px 10px; margin-right: 10px;
+    letter-spacing: 0.3px;
+  }
+  .hd-close {
+    width: 30px; height: 30px; border-radius: 6px;
+    border: 1px solid transparent; background: transparent;
+    color: #9aa3ad; font-size: 15px; font-weight: 700; font-family: inherit;
+    cursor: pointer;
+  }
+  .hd-close:hover { background: rgba(255,255,255,0.05); color: #fff; }
+
+  .app-main { flex: 1 1 auto; min-height: 0; display: flex; }
+
+  .nav {
+    flex: 0 0 186px; padding: 14px 10px 12px;
+    border-right: 1px solid var(--line);
+    background: rgba(0,0,0,0.12);
+    display: flex; flex-direction: column;
+  }
+  .nav-item {
+    position: relative;
+    height: 42px; display: flex; align-items: center; justify-content: space-between;
+    padding: 0 12px; border-radius: 7px;
+    font-size: 13px; color: #9aa4af; margin-bottom: 3px;
+    letter-spacing: 0.2px;
+  }
+  .nav-item .tag {
+    font-size: 9.5px; color: var(--dim);
+    border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px;
+  }
+  .nav-item.active {
+    background: rgba(255,255,255,0.055);
+    color: #f3ecdd; font-weight: 600;
+  }
+  .nav-item.active::before {
+    content: ""; position: absolute; left: 0; top: 10px; bottom: 10px;
+    width: 2px; border-radius: 2px; background: var(--gold);
+  }
+  .nav-item.active .tag { color: var(--gold); border-color: rgba(231,185,107,0.35); }
+  .nav-foot {
+    margin-top: auto; padding: 10px 10px 2px;
+    border-top: 1px solid var(--line);
+    display: flex; align-items: center; gap: 7px;
+    font-size: 10px; color: var(--dim); letter-spacing: 0.3px;
+  }
+  .nav-foot .ok { color: var(--gold); font-size: 9px; }
+  .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); box-shadow: 0 0 6px rgba(121,201,158,0.6); }
+  .dot.off { background: #7a8390; box-shadow: none; }
+
+  .content { flex: 1 1 auto; min-width: 0; padding: 18px 22px 0; overflow: hidden; }
+
+  .section {
+    display: flex; align-items: center; gap: 10px;
+    font-size: 10.5px; color: #8d97a3; letter-spacing: 1px;
+    margin: 0 0 8px 2px;
+  }
+  .section::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+  .section + .card { margin-bottom: 16px; }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .row {
+    min-height: 54px; display: flex; align-items: center; gap: 16px;
+    padding: 9px 16px;
+  }
+  .row + .row { border-top: 1px solid rgba(255,255,255,0.045); }
+  .row-l { flex: 1 1 auto; min-width: 0; }
+  .row-t { font-size: 13px; color: #ece6da; line-height: 1.25; }
+  .row-d { font-size: 10.5px; color: var(--dim); margin-top: 3px; line-height: 1.3; }
+  .row-r { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; }
+
+  /* 开关 */
+  .sw { width: 42px; height: 22px; border-radius: 11px; background: #2a323b; position: relative; flex: 0 0 auto; }
+  .sw .kn { position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: #7d8792; }
+  .sw.on { background: rgba(231,185,107,0.92); }
+  .sw.on .kn { left: 23px; background: #14181d; }
+
+  /* 分段 */
+  .seg { display: flex; gap: 2px; padding: 2px; background: #0d1217; border: 1px solid var(--line); border-radius: 7px; }
+  .seg-i {
+    height: 26px; line-height: 26px; padding: 0 13px; border-radius: 5px;
+    font-size: 12px; color: #98a2ad; white-space: nowrap;
+  }
+  .seg-i.active { background: rgba(231,185,107,0.14); color: var(--gold); box-shadow: inset 0 0 0 1px rgba(231,185,107,0.28); }
+
+  /* 下拉按钮(点击进入二级选择页,不是浮层) */
+  .select {
+    height: 32px; min-width: 176px; padding: 0 12px 0 12px;
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    background: #0d1217; border: 1px solid var(--line-strong); border-radius: 7px;
+    font-size: 12.5px; color: var(--text);
+  }
+  .select .chev {
+    width: 6px; height: 6px; margin: 0 2px 3px 0;
+    border-right: 1.5px solid #7b8591; border-bottom: 1.5px solid #7b8591;
+    transform: rotate(45deg);
+  }
+  .select:hover { border-color: rgba(231,185,107,0.4); }
+
+  /* 服务商条 */
+  .prov-row { display: flex; gap: 8px; }
+  .prov {
+    flex: 1 1 0; height: 68px; padding: 9px 10px;
+    background: var(--surface); border: 1px solid var(--line); border-radius: 8px;
+    position: relative; display: flex; flex-direction: column; justify-content: space-between;
+  }
+  .prov .nm { font-size: 12px; color: #e6e0d4; font-weight: 600; letter-spacing: 0.2px; }
+  .prov .st { font-size: 9.5px; color: var(--dim); }
+  .prov .badge { font-size: 8.5px; letter-spacing: 0.4px; color: #8fd6ae; }
+  .prov.sel {
+    border-color: rgba(231,185,107,0.55);
+    background: linear-gradient(180deg, rgba(231,185,107,0.12), rgba(231,185,107,0.04));
+    box-shadow: inset 0 0 0 1px rgba(231,185,107,0.12);
+  }
+  .prov.sel .nm { color: var(--gold); }
+  .prov .check {
+    position: absolute; top: 7px; right: 8px;
+    width: 13px; height: 13px; border-radius: 50%;
+    background: var(--gold); color: #14181d;
+    font-size: 8px; line-height: 13px; text-align: center; font-weight: 700;
+  }
+
+  /* 凭据卡 */
+  .cred { padding: 12px 16px 14px; }
+  .cred-head { display: flex; align-items: center; gap: 8px; }
+  .cred-head .t { font-size: 12px; color: #dcd6ca; }
+  .pill {
+    font-size: 9.5px; padding: 2px 8px; border-radius: 20px;
+    color: var(--green); background: rgba(121,201,158,0.08);
+    border: 1px solid rgba(121,201,158,0.3);
+  }
+  .cred-head .note { margin-left: auto; font-size: 9.5px; color: var(--dim); }
+  .key-line { display: flex; gap: 8px; margin-top: 8px; }
+  .key-input {
+    flex: 1; height: 34px; border-radius: 6px;
+    background: #0c1116; border: 1px solid var(--line-strong);
+    display: flex; align-items: center; padding: 0 11px;
+    color: #cfc8ba; font-size: 13px; letter-spacing: 2px;
+  }
+  .ghost {
+    height: 34px; padding: 0 11px; border-radius: 6px;
+    background: transparent; border: 1px solid var(--line-strong);
+    color: #b9c2cc; font-size: 11px; font-family: inherit;
+  }
+  .fields { display: flex; gap: 10px; margin-top: 10px; }
+  .field { flex: 1; }
+  .field .fl { font-size: 10px; color: var(--dim); margin-bottom: 4px; letter-spacing: 0.3px; }
+  .field .fv {
+    height: 32px; border-radius: 6px; background: #0c1116;
+    border: 1px solid var(--line); display: flex; align-items: center;
+    padding: 0 10px; color: #d8d2c6; font-size: 11.5px;
+  }
+  .cred .hint { margin-top: 9px; font-size: 9.5px; color: var(--dim); line-height: 1.4; }
+
+  /* 回退 */
+  .chips { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
+  .chip {
+    height: 24px; padding: 0 9px; border-radius: 20px;
+    border: 1px solid rgba(231,185,107,0.3); background: rgba(231,185,107,0.07);
+    color: #d9c69e; font-size: 10px; display: flex; align-items: center; gap: 6px;
+  }
+  .chip .x { color: #8c7c5e; font-size: 10px; }
+  .chip.add { border-style: dashed; border-color: var(--line-strong); background: transparent; color: var(--dim); }
+
+  /* 语言选择二级页 */
+  .sheet-head { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+  .back {
+    height: 28px; padding: 0 10px 0 8px; border-radius: 6px;
+    border: 1px solid var(--line); background: transparent;
+    color: #b9c2cc; font-size: 11px; font-family: inherit;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .sheet-title { font-size: 14px; color: #f0eadf; font-weight: 600; }
+  .sheet-sub { font-size: 10px; color: var(--dim); margin-left: auto; }
+  .lang-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .lang {
+    height: 64px; border-radius: 8px;
+    background: var(--surface); border: 1px solid var(--line);
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+    position: relative;
+  }
+  .lang .ln { font-size: 13px; color: #e9e3d7; }
+  .lang .lc { font-size: 9.5px; color: var(--dim); letter-spacing: 0.5px; }
+  .lang.sel {
+    border-color: rgba(231,185,107,0.6);
+    background: linear-gradient(180deg, rgba(231,185,107,0.13), rgba(231,185,107,0.04));
+  }
+  .lang.sel .ln { color: var(--gold); }
+  .lang.sel .lc { color: rgba(231,185,107,0.7); }
+  .lang .check {
+    position: absolute; top: 8px; right: 9px;
+    color: var(--gold); font-size: 10px; font-weight: 700;
+  }
+  .lang.custom { border-style: dashed; border-color: var(--line-strong); background: transparent; }
+  .lang.custom .ln { color: #9aa4af; font-size: 12px; }
+  .sheet-note { margin-top: 14px; font-size: 10px; color: var(--dim); }
+
+  /* 提示 */
+  .tip {
+    margin-top: 16px; padding: 9px 14px;
+    display: flex; align-items: center; gap: 10px;
+    border: 1px dashed var(--line-strong); border-radius: 8px;
+    font-size: 10.5px; color: var(--dim);
+  }
+  .kbd {
+    font-family: inherit; font-size: 10px; color: var(--gold);
+    border: 1px solid rgba(231,185,107,0.35); border-radius: 4px;
+    padding: 1px 6px; background: rgba(231,185,107,0.07);
+    letter-spacing: 0.5px;
+  }
+
+  /* 页脚 */
+  .app-foot {
+    flex: 0 0 60px; display: flex; align-items: center;
+    padding: 0 18px;
+    border-top: 1px solid var(--line);
+    background: rgba(0,0,0,0.18);
+  }
+  .foot-status { display: flex; align-items: center; gap: 8px; font-size: 10.5px; color: #9aa4af; }
+  .foot-note { margin-left: 12px; font-size: 9.5px; color: var(--dim); }
+  .app-foot .spacer { flex: 1; }
+  .btn-ghost {
+    height: 34px; padding: 0 14px; border-radius: 6px;
+    background: transparent; border: 1px solid var(--line-strong);
+    color: #c7cfd8; font-size: 11.5px; font-family: inherit; font-weight: 600;
+    letter-spacing: 0.2px; margin-right: 8px;
+  }
+  .btn-primary {
+    height: 34px; padding: 0 20px; border-radius: 6px;
+    background: linear-gradient(180deg, #ecc47c, #d9a955);
+    border: 1px solid rgba(255, 236, 200, 0.55);
+    color: #1a1409; font-size: 12px; font-family: inherit; font-weight: 700;
+    letter-spacing: 0.4px;
+    box-shadow: 0 1px 0 rgba(255,255,255,0.25) inset, 0 4px 12px rgba(0,0,0,0.3);
+  }
+
+  /* 游戏内紧凑版:640×520,锚在聊天框上方,去掉右上角关闭 */
+  .app-c { left: 24px; top: 96px; width: 600px; height: 480px; }
+  .app-c .app-header { flex: 0 0 50px; padding: 0 16px; }
+  .app-c .brand-mark { width: 26px; height: 26px; border-radius: 7px; font-size: 9px; }
+  .app-c .brand-name { font-size: 13.5px; }
+  .app-c .brand-sub { font-size: 8.5px; letter-spacing: 1.2px; }
+  .app-c .hd-note { margin-left: auto; font-size: 9.5px; color: var(--dim); letter-spacing: 0.4px; }
+  .tabs {
+    flex: 0 0 38px; display: flex; align-items: stretch; gap: 2px;
+    padding: 0 12px; border-bottom: 1px solid var(--line);
+  }
+  .tab {
+    position: relative; display: flex; align-items: center;
+    padding: 0 12px; font-size: 12px; color: #98a2ad;
+  }
+  .tab.active { color: var(--gold); font-weight: 600; }
+  .tab.active::after {
+    content: ""; position: absolute; left: 10px; right: 10px; bottom: 0;
+    height: 2px; border-radius: 2px; background: var(--gold);
+  }
+  .tab .mini { width: 5px; height: 5px; border-radius: 50%; background: var(--green); margin-left: 6px; }
+  .app-c .content { padding: 10px 16px 0; }
+  .app-c .section { font-size: 10px; margin-bottom: 5px; }
+  .app-c .section + .card { margin-bottom: 10px; }
+  .app-c .row { min-height: 44px; padding: 4px 14px; gap: 12px; }
+  .app-c .row-t { font-size: 12.5px; }
+  .app-c .row-d { font-size: 10px; margin-top: 2px; }
+  .app-c .sw { width: 38px; height: 20px; border-radius: 10px; }
+  .app-c .sw .kn { width: 14px; height: 14px; top: 3px; left: 3px; }
+  .app-c .sw.on .kn { left: 21px; }
+  .app-c .seg { padding: 2px; }
+  .app-c .seg-i { height: 22px; line-height: 22px; padding: 0 10px; font-size: 11px; }
+  .app-c .select { height: 28px; min-width: 150px; font-size: 11.5px; padding: 0 10px; }
+  .app-c .app-foot { flex: 0 0 52px; padding: 0 16px; }
+  .app-c .btn-primary { height: 32px; padding: 0 16px; font-size: 11.5px; }
+  .app-c .btn-ghost { height: 32px; padding: 0 12px; font-size: 11px; }
+  .app-c .foot-status { font-size: 10px; }
+  .app-c .foot-note { font-size: 9px; }
+
+  #compactApp { display: none; }
+  body[data-view="compact"] #compactApp { display: flex; }
+  body[data-view="compact"] #wideApp { display: none; }
+
+  /* ESC 菜单场景(示意背景 + 悬浮设置面板) */
+  .esc-bg { display: none; position: absolute; inset: 0; z-index: 2; }
+  body[data-view="esc"] .esc-bg { display: block; }
+  body[data-view="esc"] #wideApp { display: flex; }
+  body[data-view="esc"] .view-general { display: block; }
+  .esc-bg::before {
+    content: ""; position: absolute; inset: 0;
+    background:
+      linear-gradient(90deg, rgba(8, 11, 14, 0.96) 0%, rgba(8, 11, 14, 0.82) 26%, rgba(8, 11, 14, 0.55) 46%, rgba(8, 11, 14, 0.72) 100%),
+      radial-gradient(900px 500px at 62% 38%, #1c242d 0%, #0b0f14 62%, #06080a 100%);
+  }
+  .esc-nav {
+    position: absolute; left: 0; top: 0; bottom: 0; width: 300px;
+    padding: 84px 34px 40px;
+    display: flex; flex-direction: column; gap: 22px;
+    background: linear-gradient(90deg, rgba(6, 9, 12, 0.9), rgba(6, 9, 12, 0));
+  }
+  .esc-nav .cap { font-size: 9px; letter-spacing: 2.4px; color: #5d6772; margin-bottom: 2px; }
+  .esc-nav .it { font-size: 15px; color: #87919c; letter-spacing: 0.3px; }
+  .esc-nav .it.on { color: #e7b96b; font-weight: 600; }
+  .esc-nav .it.on::before {
+    content: ""; display: inline-block; width: 2px; height: 13px;
+    background: #e7b96b; margin-right: 9px; vertical-align: -2px; border-radius: 2px;
+  }
+  .esc-nav .sep { height: 1px; background: rgba(255,255,255,0.06); margin: 6px 0; }
+  .esc-right {
+    position: absolute; right: 30px; top: 108px; width: 288px; height: 446px;
+    border: 1px solid rgba(255,255,255,0.05); border-radius: 8px;
+    background: rgba(255,255,255,0.018); padding: 14px;
+    display: flex; flex-direction: column; gap: 9px;
+  }
+  .esc-right .rt { font-size: 9px; letter-spacing: 2px; color: #5d6772; margin-bottom: 4px; }
+  .esc-right .rr { height: 34px; border-radius: 5px; background: rgba(255,255,255,0.035); }
+  .esc-dim { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.46); }
+  body[data-view="escmenu"] .esc-bg { display: block; }
+  body[data-view="escmenu"] .esc-dim { display: none; }
+  body[data-view="escmenu"] .app { display: none; }
+  .new-tag {
+    font-size: 8px; color: #e7b96b; border: 1px solid rgba(231,185,107,0.45);
+    border-radius: 3px; padding: 1px 4px; margin-left: 8px; vertical-align: 1px;
+    letter-spacing: 0.5px;
+  }
+
+  .view { display: none; }
+  body[data-view="general"] .view-general { display: block; }
+  body[data-view="service"] .view-service { display: block; }
+  body[data-view="lang"] .view-lang { display: block; }
+
+  body[data-view="general"] .nav-general,
+  body[data-view="lang"] .nav-general {
+    background: rgba(255,255,255,0.055); color: #f3ecdd; font-weight: 600;
+  }
+  body[data-view="service"] .nav-service {
+    background: rgba(255,255,255,0.055); color: #f3ecdd; font-weight: 600;
+  }
+  body[data-view="general"] .nav-general::before,
+  body[data-view="lang"] .nav-general::before,
+  body[data-view="service"] .nav-service::before {
+    content: ""; position: absolute; left: 0; top: 10px; bottom: 10px;
+    width: 2px; border-radius: 2px; background: var(--gold);
+  }
+
+  body[data-view="current"] .app { display: none; }
+  body:not([data-view="current"]) .cur-panel { display: none; }
+</style>
+</head>
+<body data-view="current">
+<div class="stage">
+
+  <!-- ESC 菜单示意背景 -->
+  <div class="esc-bg">
+    <div class="esc-nav">
+      <div class="cap">ESC MENU</div>
+      <div class="it">继续游戏</div>
+      <div class="it">更改英雄</div>
+      <div class="sep"></div>
+      <div class="it">设置</div>
+      <div class="it on">翻译设置<span class="new-tag">NEW</span></div>
+      <div class="sep"></div>
+      <div class="it">退出游戏</div>
+    </div>
+    <div class="esc-right">
+      <div class="rt">FRIENDS</div>
+      <div class="rr"></div><div class="rr"></div><div class="rr"></div><div class="rr"></div>
+      <div class="rr"></div><div class="rr"></div><div class="rr"></div>
+    </div>
+    <div class="esc-dim"></div>
+  </div>
+
+  <!-- ================= A. 现状 ================= -->
+  <div class="cur-panel">
+    <div class="cur-header">
+      <div class="cur-title">Babel Tower 设置</div>
+      <button class="cur-close">X</button>
+    </div>
+
+    <div class="cur-body">
+      <div class="cur-list">
+        <div class="cur-row">
+          <div class="cur-label">启用翻译</div>
+          <button class="cur-toggle">是</button>
+        </div>
+
+        <div class="cur-row">
+          <div class="cur-label">服务商(点击选择)</div>
+          <button class="cur-select">OpenAI 兼容(自定义)</button>
+        </div>
+
+        <div class="cur-row">
+          <div class="cur-label">API Key</div>
+          <input class="cur-input" value="********" />
+          <div class="cur-hint">已配置</div>
+        </div>
+
+        <div class="cur-row">
+          <div class="cur-label">OpenAI 兼容 Base URL</div>
+          <input class="cur-input" value="https://api.deepseek.com" />
+        </div>
+
+        <div class="cur-row">
+          <div class="cur-label">模型名(如 gpt-4o-mini / llama3)</div>
+          <input class="cur-input" value="deepseek-chat" />
+        </div>
+
+        <div class="cur-row">
+          <div class="cur-label">服务商失败自动回退(逗号分隔,如 microsoft,openai;仅使用已填 Key 的)</div>
+          <input class="cur-input" value="" />
+        </div>
+
+        <div class="cur-row">
+          <div class="cur-label">目标语言(点击选择)</div>
+          <button class="cur-select">简体中文 (zh-Hans)</button>
+        </div>
+
+        <div class="cur-row">
+          <div class="cur-label">显示模式(点击选择)</div>
+          <button class="cur-select">双语(原文+译文)</button>
+        </div>
+
+        <div class="cur-row">
+          <div class="cur-label">发送前翻译(点击选择)</div>
+          <button class="cur-select">关(发原文)</button>
+        </div>
+
+        <div class="cur-row">
+          <div class="cur-label">发送目标语言(点击选择)</div>
+          <button class="cur-select">English 英语 (en)</button>
+        </div>
+
+        <div class="cur-row">
+          <div class="cur-label">超时(ms)</div>
+          <input class="cur-input" value="15000" />
+        </div>
+
+        <div class="cur-row">
+          <div class="cur-label">强制翻译(跳过语言判断)</div>
+          <button class="cur-toggle">否</button>
+        </div>
+
+        <div class="cur-row">
+          <div class="cur-label">翻译自己的消息</div>
+          <button class="cur-toggle">是</button>
+        </div>
+
+        <div class="cur-row">
+          <div class="cur-label">聊天日志(按比赛 ID 保存到 logs/chat)</div>
+          <button class="cur-toggle">是</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="cur-status">
+      <div class="cur-status-label">OpenAI 兼容端点:DeepSeek 填 https://api.deepseek.com + deepseek-chat/deepseek-reasoner;OpenAI/Ollama/LM Studio/OneAPI 亦可</div>
+      <div class="cur-bridge">桥状态: 桥在线 · 服务商 openai</div>
+    </div>
+
+    <div class="cur-footer">
+      <button class="cur-btn save">保存</button>
+      <button class="cur-btn test">测试</button>
+      <div class="cur-hint">选项点击选择 · 改完点保存 · ESC 关闭</div>
+    </div>
+  </div>
+
+  <!-- ================= B. 优化稿 ================= -->
+  <div class="app" id="wideApp">
+    <div class="app-header">
+      <div class="brand-mark">DL</div>
+      <div class="brand-text">
+        <div class="brand-name">DeadlockLingua</div>
+        <div class="brand-sub">Chat Translation</div>
+      </div>
+      <div class="spacer"></div>
+      <div class="hd-chip">v1.0.0</div>
+      <button class="hd-close">✕</button>
+    </div>
+
+    <div class="app-main">
+      <div class="nav">
+        <div class="nav-item nav-general">通用</div>
+        <div class="nav-item nav-service">翻译服务 <span class="tag">OpenAI</span></div>
+        <div class="nav-item nav-adv">高级</div>
+        <div class="nav-foot"><span class="ok">✓</span> 设置自动保存</div>
+      </div>
+
+      <div class="content">
+
+        <!-- 通用 -->
+        <div class="view view-general">
+          <div class="section">显示</div>
+          <div class="card">
+            <div class="row">
+              <div class="row-l">
+                <div class="row-t">启用聊天翻译</div>
+                <div class="row-d">关闭后不再扫描与翻译收到的消息</div>
+              </div>
+              <div class="row-r"><div class="sw on"><div class="kn"></div></div></div>
+            </div>
+            <div class="row">
+              <div class="row-l">
+                <div class="row-t">目标语言</div>
+                <div class="row-d">外语消息翻译成此语言</div>
+              </div>
+              <div class="row-r">
+                <div class="select"><span>简体中文</span><span class="chev"></span></div>
+              </div>
+            </div>
+            <div class="row">
+              <div class="row-l">
+                <div class="row-t">译文显示</div>
+                <div class="row-d">保留原文或只显示译文</div>
+              </div>
+              <div class="row-r">
+                <div class="seg">
+                  <div class="seg-i active">双语</div>
+                  <div class="seg-i">仅译文</div>
+                </div>
+              </div>
+            </div>
+            <div class="row">
+              <div class="row-l">
+                <div class="row-t">翻译自己的消息</div>
+                <div class="row-d">队内聊天里自己的发言也显示译文</div>
+              </div>
+              <div class="row-r"><div class="sw on"><div class="kn"></div></div></div>
+            </div>
+          </div>
+
+          <div class="section">发送</div>
+          <div class="card">
+            <div class="row">
+              <div class="row-l">
+                <div class="row-t">发送前翻译</div>
+                <div class="row-d">按 Enter 前先把内容翻成对方语言</div>
+              </div>
+              <div class="row-r">
+                <div class="seg">
+                  <div class="seg-i">关</div>
+                  <div class="seg-i active">只发译文</div>
+                  <div class="seg-i">双语</div>
+                </div>
+              </div>
+            </div>
+            <div class="row">
+              <div class="row-l">
+                <div class="row-t">发送目标语言</div>
+                <div class="row-d">仅在「发送前翻译」开启时使用</div>
+              </div>
+              <div class="row-r">
+                <div class="select"><span>English</span><span class="chev"></span></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="tip">
+            <span class="kbd">ESC</span>
+            <span>打开菜单 → 翻译设置;所有更改即时保存,关闭面板不会中断翻译。</span>
+          </div>
+        </div>
+
+        <!-- 翻译服务 -->
+        <div class="view view-service">
+          <div class="section">服务商</div>
+          <div class="prov-row">
+            <div class="prov">
+              <div class="nm">Bing</div>
+              <div class="st"><span class="badge">免 Key</span></div>
+            </div>
+            <div class="prov">
+              <div class="nm">Microsoft</div>
+              <div class="st">已配置</div>
+            </div>
+            <div class="prov sel">
+              <div class="check">✓</div>
+              <div class="nm">OpenAI</div>
+              <div class="st">已配置</div>
+            </div>
+            <div class="prov">
+              <div class="nm">DeepL</div>
+              <div class="st">未配置</div>
+            </div>
+            <div class="prov">
+              <div class="nm">Google</div>
+              <div class="st">未配置</div>
+            </div>
+          </div>
+
+          <div class="section" style="margin-top:16px;">凭据</div>
+          <div class="card cred">
+            <div class="cred-head">
+              <span class="t">API Key</span>
+              <span class="pill">已保存</span>
+              <span class="note">仅存本机 config/config.json</span>
+            </div>
+            <div class="key-line">
+              <div class="key-input">••••••••••••••••••••</div>
+              <button class="ghost">显示</button>
+              <button class="ghost">清除</button>
+            </div>
+            <div class="fields">
+              <div class="field">
+                <div class="fl">Base URL</div>
+                <div class="fv">https://api.deepseek.com/v1</div>
+              </div>
+              <div class="field">
+                <div class="fl">模型</div>
+                <div class="fv">deepseek-chat</div>
+              </div>
+            </div>
+            <div class="hint">OpenAI 兼容接口可接 DeepSeek、Ollama、LM Studio、OneAPI;Base URL 需带 /v1。</div>
+          </div>
+
+          <div class="section" style="margin-top:16px;">失败回退</div>
+          <div class="card">
+            <div class="row" style="min-height:48px;">
+              <div class="row-l">
+                <div class="row-t">主服务商失败时自动切换</div>
+                <div class="row-d">按顺序尝试下列服务商,只使用已配置 Key 的</div>
+              </div>
+              <div class="row-r"><div class="sw on"><div class="kn"></div></div></div>
+            </div>
+            <div class="row" style="min-height:44px;padding-top:0;padding-bottom:10px;">
+              <div class="chips">
+                <span class="chip">1 · Microsoft <span class="x">×</span></span>
+                <span class="chip">2 · DeepL <span class="x">×</span></span>
+                <span class="chip add">+ 添加</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 语言二级页 -->
+        <div class="view view-lang">
+          <div class="sheet-head">
+            <button class="back">← 返回</button>
+            <div class="sheet-title">目标语言</div>
+            <div class="sheet-sub">收到的消息翻译成此语言</div>
+          </div>
+          <div class="lang-grid">
+            <div class="lang sel"><span class="check">✓</span><div class="ln">简体中文</div><div class="lc">zh-Hans</div></div>
+            <div class="lang"><div class="ln">繁體中文</div><div class="lc">zh-Hant</div></div>
+            <div class="lang"><div class="ln">English</div><div class="lc">en</div></div>
+            <div class="lang"><div class="ln">日本語</div><div class="lc">ja</div></div>
+            <div class="lang"><div class="ln">한국어</div><div class="lc">ko</div></div>
+            <div class="lang"><div class="ln">Français</div><div class="lc">fr</div></div>
+            <div class="lang"><div class="ln">Deutsch</div><div class="lc">de</div></div>
+            <div class="lang"><div class="ln">Español</div><div class="lc">es</div></div>
+            <div class="lang custom"><div class="ln">自定义…</div><div class="lc">手输语言代码</div></div>
+          </div>
+          <div class="sheet-note">同语言的消息会自动跳过,不会浪费一次翻译请求。</div>
+        </div>
+
+      </div>
+    </div>
+
+    <div class="app-foot">
+      <div class="foot-status"><span class="dot"></span> 桥已连接</div>
+      <div class="foot-note">端口 8791 · 配置仅存本机</div>
+      <div class="spacer"></div>
+      <button class="btn-ghost">测试连接</button>
+      <button class="btn-primary">完成并关闭</button>
+    </div>
+  </div>
+
+  <!-- ================= C. 游戏内紧凑版 ================= -->
+  <div class="app app-c" id="compactApp">
+    <div class="app-header">
+      <div class="brand-mark">DL</div>
+      <div class="brand-text">
+        <div class="brand-name">DeadlockLingua</div>
+        <div class="brand-sub">Chat Translation</div>
+      </div>
+      <button class="hd-close" style="margin-left:auto;">✕</button>
+    </div>
+
+    <div class="tabs">
+      <div class="tab active">通用</div>
+      <div class="tab">翻译服务<span class="mini"></span></div>
+      <div class="tab">高级</div>
+    </div>
+
+    <div class="app-main">
+      <div class="content">
+        <div class="section">显示</div>
+        <div class="card">
+          <div class="row">
+            <div class="row-l">
+              <div class="row-t">启用聊天翻译</div>
+              <div class="row-d">关闭后不再扫描与翻译收到的消息</div>
+            </div>
+            <div class="row-r"><div class="sw on"><div class="kn"></div></div></div>
+          </div>
+          <div class="row">
+            <div class="row-l">
+              <div class="row-t">目标语言</div>
+              <div class="row-d">外语消息翻译成此语言</div>
+            </div>
+            <div class="row-r">
+              <div class="select"><span>简体中文</span><span class="chev"></span></div>
+            </div>
+          </div>
+          <div class="row">
+            <div class="row-l">
+              <div class="row-t">译文显示</div>
+              <div class="row-d">保留原文或只显示译文</div>
+            </div>
+            <div class="row-r">
+              <div class="seg">
+                <div class="seg-i active">双语</div>
+                <div class="seg-i">仅译文</div>
+              </div>
+            </div>
+          </div>
+          <div class="row">
+            <div class="row-l">
+              <div class="row-t">翻译自己的消息</div>
+              <div class="row-d">队内聊天里自己的发言也显示译文</div>
+            </div>
+            <div class="row-r"><div class="sw on"><div class="kn"></div></div></div>
+          </div>
+        </div>
+
+        <div class="section">发送</div>
+        <div class="card">
+          <div class="row">
+            <div class="row-l">
+              <div class="row-t">发送前翻译</div>
+              <div class="row-d">按 Enter 前先把内容翻成对方语言</div>
+            </div>
+            <div class="row-r">
+              <div class="seg">
+                <div class="seg-i">关</div>
+                <div class="seg-i active">只发译文</div>
+                <div class="seg-i">双语</div>
+              </div>
+            </div>
+          </div>
+          <div class="row">
+            <div class="row-l">
+              <div class="row-t">发送目标语言</div>
+              <div class="row-d">仅在「发送前翻译」开启时使用</div>
+            </div>
+            <div class="row-r">
+              <div class="select"><span>English</span><span class="chev"></span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="app-foot">
+      <div class="foot-status"><span class="dot"></span> 桥已连接</div>
+      <div class="foot-note">端口 8791 · ESC 关闭</div>
+      <div class="spacer"></div>
+      <button class="btn-ghost">测试连接</button>
+      <button class="btn-primary">完成并关闭</button>
+    </div>
+  </div>
+
+</div>
+<script>
+  (function () {
+    var ok = { current: 1, general: 1, service: 1, lang: 1, compact: 1, esc: 1, escmenu: 1 };
+    function apply() {
+      var v = (location.hash || "#current").replace("#", "");
+      document.body.setAttribute("data-view", ok[v] ? v : "current");
+    }
+    apply();
+    window.addEventListener("hashchange", apply);
+  })();
+</script>
+</body>
+</html>
