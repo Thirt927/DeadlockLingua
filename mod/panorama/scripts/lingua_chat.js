@@ -6389,6 +6389,13 @@ function injectTranslation(row, sig, text) {
       }
       diagLog("pinst", "PANORAMA: settings panel instances=" + insts.length + desc);
     } catch (e) {}
+    // /tr 用紧凑第一版(600×480 顶部分段);ESC 入口保持 800×620 左导航
+    const chatMode = !(escHostedPanel && isValid(escHostedPanel));
+    try {
+      if (chatMode) panel.AddClass("LCTChatMode");
+      else panel.RemoveClass("LCTChatMode");
+    } catch (e) {}
+    diagLog("setmode", "PANORAMA: settings mode=" + (chatMode ? "chat" : "esc"));
     try {
       panel.AddClass(SETTINGS_VISIBLE_CLASS);
     } catch (e) {}
