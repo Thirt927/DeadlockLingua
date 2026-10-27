@@ -2143,14 +2143,14 @@ ode -e "JSON.parse(...)" 通过)。
 - **验证方式**: `node --check` 通过;`lingua_chat_simtest.js` 新增 [7b]/[7c]/[7d] 用例(俄语 `//sd ru`、日语 `//ja` 短形式、未知语言不发送、`//随便 正文` 按设置翻译、`outgoing=off` 时只发去前缀正文),全量 **PASS 68 / FAIL 0**;`build.ps1` 编译成功,`dist/pak22_dir.vpk` 已部署到 addons。
 - **仍需用户测试**: 重启 Deadlock,在聊天框试 `//sd 俄语 我们一起去推中路`、`//ru hello` 与 `//随便 我们推中`,确认只发出对应译文/按设置翻译的正文,且下一条恢复默认语言。
 
-## 2026-10-26: /tr 面板回到第一版 800×620 视觉（第 86 版，覆盖第 84 版标签页）
+## 2026-10-26/27: 设置面板回到第一版视觉（ESC 800×620 / /tr 600×480）
 
-- **背景**: 用户明确第一版 800×620 视觉（左导航、金色主色、行内「标题/说明 + 右侧控件」、轨道开关、分段按钮、服务商卡片、底部「测试连接 / 完成并关闭」）比第 84 版 600×640 标签页好看；仓库已经有 ESC 入口，需要在现有实现上改回第一版。
-- **方案**: 面板改 800×620；左侧 186px 导航（通用 / 翻译服务 / 高级）；右侧页面滚动；行改为左文右控件（标签+说明在左，控件列 300px）；开关改轨道+圆点；译文显示/发送前翻译改分段；服务商改 5 张卡片；凭证卡带显示 Key；底部测试/保存/完成并关闭。
+- **背景**: 用户明确第一版视觉（左导航、金色主色、行内「标题/说明 + 右侧控件」、轨道开关、分段按钮、服务商卡片、底部「测试连接 / 完成并关闭」）比第 84 版 600×640 标签页好看；仓库已经有 ESC 入口，需要在现有实现上改回第一版；随后用户指出 `/tr` 和 ESC 共用面板，`/tr` 也需要紧凑版。
+- **方案**: ESC 800×620 左导航；`/tr` 600×480 紧凑版（同一份面板加 `LCTChatMode`：顶部分段、紧凑行、控件缩小、隐藏右上角 X）；行改为左文右控件（标签+说明在左，ESC 控件列 300px / 紧凑 220px）；开关改轨道+圆点；译文显示/发送前翻译改分段；服务商改 5 张卡片；凭证卡带显示 Key；底部测试/保存/完成并关闭。
 - **改动文件**:
   - `mod/panorama/layout/chat.xml`: 重写面板为 header + left nav + pages + footer；新增服务商卡片、分段按钮、轨道开关、凭证卡、`LCTCredSection`。
-  - `mod/panorama/styles/lingua_chat.css`: 追加第 86 版视觉覆盖（800×620、左导航、金色、卡片、两栏行、开关、分段、服务商卡、凭证卡、页脚）；关键属性在文件末尾重述，避免浏览器式 `background: linear-gradient` 被引擎整条丢弃。
-  - `mod/panorama/scripts/lingua_chat.js`: `setToggleText` 同步 Button 的 `LCTOn`；新增 `syncSegments` / `syncProviderCards` / `LCTShowKey` / `LCTSaveAndClose`；`syncProviderRows` 增加 `LCTCredSection` 显隐；`LCTShowTab` 服务商页同步卡片。
+  - `mod/panorama/styles/lingua_chat.css`: 追加第 86 版视觉覆盖（800×620、左导航、金色、卡片、两栏行、开关、分段、服务商卡、凭证卡、页脚）；再追加 `.LCTChatMode` 紧凑覆盖（600×480、顶部分段、紧凑行、隐藏右上角 X）；关键属性在文件末尾重述，避免浏览器式 `background: linear-gradient` 被引擎整条丢弃。
+  - `mod/panorama/scripts/lingua_chat.js`: `openSettingsPanel` 按入口切换 `LCTChatMode`（`/tr` 加、ESC 去掉）；`setToggleText` 同步 Button 的 `LCTOn`；新增 `syncSegments` / `syncProviderCards` / `LCTShowKey` / `LCTSaveAndClose`；`syncProviderRows` 增加 `LCTCredSection` 显隐；`LCTShowTab` 服务商页同步卡片。
   - `docs/ui/panel-v1-general.png` / `panel-v1-service.png` / `settings-mockups-v1.html`: 第一版设计参考（从归档分支取回）；删除第 84 版 `panel-tabbed.*` 预览。
   - `CHANGELOG.md`: 更新 Unreleased 面板条目与实机验证项。
 - **验证方式**:
@@ -2158,7 +2158,7 @@ ode -e "JSON.parse(...)" 通过)。
   - `scripts/lingua_chat_simtest.js` 60/0；`scripts/test_steamid_roster.js` 3/0；
   - 未构建 VPK、未实机（本机无游戏与 CSDK）。
 - **仍需用户测试**:
-  - 800×620 在游戏字体下是否一屏/滚动合适；两栏行标题与右侧控件是否垂直对齐；
+  - ESC 800×620 与 `/tr` 600×480 在游戏字体下是否一屏/滚动合适；`/tr` 顶部分段是否正常；两栏行标题与右侧控件是否垂直对齐；
   - 左导航 active、服务商卡片选中/已配置状态、Key 显示/隐藏；
   - 分段按钮与开关状态是否即时更新；
   - 底部「完成并关闭」是否保存后关闭，右上角 X 是否被 HUD 挡（ESC 入口下应可点）。
