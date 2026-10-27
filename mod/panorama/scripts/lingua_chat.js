@@ -14,7 +14,7 @@
   "use strict";
 
   const LOG_PREFIX = "[LCT]";
-  const VERSION = "2.0.0";
+  const VERSION = "2.2.0";
 
   // ---- 原版聊天结构 ID(当前 Deadlock 版本稳定)----
   const CHAT_ROOT_ID = "Chat";
@@ -3553,7 +3553,7 @@ function resolveSteamId(record) {
       // 新版气泡行若带 SenderName 直接读;否则保持 <unknown> 走 recentRows 回填
       const inlineSender = safeText(findClass(row, SENDER_NAME_CLASS)) || "";
       const sender = inlineSender || UNKNOWN_NAME;
-      return { sender: sender, channel: "hud", text: text, isOwn: isOwn, hero: readHeroFromRow(row) || fallbackHeroForSender(sender), heroId: readHeroIdFromRow(row), steamid: readSteamIdFromRow(row) || steamIdByName(sender), hud: true, quick: true };
+      return { sender: sender, channel: "hud", text: text, isOwn: isOwn, hero: readHeroFromRow(row) || fallbackHeroForSender(sender), heroId: readHeroIdFromRow(row), steamid: readSteamIdFromRow(row) || steamIdByName(sender), hud: true, quick: !!(findChild(row, "PingLabel") || findChild(row, "TargetHeroImage")) };
     }
     const source = findChild(row, MESSAGE_SOURCE_ID);
     const contents = findChild(row, MESSAGE_CONTENTS_ID);
@@ -3575,7 +3575,7 @@ function resolveSteamId(record) {
       hero: readHeroFromRow(row) || fallbackHeroForSender(sender),
       heroId: readHeroIdFromRow(row),
       steamid: readSteamIdFromRow(row) || steamIdByName(sender),
-        quick: !!findChild(row, "PingLabel"),
+      quick: !!(findChild(row, "PingLabel") || findChild(row, "TargetHeroImage") || (contents && hasClass(contents, "Ping"))),
     };
   }
 
@@ -3646,6 +3646,7 @@ function resolveSteamId(record) {
     const text = record.text;
     if (!text || text.length < 2) return true;
     if (text.charAt(0) === "/") return true; // 指令消息
+    if (record.quick) return true; // 快捷发言/地图标记:引擎已按各客户端语言本地化,再翻一遍没有意义
     if (!hasLetterChar(text)) return true; // 纯数字/符号/表情
     if (record.isOwn && State.cfg.translateOwn === false) return true; // 可配置:默认翻译自己的消息
     if (!State.cfg.force && isTargetLanguageText(text)) return true; // 已为目标语言

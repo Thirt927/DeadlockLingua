@@ -456,13 +456,27 @@ async function test4_bilingualNoCollapse() {
 }
 
 async function test5_pingBubbleKept() {
-  console.log("\n[5] english quick chat (Ping) in translation_only: bubble kept + translation appended");
+  console.log("\n[5] quick chat (Ping): engine already localized -> no translation, bubble kept");
   const env = freshEnv(CFG.translationOnly);
   const row = env.addRow("ping", "Carol", "go mid");
-  const ok = await waitFor(() => labelsOf(row).length > 0, 10000);
+  await sleep(1500);
   const labels = labelsOf(row);
-  assert("translation label injected", ok && labels.length === 1 && labels[0].text.length > 0, labels[0] && labels[0].text);
+  assert("no translation label for quick chat", labels.length === 0, labels.length + " labels");
   assert("ping bubble NOT collapsed", row.FindChildTraverse("MessageContents").style.visibility === "visible");
+}
+
+async function test5b_hudPingSkipped() {
+  console.log("\n[5b] HUD quick chat (PingLabel in bubble): not translated");
+  const env = freshEnv(CFG.translationOnly);
+  const row = new MockPanel(null).setClass("ChatMessage");
+  const contents = row.addChild(new MockPanel("MessageContents"));
+  const bubble = contents.addChild(new MockPanel(null).setClass("ChatBubble"));
+  bubble.addChild(new MockPanel("PingLabel")).text = "go mid";
+  bubble.addChild(new MockPanel("MessageText")).text = "go mid";
+  env.hudMessages.addChild(row);
+  await sleep(1500);
+  assert("no HUD translation label for quick chat", row.FindChildrenWithClassTraverse("LCTTranslationHud").length === 0, row.FindChildrenWithClassTraverse("LCTTranslationHud").length + " labels");
+  assert("HUD quick bubble NOT collapsed", row.FindChildTraverse("MessageContents").style.visibility === "visible");
 }
 
 async function test6_ownMessageSkipped() {
@@ -898,6 +912,7 @@ async function main() {
   await test3_recycleToAnotherEnglish();
   await test4_bilingualNoCollapse();
   await test5_pingBubbleKept();
+  await test5b_hudPingSkipped();
   await test6_ownMessageSkipped();
   await test7_consecutiveOutgoing();
   await test7b_langOverride();

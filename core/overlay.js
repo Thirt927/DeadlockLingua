@@ -149,9 +149,10 @@ function ingest(line, opts) {
     if (first !== undefined) dedup.delete(first);
   }
 
-  // 快捷消息(聊天轮盘/Ping/英雄冷却提示 等,HUD kind=quick)由游戏客户端本地化成
-  // 目标语言,没有翻译需求:不进字幕浮层、不翻译(聊天日志上面已正常落盘)。
-  if (rec.kind === "quick") return;
+  // 快捷消息(聊天轮盘/Ping/英雄冷却提示 等,kind=quick)由游戏客户端本地化成
+  // 目标语言,没有翻译需求;HUD 顶栏气泡行(kind=hud)与左下聊天是同一条消息的另一份
+  // DOM 副本,进字幕浮层会重复,所以这里一并跳过(聊天日志上面已正常落盘)。
+  if (rec.kind === "quick" || rec.kind === "hud") return;
 
   const msg = {
     seq: ++seq,

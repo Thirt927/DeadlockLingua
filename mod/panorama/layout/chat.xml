@@ -87,7 +87,7 @@
 					<Label class="LCTBrandSub" text="CHAT TRANSLATION" />
 				</Panel>
 				<Panel class="LCTHeaderSpacer" />
-				<Label class="LCTVersion" text="v2.1.0" />
+				<Label class="LCTVersion" text="v2.2.0" />
 				<Button id="LCTCloseBtn" class="LCTHeaderClose" onactivate="LCTCloseSettings();">
 					<Label text="X" />
 				</Button>

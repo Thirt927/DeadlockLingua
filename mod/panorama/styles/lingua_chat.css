@@ -1450,27 +1450,30 @@
 
 
 /* ============================================================
-   /tr 紧凑第一版(600×480):顶部分段 + 紧凑行
+   /tr 紧凑第一版(640×520):顶部分段 + 紧凑行
    ESC 入口不加这个类,保持 800×620 左导航
+   ⚠️ 字号不得低于 ~10.5px:第 87 版把正文压到 8.5~9px,中文字形被挤小
+   ("一些字压缩了")。本版只压缩容器尺寸与留白,字号贴近 800 版,
+   页面自身可滚动(overflow: squish scroll),不需要靠缩字省空间。
    ============================================================ */
 .LCTSettingsPanel.LCTChatMode {
-  width: 600px;
-  height: 480px;
+  width: 640px;
+  height: 520px;
 }
 
 .LCTChatMode .LCTSettingsHeader {
-  height: 50px;
+  height: 54px;
   padding: 0px 16px;
 }
 
 .LCTChatMode .LCTBrandMark {
-  width: 26px;
-  height: 26px;
-  border-radius: 7px;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
 }
 
 .LCTChatMode .LCTBrandMarkText {
-  font-size: 9px;
+  font-size: 9.5px;
 }
 
 .LCTChatMode .LCTBrandText {
@@ -1478,17 +1481,28 @@
 }
 
 .LCTChatMode .LCTBrandName {
-  font-size: 13.5px;
+  font-size: 14px;
 }
 
 .LCTChatMode .LCTBrandSub {
-  font-size: 8.5px;
+  font-size: 9px;
   letter-spacing: 1.2px;
 }
 
-.LCTChatMode .LCTVersion,
-.LCTChatMode .LCTHeaderClose {
+/* 紧凑模式只收版本徽标;右上角 X 必须保留(第 87 版把它 collapse 掉 → 无法关闭) */
+.LCTChatMode .LCTVersion {
   visibility: collapse;
+}
+
+.LCTChatMode .LCTHeaderClose {
+  visibility: visible;
+  width: 32px;
+  height: 32px;
+  margin-right: 2px;
+}
+
+.LCTChatMode .LCTHeaderClose Label {
+  font-size: 16px;
 }
 
 .LCTChatMode .LCTMain {
@@ -1497,7 +1511,7 @@
 
 .LCTChatMode .LCTNav {
   width: 100%;
-  height: 38px;
+  height: 40px;
   flow-children: right;
   padding: 0px 12px;
   border-right: 0px solid transparent;
@@ -1507,8 +1521,8 @@
 
 .LCTChatMode .LCTNavItem {
   width: fit-children;
-  height: 38px;
-  padding: 0px 12px;
+  height: 40px;
+  padding: 0px 13px;
   margin-bottom: 0px;
   margin-right: 2px;
   border-radius: 0px;
@@ -1529,11 +1543,11 @@
 
 .LCTChatMode .LCTNavLabel {
   width: fit-children;
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .LCTChatMode .LCTNavTag {
-  font-size: 8.5px;
+  font-size: 9px;
   padding: 0px 4px;
   margin-left: 5px;
 }
@@ -1555,31 +1569,31 @@
 }
 
 .LCTChatMode .LCTSettingsPage {
-  padding: 10px 16px 8px 16px;
+  padding: 12px 16px 10px 16px;
 }
 
 .LCTChatMode .LCTSectionTitle {
-  font-size: 10px;
-  margin-bottom: 5px;
-  padding-bottom: 5px;
+  font-size: 10.5px;
+  margin-bottom: 6px;
+  padding-bottom: 6px;
 }
 
 .LCTChatMode .LCTCard {
-  margin-bottom: 10px;
+  margin-bottom: 12px;
 }
 
 .LCTChatMode .LCTSettingsRow {
-  min-height: 44px;
-  padding: 4px 14px;
+  min-height: 50px;
+  padding: 8px 16px;
 }
 
 .LCTChatMode .LCTRowLabel {
-  font-size: 12.5px;
-  margin-bottom: 2px;
+  font-size: 13px;
+  margin-bottom: 3px;
 }
 
 .LCTChatMode .LCTRowDesc {
-  font-size: 10px;
+  font-size: 10.5px;
 }
 
 .LCTChatMode .LCTFieldCol {
@@ -1609,133 +1623,133 @@
 }
 
 .LCTChatMode .LCTSeg {
-  height: 26px;
+  height: 30px;
   padding: 2px;
 }
 
 .LCTChatMode .LCTSegBtn {
-  height: 22px;
-  padding: 0px 9px;
+  height: 24px;
+  padding: 0px 10px;
 }
 
 .LCTChatMode .LCTSegBtn Label {
-  font-size: 11px;
+  font-size: 11.5px;
 }
 
 .LCTChatMode .LCTSelectWrap {
-  width: 150px;
-  height: 28px;
+  width: 160px;
+  height: 32px;
 }
 
 .LCTChatMode .LCTSelect {
-  height: 28px;
+  height: 32px;
 }
 
 .LCTChatMode .LCTSelectValue {
-  font-size: 11.5px;
+  font-size: 12px;
   padding-left: 10px;
 }
 
 .LCTChatMode .LCTChevron {
-  margin-right: 10px;
-  font-size: 9px;
+  margin-right: 9px;
+  font-size: 10px;
 }
 
 .LCTChatMode .LCTSelectMenu {
-  width: 150px;
+  width: 160px;
 }
 
 .LCTChatMode .LCTMenuOption {
-  height: 24px;
+  height: 26px;
 }
 
 .LCTChatMode .LCTMenuOption Label {
-  font-size: 11px;
+  font-size: 11.5px;
 }
 
 .LCTChatMode .LCTInput {
-  height: 28px;
-  font-size: 11.5px;
-  padding: 0px 8px;
+  height: 32px;
+  font-size: 12.5px;
+  padding: 0px 9px;
 }
 
 .LCTChatMode .LCTKeyInput {
-  height: 30px;
+  height: 34px;
 }
 
 .LCTChatMode .LCTTip {
-  min-height: 32px;
+  min-height: 38px;
   margin-top: 10px;
-  padding: 6px 10px;
+  padding: 8px 12px;
 }
 
 .LCTChatMode .LCTKbd {
-  font-size: 9px;
+  font-size: 9.5px;
   padding: 0px 5px;
   margin-right: 8px;
 }
 
 .LCTChatMode .LCTTipText {
-  font-size: 9.5px;
+  font-size: 10.5px;
 }
 
 .LCTChatMode .LCTProvRow {
-  height: 56px;
+  height: 60px;
   margin-bottom: 10px;
 }
 
 .LCTChatMode .LCTProvCard {
-  height: 56px;
-  padding: 6px 8px;
+  height: 60px;
+  padding: 7px 9px;
   margin-right: 6px;
 }
 
 .LCTChatMode .LCTProvName {
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .LCTChatMode .LCTProvState {
-  font-size: 9px;
+  font-size: 10px;
   margin-top: 4px;
 }
 
 .LCTChatMode .LCTProvCheck {
-  font-size: 9px;
+  font-size: 9.5px;
 }
 
 .LCTChatMode .LCTCred {
-  padding: 10px 12px;
+  padding: 12px 14px;
 }
 
 .LCTChatMode .LCTCredHead {
-  height: 20px;
+  height: 22px;
 }
 
 .LCTChatMode .LCTCredTitle {
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .LCTChatMode .LCTPill {
-  font-size: 8.5px;
+  font-size: 9px;
   padding: 1px 6px;
 }
 
 .LCTChatMode .LCTCredNote {
-  font-size: 8.5px;
+  font-size: 9px;
 }
 
 .LCTChatMode .LCTKeyLine {
-  height: 30px;
-  margin-top: 6px;
+  height: 32px;
+  margin-top: 8px;
 }
 
 .LCTChatMode .LCTKeyLine .LCTGhost {
-  height: 30px;
-  padding: 0px 9px;
+  height: 32px;
+  padding: 0px 10px;
 }
 
 .LCTChatMode .LCTFieldLabel {
-  font-size: 9px;
+  font-size: 10px;
 }
 
 .LCTChatMode .LCTField {
@@ -1747,42 +1761,42 @@
 }
 
 .LCTChatMode .LCTCredHint {
-  font-size: 9px;
-  margin-top: 7px;
+  font-size: 10px;
+  margin-top: 8px;
 }
 
 .LCTChatMode .LCTSettingsFooter {
-  height: 52px;
+  height: 56px;
   padding: 0px 16px;
 }
 
 .LCTChatMode .LCTFootDot {
-  font-size: 8px;
+  font-size: 8.5px;
 }
 
 .LCTChatMode .LCTBridgeStatus {
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .LCTChatMode .LCTFootNote {
-  font-size: 8.5px;
+  font-size: 9.5px;
   margin-left: 8px;
 }
 
 .LCTChatMode .LCTGhost {
-  height: 32px;
+  height: 34px;
   padding: 0px 10px;
 }
 
 .LCTChatMode .LCTGhost Label {
-  font-size: 10.5px;
+  font-size: 11.5px;
 }
 
 .LCTChatMode .LCTPrimary {
-  height: 32px;
+  height: 34px;
   padding: 0px 16px;
 }
 
 .LCTChatMode .LCTPrimary Label {
-  font-size: 11.5px;
+  font-size: 12px;
 }

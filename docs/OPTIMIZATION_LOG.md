@@ -2162,3 +2162,19 @@ ode -e "JSON.parse(...)" 通过)。
   - 左导航 active、服务商卡片选中/已配置状态、Key 显示/隐藏；
   - 分段按钮与开关状态是否即时更新；
   - 底部「完成并关闭」是否保存后关闭，右上角 X 是否被 HUD 挡（ESC 入口下应可点）。
+
+## 第九十六轮(2026-10-27): /tr 紧凑面板可读性 + X 回归 + 快捷发言跳过翻译(v2.2.0)
+
+- **需求**: ①`/tr` 紧凑布局里「一些字压缩了」；②紧凑布局「没有叉号关闭页面」；③快捷发言不需要翻译。
+- **根因**:
+  - ①第 86 版为了塞进 600×480，把紧凑版正文压到 8.5~9px（`LCTCredNote`/`LCTFieldLabel`/`LCTFootNote`/`LCTProvState` 等），中文在这个尺寸下明显变小发糊；行高也被压到 44px，控件与说明挤在一起。
+  - ②`.LCTChatMode .LCTHeaderClose` 被显式 `visibility: collapse`（原意是躲 HUD），所以紧凑版根本没有 X。
+  - ③`readMessageRow` 的 HUD 分支把所有 HUD 气泡行硬编码成 `quick: true`（当初只是给日志分类用），真实快捷发言（Ping 行 / `PingLabel` / 带 `TargetHeroImage`）与普通 HUD 聊天气泡无法区分；`shouldSkip` 又从不看 `quick`，于是聊天轮盘的预设文本（引擎已按各客户端语言本地化）照样发去翻译。
+- **改动**:
+  - `mod/panorama/styles/lingua_chat.css`: 紧凑版 600×480 → **640×520**；只压缩容器尺寸/留白，字号贴近 800 版（正文 ≥10.5px、行标签 13px、行高 50px）；恢复 `.LCTHeaderClose` 可见（32×32），只保留 `.LCTVersion` 收起。
+  - `mod/panorama/scripts/lingua_chat.js`: HUD 行 `quick` 改为真实检测（`PingLabel` / `TargetHeroImage`），聊天行检测补上 `MessageContents.Ping`；`shouldSkip` 新增 `if (record.quick) return true`。
+  - `core/overlay.js`: 字幕浮层跳过条件从 `kind === "quick"` 扩到 `quick || hud`——HUD 行不再被误标 quick 后，仍需继续排除同一条消息的 HUD 副本。
+  - 版本号统一 2.2.0：`VERSION`、`chat.xml` 的 `LCTVersion`、`lingua_chat.js` 的 `VERSION`、`README.md` / `README_EN.md` 徽标与打包示例、`CHANGELOG.md` 的 Unreleased → v2.2.0。
+  - `scripts/lingua_chat_simtest.js`: 反转 [5]（Ping 行不再翻译、气泡保留），新增 [5b]（HUD `PingLabel` 快捷气泡不翻译）。
+- **验证方式**: `node --check`（lingua_chat.js / overlay.js）通过；`scripts/lingua_chat_simtest.js` **PASS 70 / FAIL 0**；`build.ps1` 编译成功并部署 `dist/pak22_dir.vpk`。
+- **仍需用户测试**: 重启 Deadlock 后 ①`/tr` 面板文字是否恢复正常大小、内容是否需要滚动（不应再出现字被压小）；②右上角 X 是否能点（聊天布局下若仍被 Tab 装备界面挡住，用页脚「完成并关闭」）；③打一条快捷发言/Ping，确认不再出现译文行；④普通聊天仍正常翻译。
