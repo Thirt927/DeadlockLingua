@@ -19,22 +19,16 @@ const httpAgent = new http.Agent({ keepAlive: true, maxSockets: 4 });
 const DEFAULT_BASE = "https://api.openai.com/v1";
 const DEFAULT_MODEL = "gpt-4o-mini";
 
+const { describeHttpError: sharedDescribeHttpError } = require("./http_errors");
+
 function describeHttpError(status, bodyText) {
-  const body = String(bodyText || "");
-  let msg = "";
-  try {
-    const j = JSON.parse(body);
-    msg = (j.error && (j.error.message || j.error.code)) || "";
-  } catch (e) {}
-  switch (status) {
-    case 401: return "API Key 无效(401)" + (msg ? ": " + msg : "");
-    case 403: return "无权限/额度问题(403)" + (msg ? ": " + msg : "");
-    case 404: return "接口地址或模型不存在(404): 检查 baseUrl 是否带对前缀(OpenAI 需 /v1,DeepSeek 需 https://api.deepseek.com)以及 model 名是否正确" + (msg ? ": " + msg : "");
-    case 429: return "请求过于频繁或额度不足(429)" + (msg ? ": " + msg : "");
-    default:
-      if (status >= 500) return "服务商错误(" + status + ")" + (msg ? ": " + msg : "");
-      return "翻译失败(" + status + ")" + (msg ? ": " + msg : "");
-  }
+  return sharedDescribeHttpError(status, bodyText, {
+    providerLabel: "服务商",
+    overrides: {
+      403: "无权限/额度问题(403)",
+      404: "接口地址或模型不存在(404): 检查 baseUrl 是否带对前缀(OpenAI 需 /v1,DeepSeek 需 https://api.deepseek.com)以及 model 名是否正确",
+    },
+  });
 }
 
 function requestJson(url, apiKey, payload, timeoutMs) {

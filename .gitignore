@@ -66,3 +66,9 @@ config/certs/
 *.pfx
 *.pass
 *.cer
+
+# dsh deck git cache
+.dsh-git-branch.txt
+.dsh-git-log.txt
+.dsh-git-status.txt
+

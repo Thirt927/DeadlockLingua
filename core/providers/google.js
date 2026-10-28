@@ -6,6 +6,7 @@
 "use strict";
 
 const https = require("https");
+const { describeHttpError: sharedDescribeHttpError } = require("./http_errors");
 
 // Keep-alive: 避免每条消息重付一次 TCP+TLS 握手(见 deepl.js 同注)。
 const agent = new https.Agent({ keepAlive: true, maxSockets: 4 });
@@ -32,20 +33,13 @@ function decodeHtmlEntities(s) {
 }
 
 function describeHttpError(status, bodyText) {
-  const body = String(bodyText || "");
-  let msg = "";
-  try {
-    const j = JSON.parse(body);
-    msg = (j.error && j.error.message) || "";
-  } catch (e) {}
-  switch (status) {
-    case 400: return "请求参数错误(400)" + (msg ? ": " + msg : "");
-    case 403: return "Key 无效或未启用 Translation API(403)" + (msg ? ": " + msg : "");
-    case 429: return "请求过于频繁或额度不足(429)";
-    default:
-      if (status >= 500) return "Google 服务错误(" + status + ")";
-      return "翻译失败(" + status + ")" + (msg ? ": " + msg : "");
-  }
+  return sharedDescribeHttpError(status, bodyText, {
+    providerLabel: "Google",
+    overrides: {
+      403: "Key 无效或未启用 Translation API(403)",
+      429: "请求过于频繁或额度不足(429)",
+    },
+  });
 }
 
 function postJson(url, apiKey, payload, timeoutMs) {

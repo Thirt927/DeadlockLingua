@@ -57,6 +57,25 @@
 - **兜底不变**:证书没装 / Steam 没重启 / 探针判死 / 连续 3 次硬失败 → 自动整局退回 BTIPC,无需用户切换。
 - **安全边界**:证书只写**当前用户**根证书库(SAN 仅 localhost/127.0.0.1/::1,冒充不了公网域名);`-Trust` 需显式执行,`-Untrust` 可撤销(两者都要完全重启 Steam 才生效)。
 
+### 7. 队友语音字幕(语音识别 B 专线)—— 方案稿,未实现(2026-10-24)
+- **用户 2026-10-24 决定:只做"队友语音 → 中文字幕";语音输入(A,自己说话→聊天)暂缓。**
+- 能借的游戏内信号:①**说话图标** = 游戏自己的每玩家语音活动 → 可用于"谁在说"归属 + 只在这段做识别(减少
+  英雄台词/音效幻觉);②**单独静音** = 本地混音增益,不能当音轨隔离,只能用来做校准实验。
+- 硬限制:不注入就拿不到每位玩家的独立语音流;Deadlock 无独立"语音输出设备",虚拟声卡分流不成立。
+  所以只能抓**游戏整局混音**(进程 loopback 可排除 Discord/浏览器,但排不掉音效),定位是"混音字幕"。
+- 架构:游戏外 C# 助手(NAudio WASAPI loopback)→ 16k mono → 桥(Silero VAD → sherpa-onnx SenseVoice /
+  腾讯云 ASR → 现有翻译链)→ 显示 MVP 复用 WPF 字幕层(kind=voice,Borderless 下可用);V2 游戏内 Panorama
+  字幕条(https 面板 `op=voice` 下行;BTIPC 16 B/s 不够)。
+- **待验证的官方捷径(2026-10-24 追加)**:Deadlock 有开发者控制台(Settings 开启);Source 系 cvar
+  `voice_recordtofile` 会把"解码后的远端语音"录成 wav(不含游戏音效)。若存在且未被封禁,采集源直接换成
+  tail 该 wav——无注入、无 ban 风险,优于 loopback(先跑 `find voice` / `cvarlist voice`)。
+- **注入方案(用户提出"只读抓取")已评估**:技术上可行(挂语音包/Opus 解码可拿到每玩家 PCM),但 VAC 检测面
+  覆盖注入模块/hook/线程/内存页异常,"只读"不构成豁免;ban 为账号级永久、Deadlock 周更导致维护成本极高。
+  因此只作为"用户明确接受风险"的私有实验,不进公开 Release。详见 voice-asr-plan.md §0.1。
+- 工作量:MVP ≈2~3 天(复用 WPF 显示),游戏内字幕条约 4~5 天。详细路线/验证清单/风险:[`docs/voice-asr-plan.md`](voice-asr-plan.md);
+  引擎/价格:[`docs/STT-research-2026-10.md`](STT-research-2026-10.md);
+  采集/全屏显示:[`docs/audio-voice-stt-research.md`](audio-voice-stt-research.md)。
+
 ## 二、已实现优化(摘要)
 
 - **翻译提速**:DeepSeek 关闭思考模式(thinking:{type:"disabled"}),单条翻译 0.6~1.0s。

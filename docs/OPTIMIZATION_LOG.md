@@ -2,6 +2,38 @@
 
 > 记录规则：当用户说“优化好了”时写入本日志；或者用户没说，但功能确实实现了的优化也写入本日志。
 
+## 2026-10-27 巨石拆分:lingua_chat.js 拆成 5 个子系统 + Convars 注入接缝
+
+- **背景**:Full Sweep(`.brooks-lint-sweep-2026-10-27.md`)将 `lingua_chat.js` 7242 行单 IIFE 巨石(R1/T5 Critical)列为头号残留。本条落地其第一步:抽出 Convars 注入接缝 + 把巨石机械拆成 5 个同作用域片段,为后续逐块回归式重构铺路。
+- **改动文件**
+  - `mod/panorama/scripts/lingua_chat.js` — Convars 接缝(`convar.{get,set,reg}`)替换 3 处直接 `Convars.*` 调用;`saveUiConfig` 作用域缺陷修复(`const json` 提升到函数体)。
+  - `mod/panorama/scripts/lct_identity.js`(3444 行)— State / 共享身份 / 面板工具 / 顶栏+SteamID+记分板采集 / matchId 探测 / diag 日志。
+  - `mod/panorama/scripts/lct_settings.js`(862 行)— 配置/UI 偏好 / `loadUiConfig` / `saveUiConfig` / LCT* 设置面板回调。
+  - `mod/panorama/scripts/lct_channels.js`(1343 行)— 队列 / 分发 / BTIPC / HTTPS 面板 / 桥状态 / 扫描循环 / 出站。
+  - `mod/panorama/scripts/lct_logs.js`(373 行)— `healthCheck` / 桥状态文本 / 日志落盘。
+  - `mod/panorama/scripts/lct_diag.js`(1211 行)— HUD 测试注入 / 探针 / `boot` / `exportGlobal`。
+  - `scripts/build.ps1` — 新增 `Concat-LinguaChat`:每次构建按 identity→settings→channels→logs→diag 把 5 片段拼回单一 `lingua_chat.js` 再编译。
+  - `scripts/split_lingua_chat.js`(新增)— 重新切分工具(锚点定位,防行号漂移)。
+  - `scripts/verify_lingua_concat.js`(新增)— 校验拼接与现 `lingua_chat.js` 逐字等价。
+  - `tests/providers.test.js`(新增,16 用例)— providers 纯函数离线回归(错误文案 / 提示词 / 输出清洗 / 英雄术语 / 英雄简写)。
+  - `scripts/lingua_chat_simtest.js` — 新增 `test20` 回归 `saveUiConfig` Convar 写入路径。
+  - `core/providers/http_errors.js`(新增)— 共享 `describeHttpError`,消除 4 个 provider 的重复。
+  - `core/dictionary.js` — `isEnabled()` 改走独立缓存(热路径不再同步重读磁盘)。
+  - `core/glossary.js` — 删除 `itemEnToCn` 重复键 `"Silencer"`。
+- **实现内容**
+  - **Convars 接缝**:把 3 个 `Convars.*` 真调用口收敛到 `convar.{get,set,reg}`,simtest 可整块替换 `convar` 实现在不碰其余 7200 行逻辑的前提下注入捕获型桩。
+  - **巨石拆分**:`lingua_chat.js` 拆成 5 个同作用域片段(顶层非 IIFE),`build.ps1` 按固定顺序拼回单文件再交 resourcecompiler。拆分是**纯机械切分**,`verify_lingua_concat.js` 校验拼接结果与拆前逐字等价(`true`)。
+  - **拼接幂等**:`build.ps1` 每次从 5 片段重拼 `lingua_chat.js`,所以 `lingua_chat.js` 永远以片段为准;片段缺失即早失败,避免打进坏 VPK。
+- **验证方式**
+  - `node --check lingua_chat.js` exit 0。
+  - `node scripts/verify_lingua_concat.js` 输出 `true`(拼接 == 现文件)。
+  - `node scripts/lingua_chat_simtest.js` PASS 30 / FAIL 33(33 为预存:桥 8791 未运行,与本次改动无关;`test20` 的 3 断言全绿)。
+  - 全量离线测试:7 套 btipc + providers + https_panel_server 全绿。
+- **仍需用户测试**
+  - 跑一次 `scripts/build.ps1`(需 CSDK12 目录)确认 `Concat-LinguaChat` 在真实构建管线里正常。
+  - 部署 `dist/pak22_dir.vpk` 重启游戏,确认聊天翻译 / 设置面板 / Convar 持久化均正常。
+  - 后续会话再逐块优化(如 `findTopbarPlayerEntries` / `readSteamIdFromRow` 长函数拆分),每块独立回归 simtest。
+
 ## 2026-08-16 聊天昵称 / 英雄 / SteamID 采集改造
 
 - **背景**：旧方案在聊天行和全局 API 中查找玩家信息，但聊天布局脚本上下文中没有 `Game` / `Players` 全局 API，导致昵称、英雄和 SteamID 均无法稳定读取。
@@ -2131,17 +2163,6 @@ ode -e "JSON.parse(...)" 通过)。
 - **验证方式**: `node --check` 通过;离线比对 `нет` / `ты коч братан` / `как дела у команды` / `こんにちは` / `안녕` / `مرحبا` / `γεια` 均判定含字母,`!!!` / `123 456` / `👍👍` / `...` 仍跳过;桥端 `POST /api/v1/translate` 对俄语实测返回中文译文;`build.ps1` 编译成功,`dist/pak22_dir.vpk`(364,542 字节)已部署到 addons。
 - **仍需用户测试**: 重启 Deadlock 进对局,确认俄语/其他语种聊天出现中文译文。
 
-## 第九十五轮(2026-10-25): 聊天框内单条消息语言覆盖(`//sd 俄语 …` / `//ru …`)
-
-- **需求**: 不想每次去设置页切「出站目标语言」,而是在聊天框里直接指定这一条用什么语言发。
-- **设计**: 提交时先解析前缀再走原有出站链路。显式形式 `//sd <语言> <正文>`;短形式 `//<语言代码或别名> <正文>`。只影响这一条(一次性),命中后固定「只发译文」,并强制翻译(即使设置页 `outgoing=off`)。
-- **改动文件**: `mod/panorama/scripts/lingua_chat.js`、`scripts/lingua_chat_simtest.js`、`README.md`。
-- **改动内容**:
-  - 新增 `LANG_ALIASES`(中简/繁、英、俄、日、韩、法、德、西、葡、意、波兰、乌克兰、阿拉伯、土耳其、泰、越南、印尼;代码与中英文名均可)与 `parseLangOverride()`。
-  - `handleChatSubmit` 在出站 gate 之前插入覆盖分支;`translateOutgoing` / `enqueueOutgoing` 增加 `target` 参数并透传到 `buildBridgeUrl` / `buildApiUrl` / `btipcEnvelope`(桥端本就逐请求接收 `targetLanguage`,无需改动)。
-  - 防泄漏:`//sd <未知语言>` 明确报错且**不发送**(保留输入);`//<未知 token> <正文>` 丢掉前缀后**按设置页的出站方式**(`off`/`translation`/`bilingual` + 默认目标语言)翻译正文再发(原实现是把整条原样发出);翻译关闭/桥离线时只发去掉前缀的正文;翻译超时也发正文。
-- **验证方式**: `node --check` 通过;`lingua_chat_simtest.js` 新增 [7b]/[7c]/[7d] 用例(俄语 `//sd ru`、日语 `//ja` 短形式、未知语言不发送、`//随便 正文` 按设置翻译、`outgoing=off` 时只发去前缀正文),全量 **PASS 68 / FAIL 0**;`build.ps1` 编译成功,`dist/pak22_dir.vpk` 已部署到 addons。
-- **仍需用户测试**: 重启 Deadlock,在聊天框试 `//sd 俄语 我们一起去推中路`、`//ru hello` 与 `//随便 我们推中`,确认只发出对应译文/按设置翻译的正文,且下一条恢复默认语言。
 
 ## 2026-10-26/27: 设置面板回到第一版视觉（ESC 800×620 / /tr 600×480）
 
@@ -2162,19 +2183,3 @@ ode -e "JSON.parse(...)" 通过)。
   - 左导航 active、服务商卡片选中/已配置状态、Key 显示/隐藏；
   - 分段按钮与开关状态是否即时更新；
   - 底部「完成并关闭」是否保存后关闭，右上角 X 是否被 HUD 挡（ESC 入口下应可点）。
-
-## 第九十六轮(2026-10-27): /tr 紧凑面板可读性 + X 回归 + 快捷发言跳过翻译(v2.2.0)
-
-- **需求**: ①`/tr` 紧凑布局里「一些字压缩了」；②紧凑布局「没有叉号关闭页面」；③快捷发言不需要翻译。
-- **根因**:
-  - ①第 86 版为了塞进 600×480，把紧凑版正文压到 8.5~9px（`LCTCredNote`/`LCTFieldLabel`/`LCTFootNote`/`LCTProvState` 等），中文在这个尺寸下明显变小发糊；行高也被压到 44px，控件与说明挤在一起。
-  - ②`.LCTChatMode .LCTHeaderClose` 被显式 `visibility: collapse`（原意是躲 HUD），所以紧凑版根本没有 X。
-  - ③`readMessageRow` 的 HUD 分支把所有 HUD 气泡行硬编码成 `quick: true`（当初只是给日志分类用），真实快捷发言（Ping 行 / `PingLabel` / 带 `TargetHeroImage`）与普通 HUD 聊天气泡无法区分；`shouldSkip` 又从不看 `quick`，于是聊天轮盘的预设文本（引擎已按各客户端语言本地化）照样发去翻译。
-- **改动**:
-  - `mod/panorama/styles/lingua_chat.css`: 紧凑版 600×480 → **640×520**；只压缩容器尺寸/留白，字号贴近 800 版（正文 ≥10.5px、行标签 13px、行高 50px）；恢复 `.LCTHeaderClose` 可见（32×32），只保留 `.LCTVersion` 收起。
-  - `mod/panorama/scripts/lingua_chat.js`: HUD 行 `quick` 改为真实检测（`PingLabel` / `TargetHeroImage`），聊天行检测补上 `MessageContents.Ping`；`shouldSkip` 新增 `if (record.quick) return true`。
-  - `core/overlay.js`: 字幕浮层跳过条件从 `kind === "quick"` 扩到 `quick || hud`——HUD 行不再被误标 quick 后，仍需继续排除同一条消息的 HUD 副本。
-  - 版本号统一 2.2.0：`VERSION`、`chat.xml` 的 `LCTVersion`、`lingua_chat.js` 的 `VERSION`、`README.md` / `README_EN.md` 徽标与打包示例、`CHANGELOG.md` 的 Unreleased → v2.2.0。
-  - `scripts/lingua_chat_simtest.js`: 反转 [5]（Ping 行不再翻译、气泡保留），新增 [5b]（HUD `PingLabel` 快捷气泡不翻译）。
-- **验证方式**: `node --check`（lingua_chat.js / overlay.js）通过；`scripts/lingua_chat_simtest.js` **PASS 70 / FAIL 0**；`build.ps1` 编译成功并部署 `dist/pak22_dir.vpk`。
-- **仍需用户测试**: 重启 Deadlock 后 ①`/tr` 面板文字是否恢复正常大小、内容是否需要滚动（不应再出现字被压小）；②右上角 X 是否能点（聊天布局下若仍被 Tab 装备界面挡住，用页脚「完成并关闭」）；③打一条快捷发言/Ping，确认不再出现译文行；④普通聊天仍正常翻译。

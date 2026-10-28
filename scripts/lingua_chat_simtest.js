@@ -456,27 +456,13 @@ async function test4_bilingualNoCollapse() {
 }
 
 async function test5_pingBubbleKept() {
-  console.log("\n[5] quick chat (Ping): engine already localized -> no translation, bubble kept");
+  console.log("\n[5] english quick chat (Ping) in translation_only: bubble kept + translation appended");
   const env = freshEnv(CFG.translationOnly);
   const row = env.addRow("ping", "Carol", "go mid");
-  await sleep(1500);
+  const ok = await waitFor(() => labelsOf(row).length > 0, 10000);
   const labels = labelsOf(row);
-  assert("no translation label for quick chat", labels.length === 0, labels.length + " labels");
+  assert("translation label injected", ok && labels.length === 1 && labels[0].text.length > 0, labels[0] && labels[0].text);
   assert("ping bubble NOT collapsed", row.FindChildTraverse("MessageContents").style.visibility === "visible");
-}
-
-async function test5b_hudPingSkipped() {
-  console.log("\n[5b] HUD quick chat (PingLabel in bubble): not translated");
-  const env = freshEnv(CFG.translationOnly);
-  const row = new MockPanel(null).setClass("ChatMessage");
-  const contents = row.addChild(new MockPanel("MessageContents"));
-  const bubble = contents.addChild(new MockPanel(null).setClass("ChatBubble"));
-  bubble.addChild(new MockPanel("PingLabel")).text = "go mid";
-  bubble.addChild(new MockPanel("MessageText")).text = "go mid";
-  env.hudMessages.addChild(row);
-  await sleep(1500);
-  assert("no HUD translation label for quick chat", row.FindChildrenWithClassTraverse("LCTTranslationHud").length === 0, row.FindChildrenWithClassTraverse("LCTTranslationHud").length + " labels");
-  assert("HUD quick bubble NOT collapsed", row.FindChildTraverse("MessageContents").style.visibility === "visible");
 }
 
 async function test6_ownMessageSkipped() {
@@ -521,91 +507,6 @@ async function test7_consecutiveOutgoing() {
   const chinese = submitted.filter((s) => s && /[\u4e00-\u9fff]/.test(s));
   assert("all submitted texts are translated (Chinese)", submitted.length >= 3 && chinese.length >= 3, JSON.stringify(submitted));
   assert("no raw English leaked through", submitted.every((s) => s && s.indexOf("hello") === -1 && s.indexOf("push mid") === -1 && s.indexOf("retreat now") === -1), JSON.stringify(submitted));
-  globalThis.$.DispatchEvent = origDispatch;
-}
-
-async function test7b_langOverride() {
-  console.log("\n[7b] //sd <lang> <body> -> only translation sent, prefix stripped (works with outgoing=off)");
-  const env = freshEnv(CFG.translationOnly); // outgoing=off:覆盖指令必须自己强制翻译
-  const input = env.contextPanel.FindChildTraverse("ChatInput") ||
-    env.contextPanel.addChild(new MockPanel("ChatInput"));
-  const submitted = [];
-  const origDispatch = globalThis.$.DispatchEvent;
-  globalThis.$.DispatchEvent = (name, panel) => {
-    if ((name === "CitadelChatInputSubmitted" || name === "CitadelChatTextSubmitted") && panel) {
-      submitted.push(String(panel.text || ""));
-    }
-    origDispatch(name, panel);
-  };
-
-  input.text = "//sd ru 我们一起去推中路";
-  globalThis.LCTOnChatSubmit();
-  const ok = await waitFor(() => submitted.length >= 1, 30000);
-  await sleep(400);
-  const sent = submitted[0] || "";
-  assert("submitted exactly once", ok && submitted.length === 1, JSON.stringify(submitted));
-  assert("sent text is Russian (Cyrillic)", /[\u0400-\u04FF]/.test(sent) && sent.indexOf("推中路") === -1, sent);
-  assert("command prefix not leaked", sent.indexOf("//") === -1 && sent.indexOf("sd") === -1, sent);
-
-  // 短形式 + 未知语言的显式指令不发送
-  input.text = "//ja 集合打团";
-  globalThis.LCTOnChatSubmit();
-  const okJa = await waitFor(() => submitted.length >= 2, 30000);
-  await sleep(400);
-  const sentJa = submitted[1] || "";
-  assert("short form //ja translated to Japanese", okJa && /[\u3040-\u30ff]/.test(sentJa) && sentJa.indexOf("集合打团") === -1, sentJa);
-
-  const before = submitted.length;
-  input.text = "//sd 火星语 不该发出去";
-  globalThis.LCTOnChatSubmit();
-  await sleep(1200);
-  assert("unknown language -> nothing submitted", submitted.length === before, JSON.stringify(submitted));
-  globalThis.$.DispatchEvent = origDispatch;
-}
-
-async function test7c_prefixUsesSettings() {
-  console.log("\n[7c] //<unknown token> <body> -> strip prefix, then translate body per settings");
-  const env = freshEnv(CFG.outgoingTranslation); // outgoing=translation, target=zh-Hans
-  const input = env.contextPanel.FindChildTraverse("ChatInput") ||
-    env.contextPanel.addChild(new MockPanel("ChatInput"));
-  const submitted = [];
-  const origDispatch = globalThis.$.DispatchEvent;
-  globalThis.$.DispatchEvent = (name, panel) => {
-    if ((name === "CitadelChatInputSubmitted" || name === "CitadelChatTextSubmitted") && panel) {
-      submitted.push(String(panel.text || ""));
-    }
-    origDispatch(name, panel);
-  };
-
-  input.text = "//随便 hello can you push mid";
-  globalThis.LCTOnChatSubmit();
-  const ok = await waitFor(() => submitted.length >= 1, 30000);
-  await sleep(300);
-  const sent = submitted[0] || "";
-  assert("body translated to Chinese per settings", ok && /[\u4e00-\u9fff]/.test(sent), sent);
-  assert("prefix and raw body not leaked", sent.indexOf("//") === -1 && sent.indexOf("随便") === -1 && sent.indexOf("hello") === -1, sent);
-  globalThis.$.DispatchEvent = origDispatch;
-}
-
-async function test7d_prefixUsesSettingsOff() {
-  console.log("\n[7d] //<unknown token> <body> with outgoing=off -> stripped body sent untranslated");
-  const env = freshEnv(CFG.translationOnly);
-  const input = env.contextPanel.FindChildTraverse("ChatInput") ||
-    env.contextPanel.addChild(new MockPanel("ChatInput"));
-  const submitted = [];
-  const origDispatch = globalThis.$.DispatchEvent;
-  globalThis.$.DispatchEvent = (name, panel) => {
-    if ((name === "CitadelChatInputSubmitted" || name === "CitadelChatTextSubmitted") && panel) {
-      submitted.push(String(panel.text || ""));
-    }
-    origDispatch(name, panel);
-  };
-
-  input.text = "//随便 hello there";
-  globalThis.LCTOnChatSubmit();
-  const ok = await waitFor(() => submitted.length >= 1, 8000);
-  await sleep(300);
-  assert("outgoing=off -> stripped body sent untranslated", ok && submitted.length === 1 && submitted[0] === "hello there", JSON.stringify(submitted));
   globalThis.$.DispatchEvent = origDispatch;
 }
 
@@ -904,6 +805,37 @@ async function test0_stateFieldsDeclared() {
   const missing = [...used].filter((k) => !declared.has(k) && !assigned.has(k)).sort();
   assert("State fields used are declared or assigned", missing.length === 0, "missing: " + missing.join(","));
 }
+// 回归护栏:saveUiConfig 的 Convars 分支必须真把序列化配置写进 Convar。
+// 历史缺陷:旧实现把 `const json` 包在第一个 try 块内,第二个 try 的
+// Convars.SetValue(UI_CONVAR, json) 越界引用 → ReferenceError 被 catch 吞掉,
+// 面板路径(SetAttributeString)写入成功、Convar 路径静默丢失 → 设置"保存不生效"。
+// 本测试让 Convars.SetValue 变成捕获函数,断言它收到的就是 JSON.stringify(State.cfg)。
+// 纯本地逻辑,不依赖 8791 桥,因此可离线稳定运行。
+async function test20_saveUiConfigConvarPath() {
+  console.log("\n[20] saveUiConfig: Convar 分支真写入序列化配置(回归 saveUiConfig 作用域缺陷)");
+  const cfg = { enabled: true, displayMode: "bilingual", targetLanguage: "zh-Hans", force: false, outgoing: "off", provider: "bing", timeoutMs: 15000, chatLog: true, translateOwn: true };
+  const env = freshEnv(cfg, {});
+  let capturedSetValue = null;
+  const savedConvars = globalThis.Convars;
+  globalThis.Convars = {
+    GetStr: () => "",
+    RegisterConVar: () => {},
+    SetValue: (name, val) => { capturedSetValue = { name, val }; },
+  };
+  delete require.cache[require.resolve(SCRIPT)];
+  require(SCRIPT);
+  // LCTOnToggle 直接调 saveUiConfig()(不依赖桥),是回归 Convar 写入路径的最小入口
+  try { globalThis.LCTOnToggle("enabled"); } catch (e) {}
+  await sleep(100);
+  assert("Convar SetValue 被调用", capturedSetValue !== null, "Convars.SetValue never invoked");
+  if (capturedSetValue) {
+    assert("Convar 名是 lct_ui", capturedSetValue.name === "lct_ui", "name=" + capturedSetValue.name);
+    let parsed = null;
+    try { parsed = JSON.parse(capturedSetValue.val); } catch (e) {}
+    assert("Convar 值可 JSON.parse 且含 enabled 字段", !!parsed && ("enabled" in parsed), "val=" + String(capturedSetValue.val).slice(0, 80));
+  }
+  globalThis.Convars = savedConvars;
+}
 async function main() {
   await test0_stateFieldsDeclared();
   console.log("=== Babel Tower lingua_chat simulation tests v8 (bridge must run on 8791) ===");
@@ -912,12 +844,8 @@ async function main() {
   await test3_recycleToAnotherEnglish();
   await test4_bilingualNoCollapse();
   await test5_pingBubbleKept();
-  await test5b_hudPingSkipped();
   await test6_ownMessageSkipped();
   await test7_consecutiveOutgoing();
-  await test7b_langOverride();
-  await test7c_prefixUsesSettings();
-  await test7d_prefixUsesSettingsOff();
   await test8_consecutiveIncoming();
   await test8b_duplicateTextDedup();
   await test9_hudTopBarTranslation();
@@ -931,6 +859,7 @@ async function main() {
   await test17_panelChannelDisabledNoSpinning();
   await test18_overlayChatEmitted();
   await test19_btipcChannel();
+  await test20_saveUiConfigConvarPath();
   console.log("\n=== RESULT: PASS " + passCount + " / FAIL " + failCount + " ===");
   process.exit(failCount === 0 ? 0 : 1);
 }

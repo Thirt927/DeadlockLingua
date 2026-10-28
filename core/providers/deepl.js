@@ -8,6 +8,7 @@
 "use strict";
 
 const https = require("https");
+const { describeHttpError: sharedDescribeHttpError } = require("./http_errors");
 
 // Keep-alive: 翻译是高频短请求,每次新建连接要付 TCP+TLS 握手(实测 100~300ms)。
 // 串行队列下这笔开销每条消息都要付一次,复用连接直接省掉。
@@ -26,15 +27,14 @@ function mapLang(lang) {
 }
 
 function describeHttpError(status, bodyText) {
-  const body = String(bodyText || "");
-  switch (status) {
-    case 403: return "DeepL Key 无效或额度不足(403)";
-    case 429: return "DeepL 请求过于频繁(429)";
-    case 456: return "DeepL 本月额度已用完(456)";
-    default:
-      if (status >= 500) return "DeepL 服务错误(" + status + ")";
-      return "翻译失败(" + status + ")" + (body ? ": " + body.slice(0, 120) : "");
-  }
+  return sharedDescribeHttpError(status, bodyText, {
+    providerLabel: "DeepL",
+    overrides: {
+      403: "DeepL Key 无效或额度不足(403)",
+      429: "DeepL 请求过于频繁(429)",
+      456: "DeepL 本月额度已用完(456)",
+    },
+  });
 }
 
 function postForm(url, fields, timeoutMs) {

@@ -2,13 +2,12 @@
 
 > 《Deadlock》聊天实时翻译：队友和对手的外语聊天自动译成中文，**译文直接显示在原消息下面**，不用切出游戏，也不用第二个窗口。装了本机证书后下行 **<1 秒**；没装则自动退回位信道（2～6 秒），不需要任何切换。
 
-`GPL-3.0` · `v2.2.0` · Windows 10/11 · Node.js 18+ · 基于 [BabelTower](https://github.com/c1375rick/BabelTower) 二次开发，由 [Thirt927](https://github.com/Thirt927) 维护
+`GPL-3.0` · `v2.1.0 + https 通道` · Windows 10/11 · Node.js 18+ · 基于 [BabelTower](https://github.com/c1375rick/BabelTower) 二次开发，由 [Thirt927](https://github.com/Thirt927) 维护
 
 [简体中文](README.md) · [English](README_EN.md)
 
 > [!NOTE]
-> 仓库当前状态：**v2.2.0** —— 设置面板第一版视觉（ESC 800×620 / `/tr` 640×520）、
-> 聊天框内单条消息语言覆盖（`//sd 俄语 …`）、非拉丁语种翻译修复、快捷发言跳过翻译。
+> 仓库当前状态：v2.1.0 之后又落了 **https 面板通道**（2026-10-24，尚未打 tag）。
 > 装了证书 → 下行 ≈ 一个 RTT；没装 → 整局自动留在 BTIPC 位信道，功能与之前完全一致。
 
 ## 目录
@@ -133,10 +132,6 @@ DeadlockLingua 由两部分组成：
 ### 发消息
 
 聊天框输入中文，回车即可——发送前会先译成英文，再走原版发送链路。开关和显示模式见[设置](#设置)。
-
-**临时指定这一条的语言**（不影响设置页里的默认值）：在聊天框里写 `//sd 俄语 我们一起去推中路` 或 `//ru 我们一起去推中路`，回车后会只发译文；下一条自动回到默认语言。支持的语言：`中(简/繁)` `en 英语` `ru 俄语` `ja 日语` `ko 韩语` `fr 法语` `de 德语` `es 西语` `pt 葡语` `it 意语` `pl 波兰语` `uk 乌克兰语` `ar 阿拉伯语` `tr 土耳其语` `th 泰语` `vi 越南语` `id 印尼语`。
-
-另外，`//任意前缀 正文`（如 `//随便 我们推中`）中的前缀会被丢掉，正文按设置页的出站方式（`off` / `translation` / `bilingual`）翻译后发送；显式形式写错语言名（`//sd 火星语 …`）则报错且不发送，避免把指令本身发进聊天。
 
 ### 设置
 
@@ -358,10 +353,10 @@ node scripts\test_bridge_fallback.js
 ### 发布打包
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\package_release.ps1 -Version 2.2.0
+powershell -ExecutionPolicy Bypass -File scripts\package_release.ps1 -Version 2.1.0
 ```
 
-产出 `dist/DeadlockLingua-2.2.0-win64.zip`，内含 VPK、桥（含 `bridge_https.js`）、内置 Node、启动/停止脚本、证书脚本与文档。
+产出 `dist/DeadlockLingua-2.1.0-win64.zip`，内含 VPK、桥（含 `bridge_https.js`）、内置 Node、启动/停止脚本、证书脚本与文档。
 
 ### 贡献
 

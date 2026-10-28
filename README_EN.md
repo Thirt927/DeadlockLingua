@@ -2,14 +2,12 @@
 
 > Real-time chat translation for *Deadlock*: your teammates' and opponents' foreign chat is translated into Chinese and **shown right under the original message** — no tabbing out, no second window. With the local certificate installed the downlink is **under 1 second**; without it the mod automatically stays on the bit channel (2–6 s). No switching required.
 
-`GPL-3.0` · `v2.2.0` · Windows 10/11 · Node.js 18+ · Forked from [BabelTower](https://github.com/c1375rick/BabelTower), maintained by [Thirt927](https://github.com/Thirt927)
+`GPL-3.0` · `v2.1.0 + https channel` · Windows 10/11 · Node.js 18+ · Forked from [BabelTower](https://github.com/c1375rick/BabelTower), maintained by [Thirt927](https://github.com/Thirt927)
 
 [简体中文](README.md) · [English](README_EN.md)
 
 > [!NOTE]
-> Repository status: **v2.2.0** — first-version settings panel (ESC 800×620 / `/tr` 640×520),
-> per-message language override in the chat box (`//sd Russian ...`), non-Latin script fix,
-> and quick-chat messages are no longer translated.
+> Repository status: v2.1.0 plus the **https panel channel** (2026-10-24, not tagged yet).
 > With the cert trusted → downlink ≈ one RTT. Without it → the session stays on the BTIPC bit channel, with exactly the same features.
 
 ## Contents
@@ -354,10 +352,10 @@ node scripts\test_bridge_fallback.js
 ### Packaging a release
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\package_release.ps1 -Version 2.2.0
+powershell -ExecutionPolicy Bypass -File scripts\package_release.ps1 -Version 2.1.0
 ```
 
-Produces `dist/DeadlockLingua-2.2.0-win64.zip` with the VPK, the bridge (including `bridge_https.js`), a portable Node runtime, start/stop scripts, the cert script and docs.
+Produces `dist/DeadlockLingua-2.1.0-win64.zip` with the VPK, the bridge (including `bridge_https.js`), a portable Node runtime, start/stop scripts, the cert script and docs.
 
 ### Contributing
 

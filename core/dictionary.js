@@ -1,4 +1,4 @@
-﻿// Babel Tower - 常用短语词典(外置可配置 + 自适应学习)
+// Babel Tower - 常用短语词典(外置可配置 + 自适应学习)
 //
 // 设计:
 //   - 词典按"目标语言"分组,任何语言用户都可受益(不偏袒中文)
@@ -32,15 +32,23 @@ function dictPath() {
   return path.join(__dirname, "..", "config", "dictionary.json");
 }
 
-// 从 config/config.json 读取 dictionary.enabled(默认 true)
+// 从 config/config.json 读取 dictionary.enabled(默认 true)。
+// 带独立缓存:翻译热路径(每条聊天 lookup/record)不再每次同步重读磁盘 + JSON.parse。
+// 配置改动仍要重启桥生效(与 load() 的缓存语义一致)。
+// 独立缓存避免与 load() 互相递归:load() 构造 cache 时调 isEnabled(),
+// isEnabled() 只读自己的 enableCache,不依赖 load()。
+let enableCache = null; // null = 未读;之后为 boolean
 function isEnabled() {
+  if (enableCache !== null) return enableCache;
+  let enabled = true;
   try {
     const cfg = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "config", "config.json"), "utf8"));
     if (cfg && typeof cfg === "object" && cfg.dictionary && typeof cfg.dictionary.enabled === "boolean") {
-      return cfg.dictionary.enabled;
+      enabled = cfg.dictionary.enabled;
     }
   } catch (e) {}
-  return true;
+  enableCache = enabled;
+  return enabled;
 }
 
 function langPrefix(targetLanguage) {

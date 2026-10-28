@@ -5,6 +5,7 @@
 "use strict";
 
 const https = require("https");
+const { describeHttpError: sharedDescribeHttpError } = require("./http_errors");
 
 // Keep-alive: 避免每条消息重付一次 TCP+TLS 握手(见 deepl.js 同注)。
 const agent = new https.Agent({ keepAlive: true, maxSockets: 4 });
@@ -13,26 +14,18 @@ const DEFAULT_ENDPOINT = "https://api.cognitive.microsofttranslator.com";
 
 // 常见错误码 -> 人类可读提示(用于游戏内红字显示)
 function describeHttpError(status, bodyText) {
-  const body = String(bodyText || "");
-  switch (status) {
-    case 401:
-      return "API Key 无效(401)";
-    case 403:
-      return "Key 无权限或缺少区域(403),若 Key 绑定了区域请在配置里填写 Region";
-    case 404:
-      return "接口地址错误(404)";
-    case 408:
-      return "请求超时(408)";
-    case 429:
-      return "请求过于频繁(429),稍后自动重试";
-    case 400:
-      return "请求参数错误(400)";
-    case 402:
-      return "额度不足(402)";
-    default:
-      if (status >= 500) return "翻译服务错误(" + status + ")";
-      return "翻译失败(" + status + ")" + (body ? ": " + body.slice(0, 120) : "");
-  }
+  return sharedDescribeHttpError(status, bodyText, {
+    providerLabel: "翻译服务",
+    overrides: {
+      401: "API Key 无效(401)",
+      403: "Key 无权限或缺少区域(403),若 Key 绑定了区域请在配置里填写 Region",
+      404: "接口地址错误(404)",
+      408: "请求超时(408)",
+      429: "请求过于频繁(429),稍后自动重试",
+      400: "请求参数错误(400)",
+      402: "额度不足(402)",
+    },
+  });
 }
 
 function buildTranslateUrl(opts) {

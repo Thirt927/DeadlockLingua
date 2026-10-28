@@ -1,4 +1,4 @@
-﻿# Babel Tower - 构建脚本
+# Babel Tower - 构建脚本
 # ------------------------------------------------------------------
 # 流程:mod/panorama 源码 -> resourcecompiler 编译 -> vpkeditcli 打包 -> dist/pak01_dir.vpk
 #
@@ -82,10 +82,47 @@ function Compile-File($compiler, $contentFile, $gameFile) {
   Write-Host "   ok: $([System.IO.Path]::GetFileName($gameFile))"
 }
 
+# ---------- 拼接 lingua_chat 子系统(巨石拆分)----------
+# 巨石已拆成 5 个同作用域片段(lct_identity/lct_logs/lct_channels/lct_settings/lct_diag),
+# 按固定依赖顺序拼回单一 lingua_chat.js 再交给 resourcecompiler 编译。
+# 片段缺一个即拼出不完整脚本 → 在此早失败,避免打进坏 VPK。
+# 该步**幂等**:每次 build 都从 5 片段重拼 lingua_chat.js,所以 lingua_chat.js 永远以片段为准。
+function Concat-LinguaChat {
+  $parts = @(
+    "lct_identity.js",   # State / 共享身份 / 工具 / 顶栏+SteamID+记分板采集
+    "lct_settings.js",   # 配置/UI 偏好/loadUiConfig/saveUiConfig + LCT* 设置面板回调
+    "lct_channels.js",   # 队列 / 分发 / BTIPC / HTTPS 面板 / 扫描循环
+    "lct_logs.js",       # healthCheck / 桥状态 / 日志落盘
+    "lct_diag.js"        # HUD 测试注入 / 探针 / boot / exportGlobal
+  )
+  $dir = Join-Path $ProjectRoot "mod\panorama\scripts"
+  $missing = @()
+  foreach ($p in $parts) { if (-not (Test-Path (Join-Path $dir $p))) { $missing += $p } }
+  if ($missing.Count -gt 0) { Fail "lingua_chat 子系统片段缺失: $($missing -join ', ')" }
+  $out = Join-Path $dir "lingua_chat.js"
+  # lingua_chat.js 的头 15 行(原 IIFE 注释块)不属于任何片段,拼接时原样保留在最前
+  $head = ([System.IO.File]::ReadLines($out) | Select-Object -First 15) -join "`r`n"
+  $sb = [System.Text.StringBuilder]::new()
+  [void]$sb.Append($head)
+  [void]$sb.Append("`r`n")
+  foreach ($p in $parts) {
+    $body = [System.IO.File]::ReadAllText((Join-Path $dir $p), [System.Text.Encoding]::UTF8)
+    [void]$sb.Append($body)
+  }
+  [void]$sb.Append("  boot();`r`n")
+  [void]$sb.Append("})();`r`n`r`n`r`n`r`n`r`n")
+  # 归一化为 CRLF(与其余 panorama 资源一致)
+  $text = $sb.ToString().Replace("`r`n", "`n").Replace("`n", "`r`n")
+  [System.IO.File]::WriteAllText($out, $text, (New-Object System.Text.UTF8Encoding($false)))
+  Write-Step "已拼接 lingua_chat.js($($parts.Count) 个子系统片段)"
+}
+
 # ---------- 主流程 ----------
 Write-Step "DeadlockLingua build (Mode=$Mode, Addon=$AddonName)"
 
 if ($Mode -eq "Source") {
+  # 先拼回 lingua_chat.js(Source 模式导出的是可编译/可部署的完整源码,不能漏拼接步)
+  Concat-LinguaChat
   $srcOut = Join-Path $DistDir "src"
   if (Test-Path $srcOut) { Remove-Item $srcOut -Recurse -Force }
   Copy-Item $ModDir $srcOut -Recurse -Force
@@ -110,6 +147,10 @@ New-Item -ItemType Directory -Path $contentAddon -Force | Out-Null
 Copy-Item $ModDir\* $contentAddon -Recurse -Force
 Write-Step "源码已同步到 $contentAddon"
 
+# 巨石拆分:先把 5 个子系统片段拼回 lingua_chat.js,再把它同步进 content addon 编译。
+Concat-LinguaChat
+Copy-Item (Join-Path $ProjectRoot "mod\panorama\scripts\lingua_chat.js") `
+         (Join-Path $contentAddon "panorama\scripts\lingua_chat.js") -Force
 
 # 2. 编译 panorama 资源
 $contentPano = Join-Path $contentAddon "panorama"
