@@ -1489,20 +1489,11 @@
   letter-spacing: 1.2px;
 }
 
-/* 紧凑模式只收版本徽标;右上角 X 必须保留(第 87 版把它 collapse 掉 → 无法关闭) */
-.LCTChatMode .LCTVersion {
-  visibility: collapse;
-}
-
+/* 紧凑模式收版本徽标 + 右上角 X:/tr 局内右上角会被 Tab 全屏装备界面遮挡,
+   关闭统一走右下角「完成并关闭」(可靠关闭点)。ESC 版右上角 X 保留可用。 */
+.LCTChatMode .LCTVersion,
 .LCTChatMode .LCTHeaderClose {
-  visibility: visible;
-  width: 32px;
-  height: 32px;
-  margin-right: 2px;
-}
-
-.LCTChatMode .LCTHeaderClose Label {
-  font-size: 16px;
+  visibility: collapse;
 }
 
 .LCTChatMode .LCTMain {
