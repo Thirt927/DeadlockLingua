@@ -77,8 +77,11 @@
 			</Button>
 			<Label id="LCTOutgoingHint" class="LCTOutgoingHint" text="" />
 		</Panel>
-		<!-- Babel Tower 设置面板(默认隐藏、居中弹窗;ESC 关闭)
-     第 86 版:回到第一版 800×620 视觉 —— 左导航、金色主色、行内标题/说明 + 右侧控件 -->
+	<!-- Babel Tower 设置面板(默认隐藏、居中弹窗;ESC 开关)
+     ⚠️ 结构上只能待在 <CitadelChat> 里:Panorama 布局文件只允许一个根面板
+     (实测 resourcecompiler: "Found duplicate root panel tag")。
+     但**打开时**运行时会把它 SetParent 到全局 UI 根(见 lingua_chat.js 的 hostSettingsPanel),
+     所以 CitadelChat 的 350px 宽度/聊天收起隐藏都影响不到它。 -->
 		<Panel id="LCTSettingsPanel" class="LCTSettingsPanel" oncancel="LCTCloseSettings();">
 			<Panel class="LCTSettingsHeader">
 				<Panel class="LCTBrandMark"><Label class="LCTBrandMarkText" text="DL" /></Panel>
@@ -87,7 +90,7 @@
 					<Label class="LCTBrandSub" text="CHAT TRANSLATION" />
 				</Panel>
 				<Panel class="LCTHeaderSpacer" />
-				<Label class="LCTVersion" text="v2.2.0" />
+				<Label class="LCTVersion" text="v2.2.1" />
 				<Button id="LCTCloseBtn" class="LCTHeaderClose" onactivate="LCTCloseSettings();">
 					<Label text="X" />
 				</Button>
@@ -386,6 +389,11 @@
 				</Button>
 				<Button id="LCTFinishBtn" class="LCTPrimary" onactivate="LCTSaveAndClose();">
 					<Label text="完成并关闭" />
+				</Button>
+				<!-- /tr 紧凑版用右下角叉号代替「完成并关闭」:640px 宽的底部栏塞不下中文按钮,
+				     「完成并关闭」会被挤出可视区(实测汉字显示不全) -->
+				<Button id="LCTChatCloseBtn" class="LCTChatCloseBtn" onactivate="LCTSaveAndClose();">
+					<Label text="X" />
 				</Button>
 			</Panel>
 		</Panel>

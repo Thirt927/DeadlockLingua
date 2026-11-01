@@ -54,9 +54,10 @@
    - 行结构统一「左标签(fill) + 右控件列 176px」,所有控件同宽
    - 控件统一高度 30px / 圆角 4px / 1px 边框;正文字号 13px,分组标题 11px */
 .LCTSettingsPanel {
-  align: center center;
-  width: 600px;
-  height: 640px;
+  horizontal-align: center;
+  vertical-align: center;
+  width: 840px;
+  height: 600px;
   background-color: gradient( linear, 0% 0%, 0% 100%, from( #151b22 ), color-stop( 0.5, #0e1318 ), to( #0a0d10 ) );
   border: 1px solid rgba(201, 164, 78, 0.22);
   border-radius: 8px;
@@ -1406,8 +1407,8 @@
 
 /* 关键属性重述:避免浏览器式 background:linear-gradient 导致整条规则被引擎丢弃 */
 .LCTSettingsPanel {
-  width: 800px;
-  height: 620px;
+  width: 840px;
+  height: 600px;
   flow-children: down;
   border: 1px solid rgba(255, 255, 255, 0.11);
   border-top: 1px solid rgba(231, 185, 107, 0.38);
@@ -1446,6 +1447,34 @@
 
 .LCTPrimary:hover {
   background-color: #f0c97e;
+}
+
+/* /tr 紧凑版右下角的叉号(代替「完成并关闭」:640px 底部栏塞不下中文按钮) */
+.LCTChatCloseBtn {
+  visibility: collapse;
+  width: 34px;
+  height: 34px;
+  margin-left: 8px;
+  border-radius: 6px;
+  background-color: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+.LCTChatCloseBtn Label {
+  horizontal-align: center;
+  vertical-align: middle;
+  color: #d8dee6;
+  font-size: 15px;
+  font-weight: bold;
+}
+
+.LCTChatCloseBtn:hover {
+  background-color: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(231, 185, 107, 0.45);
+}
+
+.LCTChatCloseBtn:active {
+  background-color: rgba(231, 185, 107, 0.16);
 }
 
 
@@ -1490,9 +1519,18 @@
 }
 
 /* 紧凑模式收版本徽标 + 右上角 X:/tr 局内右上角会被 Tab 全屏装备界面遮挡,
-   关闭统一走右下角「完成并关闭」(可靠关闭点)。ESC 版右上角 X 保留可用。 */
+   关闭统一走右下角叉号(.LCTChatCloseBtn)。ESC 版右上角 X 保留可用。 */
 .LCTChatMode .LCTVersion,
 .LCTChatMode .LCTHeaderClose {
+  visibility: collapse;
+}
+
+/* 右下角:紧凑版把「完成并关闭」换成叉号 */
+.LCTChatMode .LCTChatCloseBtn {
+  visibility: visible;
+}
+
+.LCTChatMode .LCTFinishBtn {
   visibility: collapse;
 }
 
@@ -1769,9 +1807,10 @@
   font-size: 11px;
 }
 
+/* 640px 宽下 footer 放不下「测试连接+保存+完成并关闭」三个按钮 + 桥状态 + 端口提示,
+   端口提示是纯信息性文字,紧凑版 collapse 掉,保证最右侧的「完成并关闭」不被挤出可视区 */
 .LCTChatMode .LCTFootNote {
-  font-size: 9.5px;
-  margin-left: 8px;
+  visibility: collapse;
 }
 
 .LCTChatMode .LCTGhost {

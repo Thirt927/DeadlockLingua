@@ -2178,3 +2178,19 @@ ode -e "JSON.parse(...)" 通过)。
   - `scripts/lingua_chat_simtest.js`: 反转 [5]（Ping 行不再翻译、气泡保留），新增 [5b]（HUD `PingLabel` 快捷气泡不翻译）。
 - **验证方式**: `node --check`（lingua_chat.js / overlay.js）通过；`scripts/lingua_chat_simtest.js` **PASS 70 / FAIL 0**；`build.ps1` 编译成功并部署 `dist/pak22_dir.vpk`。
 - **仍需用户测试**: 重启 Deadlock 后 ①`/tr` 面板文字是否恢复正常大小、内容是否需要滚动（不应再出现字被压小）；②右上角 X 是否能点（聊天布局下若仍被 Tab 装备界面挡住，用页脚「完成并关闭」）；③打一条快捷发言/Ping，确认不再出现译文行；④普通聊天仍正常翻译。
+
+## 第九十七轮(2026-11-01): 设置面板改挂全局 UI 根 + /tr 右下角叉号(v2.2.1)
+
+- **需求(m00277)**: ①ESC 打开的设置界面"点开太往下了"（截图里面板底边出屏、右下角「完成并关闭」被裁）；②`/tr` 面板右下角「完成并关闭」改成叉号；③`/tr` 面板"汉字显示不全"而且"过了一会就消失了"。
+- **根因**:
+  - ②`/tr` 紧凑版 640px 宽的页脚要同时塞 桥状态 + 端口提示 + `[测试连接][保存][完成并关闭]`，中文按钮被挤出可视区（第 87 版曾用 `.LCTChatMode .LCTFootNote { visibility: collapse }` 缓解，仍不够）。
+  - ①/③两个入口的宿主都不对：
+    - `getRoot()`（`lingua_chat.js:431-435`）会一路 `GetParent()` 走到**整棵 UI 树顶端**（全局 UI 根），而面板原来一直待在 `<CitadelChat>` 里 —— 反编译的 `dist/_css_game/chat.vcss_c` 里 `CitadelChat{width: 350px}`，只有 350px 宽且聊天收起时整块隐藏 → 面板被裁（汉字显示不全）+ 开一会儿随宿主消失。
+    - ESC 入口把面板 `SetParent` 到 `CitadelHudEscapeMenu`；按截图（1600×1012 缩放 ≈1.25 → 屏幕约 1280×810）反推：面板实测左上角 ≈(429,196)、尺寸 860×660，而"居中"应在 (210,75)，两式反解出父容器 ≈1718×1052（约屏幕 1.34 倍）→ 在该容器里 `align center` 算出的中心不是屏幕中心，面板偏右下并出屏。
+- **改动**:
+  - `mod/panorama/scripts/lingua_chat.js`: 新增 `settingsHomeParent` 与 `hostSettingsPanel(panel)`（记录原父节点后 `SetParent(getRoot())`，带 `diagLog("host"/"hostfail")` 埋点）；`openEscapeSettings()` 的 `panel.SetParent(escRoot)` 换成 `hostSettingsPanel(panel)`（遮罩仍留在 ESC 布局里挡背景点击）；`openSettingsPanel()` 在 `chatMode` 判定后对 `/tr` 入口同样调用 `hostSettingsPanel`；`restoreEscPanel()` 关闭时挂回 `escHostParent || settingsHomeParent`，`escHostedPanel` 为空时用 `findChild(getRoot(), SETTINGS_PANEL_ID)` 取面板；新增 `logPanelGeometry(tag, panel)` 记录 `self/par/parSize/rootSize/win`（全量 `typeof` 保护）。
+  - `mod/panorama/layout/chat.xml`: 页脚新增 `<Button id="LCTChatCloseBtn" class="LCTChatCloseBtn" onactivate="LCTSaveAndClose();"><Label text="X" /></Button>`。**面板结构仍留在 `<CitadelChat>` 内**：试过把面板提到布局根，resourcecompiler 直接报 `RESOURCE COMPILE ERROR: Found duplicate root panel tag; only one per file permitted.`（Panorama 布局只允许一个根面板），所以靠运行期 reparent 解决，不靠 XML 位置。
+  - `mod/panorama/styles/lingua_chat.css`: `.LCTSettingsPanel` 尺寸统一为 840×600（原 800×620 / 860×660 两处不一致，且 660 在 720p 屏上会被裁）；新增 `.LCTChatCloseBtn`（34×34、透明底、1px 边框、Label 居中 15px 粗体、hover/active 态）默认 `visibility: collapse`；`.LCTChatMode .LCTChatCloseBtn { visibility: visible }` + `.LCTChatMode .LCTFinishBtn { visibility: collapse }`。
+  - 版本号 2.2.0 → **2.2.1**（`VERSION`、`chat.xml` 的 `LCTVersion`）。
+- **验证方式**: chat.xml 用 Python ElementTree 解析通过（root 只有一个子面板）；`node --check` / LSP 干净；`build.ps1` 编译 7 个文件全 ok，`dist/pak22_dir.vpk` 已部署到 addons（421028 字节）。
+- **仍需用户测试**: 重启 Deadlock 后 ①ESC → 翻译设置，确认面板真正屏幕居中、底边「完成并关闭」可见可点；②`/tr` 打开，确认汉字不再被裁、聊天收起/展开都不消失、右下角是叉号且能关闭；③桥日志里新增的 `PANORAMA: settings hosted=root`、`PANORAMA: settings geometry ...` 两行可作为下一轮排障依据（若 `host=unchanged` 或 `par=CitadelChat` 说明 reparent 没生效）。

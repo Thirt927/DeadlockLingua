@@ -14,7 +14,7 @@
   "use strict";
 
   const LOG_PREFIX = "[LCT]";
-  const VERSION = "2.2.0";
+  const VERSION = "2.2.1";
 
   // ---- 原版聊天结构 ID(当前 Deadlock 版本稳定)----
   const CHAT_ROOT_ID = "Chat";
@@ -1636,8 +1636,35 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
   let escSubDumped = false;
   let escOrderLogged = false;
   let escHostParent = null;   // 面板原来的父节点(聊天布局根)
+  let settingsHomeParent = null;  // 同上,但两个入口共用(关闭时挂回去)
   let escHostedPanel = null;  // 当前挂到 ESC 的面板实例
   let escBackdrop = null;     // ESC 里的遮罩(挡住 EscapeBackground 的 resume 点击)
+
+  // 把设置面板挂到**全局 UI 根**(getRoot() 一路走到整棵 UI 树顶端 = 整屏、flow-children:none)。
+  // 为什么两个入口都挂全局根:
+  //  - /tr:原宿主 <CitadelChat> 只有 350px 宽、聊天收起时整块隐藏
+  //    → 面板被裁(汉字显示不全)而且"开一会儿就消失"。
+  //  - ESC:原宿主 CitadelHudEscapeMenu 的内部盒子比屏幕大约 1.34 倍(截图反推)
+  //    → align center 算出来的中心不是屏幕中心,面板偏右下、底边出屏。
+  function hostSettingsPanel(panel) {
+    if (!isValid(panel)) return false;
+    const top = getRoot();
+    if (!isValid(top)) return false;
+    if (!settingsHomeParent || !isValid(settingsHomeParent)) {
+      try { settingsHomeParent = panel.GetParent ? panel.GetParent() : null; } catch (e) { settingsHomeParent = null; }
+    }
+    if (!escHostParent || !isValid(escHostParent)) escHostParent = settingsHomeParent;
+    let moved = false;
+    try {
+      if (!panel.GetParent || panel.GetParent() !== top) panel.SetParent(top);
+      moved = true;
+    } catch (e) {
+      diagLog("hostfail", "PANORAMA: settings SetParent(getRoot) failed: " + (e && e.message ? e.message : String(e)));
+    }
+    diagLog("host", "PANORAMA: settings hosted=" + (moved ? "root" : "unchanged")
+      + " sameAsHome=" + (settingsHomeParent && panel.GetParent && panel.GetParent() === settingsHomeParent ? "yes" : "no"));
+    return moved;
+  }
 
   function ensureEscapeBackdrop(escRoot) {
     if (escBackdrop && isValid(escBackdrop)) return;
@@ -1664,15 +1691,19 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
   }
 
   function restoreEscPanel() {
-    const panel = escHostedPanel;
+    const panel = (escHostedPanel && isValid(escHostedPanel))
+      ? escHostedPanel
+      : findChild(getRoot(), SETTINGS_PANEL_ID);
     if (escBackdrop && isValid(escBackdrop)) {
       try { escBackdrop.DeleteAsync(0); } catch (e) {}
     }
     escBackdrop = null;
-    if (panel && isValid(panel) && escHostParent && isValid(escHostParent)) {
-      try { panel.SetParent(escHostParent); } catch (e) {}
+    const home = (escHostParent && isValid(escHostParent)) ? escHostParent : settingsHomeParent;
+    if (panel && isValid(panel) && home && isValid(home)) {
+      try { panel.SetParent(home); } catch (e) {}
     }
     escHostParent = null;
+    settingsHomeParent = null;
     escHostedPanel = null;
   }
 
@@ -1692,13 +1723,7 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
     }
     escHostedPanel = panel;
     ensureEscapeBackdrop(escRoot);
-    let moved = false;
-    try {
-      panel.SetParent(escRoot);
-      moved = true;
-    } catch (e) {
-      diagLog("escmovefail", "PANORAMA: settings SetParent(ESC) failed: " + (e && e.message ? e.message : String(e)));
-    }
+    const moved = hostSettingsPanel(panel);
     if (!moved) {
       setStatus("无法把设置面板挂到 ESC 菜单");
       restoreEscPanel();
@@ -6486,6 +6511,28 @@ function injectTranslation(row, sig, text) {
     return out;
   }
 
+  // 面板尺寸/位置/父容器尺寸一次性写入诊断日志 —— 之前"面板偏下/被裁"只能靠截图反推宿主盒子大小
+  function logPanelGeometry(tag, panel) {
+    try {
+      const bits = [];
+      bits.push("self=" + (panel.actuallayoutwidth || "?") + "x" + (panel.actuallayoutheight || "?"));
+      let par = null;
+      try { par = panel.GetParent ? panel.GetParent() : null; } catch (e) {}
+      const parOk = !!(par && isValid(par));
+      bits.push("par=" + (parOk ? (panelIdOf(par) || String(par.paneltype || "?")) : "none"));
+      if (parOk) bits.push("parSize=" + (par.actuallayoutwidth || "?") + "x" + (par.actuallayoutheight || "?"));
+      try {
+        const top = getRoot();
+        if (isValid(top)) bits.push("rootSize=" + (top.actuallayoutwidth || "?") + "x" + (top.actuallayoutheight || "?"));
+      } catch (e) {}
+      if (typeof panel.GetPositionWithinWindow === "function") {
+        const p = panel.GetPositionWithinWindow();
+        bits.push("win=" + Math.round(p.x) + "," + Math.round(p.y));
+      }
+      diagLog(tag, "PANORAMA: settings geometry " + bits.join(" "));
+    } catch (e) {}
+  }
+
   function openSettingsPanel() {
     const panel = findChild(getRoot(), SETTINGS_PANEL_ID);
     if (!panel) {
@@ -6514,6 +6561,8 @@ function injectTranslation(row, sig, text) {
       else panel.RemoveClass("LCTChatMode");
     } catch (e) {}
     diagLog("setmode", "PANORAMA: settings mode=" + (chatMode ? "chat" : "esc"));
+    // /tr 路径也要挂全局根:否则面板留在 <CitadelChat>(350px 宽)里被裁,聊天收起时整块消失
+    if (chatMode) hostSettingsPanel(panel);
     try {
       panel.AddClass(SETTINGS_VISIBLE_CLASS);
     } catch (e) {}
@@ -6528,6 +6577,7 @@ function injectTranslation(row, sig, text) {
     let insideChat = false;
     try { insideChat = !!panel.BAscendantHasClass("CitadelChat"); } catch (e) {}
     diagLog("setopen", "PANORAMA: settings opened vis=" + vis + " saveBtn=" + (saveBtn ? "yes" : "no") + " inChat=" + (insideChat ? "yes" : "no"));
+    logPanelGeometry("setgeom", panel);
     syncPanelFromConfig();
     // 恢复上次所在的标签页;LCTShowTab 会同步页显隐、标签高亮和状态栏提示
     LCTShowTab(settingsTab || "common");
