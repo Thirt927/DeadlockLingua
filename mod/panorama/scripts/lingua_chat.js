@@ -6563,6 +6563,15 @@ function injectTranslation(row, sig, text) {
     diagLog("setmode", "PANORAMA: settings mode=" + (chatMode ? "chat" : "esc"));
     // /tr 路径也要挂全局根:否则面板留在 <CitadelChat>(350px 宽)里被裁,聊天收起时整块消失
     if (chatMode) hostSettingsPanel(panel);
+    // 页脚:/tr 版把「完成并关闭」**换成**叉号(不是两个都给)。
+    // 不单靠 CSS —— .LCTFinishBtn 类曾在 XML 里漏写,导致两个按钮同时出现,这里兜一层。
+    try {
+      const finishBtn = findChild(panel, "LCTFinishBtn");
+      if (finishBtn) finishBtn.style.visibility = chatMode ? "collapse" : "visible";
+      const chatCloseBtn = findChild(panel, "LCTChatCloseBtn");
+      if (chatCloseBtn) chatCloseBtn.style.visibility = chatMode ? "visible" : "collapse";
+    } catch (e) {}
+    diagLog("setfoot", "PANORAMA: settings footer finish=" + (chatMode ? "hidden" : "shown") + " closeX=" + (chatMode ? "shown" : "hidden"));
     try {
       panel.AddClass(SETTINGS_VISIBLE_CLASS);
     } catch (e) {}

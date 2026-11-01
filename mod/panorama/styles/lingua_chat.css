@@ -1525,12 +1525,14 @@
   visibility: collapse;
 }
 
-/* 右下角:紧凑版把「完成并关闭」换成叉号 */
+/* 右下角:紧凑版把「完成并关闭」换成叉号(不是两个都给) */
 .LCTChatMode .LCTChatCloseBtn {
   visibility: visible;
 }
 
-.LCTChatMode .LCTFinishBtn {
+/* 两个选择器都写:类选择器曾经因 XML 忘加 class 而失效过一次(#LCTFinishBtn 是兜底) */
+.LCTChatMode .LCTFinishBtn,
+.LCTChatMode #LCTFinishBtn {
   visibility: collapse;
 }
 

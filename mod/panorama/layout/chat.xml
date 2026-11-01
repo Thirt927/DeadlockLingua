@@ -387,7 +387,7 @@
 				<Button id="LCTSaveBtn" class="LCTGhost" onactivate="LCTSave();">
 					<Label text="保存" />
 				</Button>
-				<Button id="LCTFinishBtn" class="LCTPrimary" onactivate="LCTSaveAndClose();">
+				<Button id="LCTFinishBtn" class="LCTPrimary LCTFinishBtn" onactivate="LCTSaveAndClose();">
 					<Label text="完成并关闭" />
 				</Button>
 				<!-- /tr 紧凑版用右下角叉号代替「完成并关闭」:640px 宽的底部栏塞不下中文按钮,
