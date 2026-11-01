@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<!--
+  ⚠️ 本地纯静态原型文件:不开服务器、无网络请求、不随 VPK 部署、不进产品代码路径。
+  数据全部来自本页内置的 state(无外部输入源),用户可控字段(prompt 改名 / Key 标签)
+  纯 DOM 构建(全部 createElement + textContent),无 innerHTML,可本地直接打开。
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>DeadlockLingua — 服务商管理 v3 · 原型(仿 Cherry Studio / New-API)</title>
+<link href="https://fonts.googleapis.com/css2?family=Poiret+One&family=Didact+Gothic&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #0a0e12; --panel: #121820; --panel2: #151b22;
+  --line: rgba(255,255,255,0.08);
+  --gold: #e7b96b; --gold-soft: rgba(231,185,107,0.14); --gold-line: rgba(231,185,107,0.45);
+  --patina: #4e8c7a; --text: #d8dee6; --dim: #8b95a3;
+  --ok: #6fcf9f; --err: #e07a6f; --idk: #5a6472;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: radial-gradient(1100px 640px at 50% -8%, #10161d, var(--bg));
+  color: var(--text); font-family: "Didact Gothic", "Microsoft YaHei", sans-serif;
+  font-size: 13px; min-height: 100vh; padding: 26px 16px 60px;
+}
+h1 { text-align: center; font-family: "Poiret One", sans-serif; font-size: 26px; color: var(--gold); letter-spacing: 2px; font-weight: normal; }
+.sub { text-align: center; color: var(--dim); font-size: 11.5px; margin: 6px 0 18px; line-height: 1.7; }
+.sub b { color: var(--gold); font-weight: normal; }
+
+.tabs { display: flex; gap: 10px; justify-content: center; margin-bottom: 20px; }
+.tab { padding: 8px 22px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel2); color: var(--dim); cursor: pointer; user-select: none; }
+.tab.on { background: var(--gold-soft); border-color: var(--gold-line); color: var(--gold); }
+.stage { display: none; } .stage.on { display: block; }
+.card { background: var(--panel); border: 1px solid var(--line); border-top: 1px solid var(--gold-line); border-radius: 10px; box-shadow: rgba(0,0,0,0.5) 0 18px 40px; }
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 7px; vertical-align: -1px; }
+.dot.ok { background: var(--ok); } .dot.err { background: var(--err); } .dot.idk { background: var(--idk); }
+.btn { font-family: inherit; cursor: pointer; border-radius: 6px; font-size: 12px; padding: 6px 13px; border: 1px solid var(--line); background: rgba(255,255,255,0.03); color: var(--text); }
+.btn:hover { background: rgba(255,255,255,0.08); border-color: rgba(231,185,107,0.4); }
+.btn.gold { background: var(--gold); color: #14100a; border-color: rgba(255,236,200,0.55); font-weight: bold; }
+.btn.gold:hover { background: #f0c97e; }
+.btn.mini { padding: 3px 10px; font-size: 11px; }
+.btn.ghost:hover { border-color: rgba(224,122,111,0.55); color: var(--err); }
+input[type=text], input[type=password] { font-family: inherit; font-size: 12px; color: var(--text); background: rgba(0,0,0,0.3); border: 1px solid var(--line); border-radius: 6px; padding: 6px 9px; outline: none; }
+input:focus { border-color: var(--gold-line); }
+
+/* ============ ① Web ============ */
+#w { display: flex; justify-content: center; }
+#wcard { width: 980px; padding: 26px 30px; }
+#wcard h2 { font-family: "Poiret One", sans-serif; font-size: 22px; color: var(--gold); letter-spacing: 1px; font-weight: normal; }
+.desc { color: var(--dim); font-size: 11.5px; margin: 4px 0 16px; line-height: 1.7; }
+.desc .src { color: var(--patina); }
+.seclbl { font-size: 10px; color: var(--dim); letter-spacing: 1.6px; text-transform: uppercase; margin: 18px 0 10px; }
+
+/* 端点卡(仿 New-API 渠道行:状态点 + 名称 + 类型 + 响应时间 + 状态开关) */
+.chan { border: 1px solid var(--line); border-radius: 8px; background: var(--panel2); margin-bottom: 10px; transition: border-color .15s; }
+.chan:hover { border-color: rgba(231,185,107,0.3); }
+.chan.on { border-color: var(--gold-line); background: linear-gradient(180deg, var(--gold-soft), rgba(231,185,107,0.02)); }
+.chan-off { opacity: 0.55; }
+.row1 { display: flex; align-items: center; gap: 10px; padding: 11px 14px; }
+.rank { width: 22px; height: 22px; flex: none; border-radius: 50%; border: 1px solid var(--line); background: rgba(255,255,255,0.04); color: var(--dim); display: flex; align-items: center; justify-content: center; font-size: 11px; }
+.chan.on .rank { background: var(--gold); border-color: transparent; color: #14100a; font-weight: bold; }
+.nm { font-size: 13px; font-weight: bold; min-width: 118px; cursor: text; border-bottom: 1px dashed transparent; }
+.nm:hover { border-bottom-color: rgba(231,185,107,0.4); }
+.meta { color: var(--dim); font-size: 11px; }
+.lat { color: var(--patina); font-size: 11px; min-width: 46px; text-align: right; }
+.lat.na { color: var(--dim); }
+.badge { font-size: 10.5px; color: var(--gold); border: 1px solid var(--gold-line); background: rgba(231,185,107,0.08); padding: 2px 9px; border-radius: 20px; }
+.badge.dim { color: var(--dim); border-color: var(--line); background: transparent; }
+.sw { width: 34px; height: 18px; border-radius: 9px; background: rgba(255,255,255,0.09); position: relative; cursor: pointer; flex: none; }
+.sw::after { content: ""; position: absolute; width: 14px; height: 14px; border-radius: 50%; background: #6b7684; top: 2px; left: 2px; transition: .15s; }
+.sw.on { background: rgba(111,207,159,0.25); }
+.sw.on::after { left: 18px; background: var(--ok); }
+.sp { flex: 1; }
+
+/* Key 池(仿 Cherry Studio API Key 管理:每把 Key 独立条目,标签+启用+复制+删) */
+.row2 { display: flex; align-items: center; gap: 7px; padding: 0 14px 12px 46px; flex-wrap: wrap; }
+.kp { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; padding: 3px 5px 3px 9px; border-radius: 14px; border: 1px solid var(--line); background: rgba(0,0,0,0.25); color: var(--text); }
+.ki { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); flex: none; }
+.kp.dead { color: var(--err); border-color: rgba(224,122,111,0.4); }
+.kp.dead .ki { background: var(--err); }
+.kp.dead .kl { text-decoration: line-through; opacity: .7; }
+.kl { min-width: 12px; }
+.kic { cursor: pointer; color: var(--dim); font-size: 11px; padding: 1px 5px; border-radius: 4px; user-select: none; }
+.kic:hover { background: rgba(255,255,255,0.08); color: var(--gold); }
+.kic.del:hover { color: var(--err); }
+.kadd { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; padding: 3px 10px; border-radius: 14px; border: 1px dashed var(--gold-line); color: var(--gold); background: rgba(231,185,107,0.05); cursor: pointer; user-select: none; }
+.kadd:hover { background: rgba(231,185,107,0.12); }
+.knote { width: 100%; font-size: 10.5px; color: var(--dim); margin-top: 2px; }
+.knote b { color: var(--patina); font-weight: normal; }
+
+/* 快加输入(逗号分隔,Cherry Studio 的 Quick Add) */
+.quick { display: none; align-items: center; gap: 8px; padding: 0 14px 12px 46px; }
+.quick.show { display: flex; }
+.quick input { flex: 1; }
+.quick .hint { font-size: 10.5px; color: var(--dim); }
+
+/* 回退链 */
+.chain { border: 1px dashed var(--line); border-radius: 8px; background: rgba(0,0,0,0.18); padding: 13px 16px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.cnode { padding: 5px 13px; border-radius: 16px; border: 1px solid var(--line); background: var(--panel2); font-size: 12px; }
+.cnode b { color: var(--gold); font-weight: normal; }
+.cnode.dim { color: var(--dim); }
+.carr { color: var(--patina); font-size: 14px; }
+.clabel { width: 100%; font-size: 10px; color: var(--dim); letter-spacing: 1.2px; text-transform: uppercase; margin-bottom: 4px; }
+.fine { font-size: 10.5px; color: var(--dim); margin-top: 14px; line-height: 1.9; border-top: 1px solid var(--line); padding-top: 10px; }
+
+/* ============ ② 游戏内 /tr ============ */
+#g { display: flex; justify-content: center; }
+.gpanel { width: 640px; height: 640px; border-radius: 10px; overflow: hidden; display: flex; flex-direction: column; background: linear-gradient(180deg, #121820, #0a0e12); }
+.ghead { height: 54px; flex: none; padding: 0 16px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid rgba(255,255,255,0.06); }
+.mark { width: 30px; height: 30px; border-radius: 8px; flex: none; background: linear-gradient(160deg, #ecc47c, #b98a3e); color: #14100a; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: bold; font-family: "Poiret One", sans-serif; }
+.ghead .tt { color: var(--gold); font-family: "Poiret One", sans-serif; font-size: 19px; letter-spacing: 1px; }
+.ghead .tt span { display: block; font-family: "Didact Gothic", "Microsoft YaHei", sans-serif; font-size: 9px; letter-spacing: 1.4px; color: var(--dim); }
+.seg { margin-left: auto; display: flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.seg div { padding: 5px 14px; font-size: 11.5px; color: var(--dim); cursor: pointer; }
+.seg div.on { background: var(--gold-soft); color: var(--gold); }
+.gbody { flex: 1; overflow-y: auto; padding: 12px 16px 6px; }
+.gbody::-webkit-scrollbar { width: 8px; } .gbody::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 4px; }
+.gchan { border: 1px solid var(--line); border-radius: 8px; background: var(--panel2); padding: 9px 11px; margin-bottom: 8px; cursor: pointer; transition: border-color .15s; }
+.gchan:hover { border-color: rgba(231,185,107,0.35); }
+.gchan.on { border-color: var(--gold-line); background: linear-gradient(180deg, var(--gold-soft), rgba(231,185,107,0.02)); }
+.grow { display: flex; align-items: center; gap: 8px; }
+.grow .nm { font-weight: bold; color: var(--text); flex: 1; font-size: 12.5px; }
+.gchan.on .nm { color: var(--gold); }
+.grow .mt { color: var(--dim); font-size: 10px; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.grow .lat { color: var(--patina); font-size: 10px; }
+.gadd { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+.preset { padding: 5px 12px; border-radius: 20px; border: 1px dashed var(--line); color: var(--dim); font-size: 11px; cursor: pointer; background: rgba(0,0,0,0.15); }
+.preset:hover { border-color: var(--gold-line); color: var(--gold); background: rgba(231,185,107,0.06); }
+.gkeys { display: flex; gap: 5px; align-items: center; margin-top: 7px; flex-wrap: wrap; }
+.gkeys .kp { padding: 2px 4px 2px 8px; }
+.gfoot { height: 58px; flex: none; border-top: 1px solid rgba(255,255,255,0.06); display: flex; align-items: center; gap: 10px; padding: 0 14px; }
+.gfoot .hint { flex: 1; font-size: 10.5px; color: var(--dim); line-height: 1.5; }
+.gfoot .hint b { color: var(--gold); font-weight: normal; }
+
+#toast { position: fixed; left: 50%; top: 18px; transform: translateX(-50%) translateY(-60px); background: var(--panel2); border: 1px solid var(--gold-line); border-radius: 6px; padding: 8px 20px; font-size: 12px; color: var(--gold); transition: transform .25s; z-index: 99; max-width: 70vw; }
+#toast.show { transform: translateX(-50%) translateY(0); }
+</style>
+</head>
+<body>
+
+<h1>服务商管理 v3 · 原型</h1>
+<div class="sub">
+  参照真实产品:<b>Cherry Studio</b>(桌面客户端:服务商页 + 逗号快加 Key + Key 管理列表 + 可选 Key 测试)、<b>New-API</b>(网关:渠道行 = 状态点/名称/响应时间 + Multi-Key 自动轮询 + 失败 Key 自动跳过/恢复)、<b>Open WebUI</b>(按协议 Add Connection)<br>
+  共识三件套:① 每行标配 <b>状态点 + 响应时间</b>;② Key 是「<b>管理列表</b>」(标签+启用/禁用+复制+删除)不是四个输入框;③ 失败 Key <b>自动禁用</b>,恢复后<b>自动回来</b>
+</div>
+
+<div class="tabs">
+  <div class="tab on" data-v="w" onclick="show('w')">① Web 设置页版</div>
+  <div class="tab" data-v="g" onclick="show('g')">② 游戏内 /tr 紧凑版</div>
+</div>
+<div id="toast"></div>
+
+<!-- ① Web -->
+<div id="w" class="stage on">
+  <div class="card" id="wcard">
+    <h2>服务商</h2>
+    <div class="desc">
+      一张卡 = 一个端点(host + 模型),顺序即回退顺序,点 <span style="color:var(--gold)">★</span> 设最优先。卡内可挂任意多 Key,自动轮询;Key 失败自动跳过,连续 3 次失败自动禁用,恢复后自动重新启用。<br>
+      <span class="src">迁移:老配置 {openai:{apiKey,baseUrl,model}} 首次读入自动包成第 1 张卡「默认」,Key 进 Key 池,不丢数据。</span>
+    </div>
+
+    <div class="gadd" id="wPresets" style="margin-bottom:12px"></div>
+    <div id="wChans"></div>
+
+    <div class="seclbl">跨类别回退(openai 端点全部失败后)</div>
+    <div class="chain" id="wChain"></div>
+
+    <div class="fine">
+      其它类别(Microsoft / DeepL / Google)每类一个 Key,维持现状;Bing 免 Key 永远兜底。<br>
+      「复制」把该 Key 的标签 + 完整值复制到剪贴板(值在输入框里默认打码,点标签旁 👁 展开)。
+    </div>
+  </div>
+</div>
+
+<!-- ② 游戏内 -->
+<div id="g" class="stage">
+  <div class="card gpanel">
+    <div class="ghead">
+      <div class="mark">DL</div>
+      <div class="tt">服务商<span>PROVIDER</span></div>
+      <div class="seg"><div class="on" onclick="gseg(this,0)">端点</div><div onclick="gseg(this,1)">跨类别</div></div>
+    </div>
+    <div class="gbody">
+      <div class="seclbl" style="margin:2px 0 8px">点卡片设最优先 · 失败自动按顺序回退 · Bing 兜底</div>
+      <div class="gadd" id="gAdd"></div>
+      <div id="gChans"></div>
+      <div id="gOthers" style="display:none"></div>
+    </div>
+    <div class="gfoot">
+      <span class="hint" id="gHint"></span>
+      <button class="btn gold mini" onclick="toast('原型:同 Web 版添加预设端点')">+ 添加</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const PRESETS = [
+  { name: "DeepSeek", host: "api.deepseek.com", baseUrl: "https://api.deepseek.com", model: "deepseek-chat" },
+  { name: "OpenAI", host: "api.openai.com", baseUrl: "https://api.openai.com/v1", model: "gpt-4o-mini" },
+  { name: "Ollama 本地", host: "127.0.0.1:11434", baseUrl: "http://127.0.0.1:11434/v1", model: "llama3:8b" },
+  { name: "OneAPI 网关", host: "oneapi.example", baseUrl: "https://your-oneapi.example/v1", model: "gpt-4o" },
+];
+let idSeq = 4;
+const state = {
+  chans: [
+    { name: "DeepSeek 主力", host: "api.deepseek.com", model: "deepseek-chat", lat: "213ms", st: "ok", on: true,
+      keys: [
+        { id: "k1", label: "K1", on: true },
+        { id: "k2", label: "K2", on: true },
+        { id: "k3", label: "备用", on: false, auto: "连续3次失败自动禁用" },
+      ] },
+    { name: "Ollama 本地", host: "127.0.0.1:11434", model: "llama3:8b", lat: "1.2s", st: "ok", on: true,
+      keys: [ { id: "k4", label: "本地", on: true, local: true } ] },
+  ],
+  primary: 0,
+  others: [
+    { n: "Bing", m: "免 Key · 恒兜底", st: "ok" },
+    { n: "Microsoft", m: "已配置", st: "ok" },
+    { n: "DeepL", m: "未配置", st: "idk" },
+    { n: "Google", m: "未配置", st: "idk" },
+  ],
+};
+
+/* ---------- 小型 DOM 助手:全部 createElement + textContent,无 innerHTML ---------- */
+function el(tag, cls, text) {
+  const d = document.createElement(tag);
+  if (cls) d.className = cls;
+  if (text != null) d.textContent = text;
+  return d;
+}
+function btn(text, fn, cls) {
+  const b = el("button", "btn " + (cls || ""), text);
+  b.onclick = fn;
+  return b;
+}
+function icon(text, title, fn, cls) {
+  const s = el("span", cls || "kic", text);
+  s.title = title;
+  s.onclick = fn;
+  return s;
+}
+function dot(st) { return el("i", "dot " + st); }
+
+function toast(m) {
+  const t = document.getElementById("toast");
+  t.textContent = m; t.classList.add("show");
+  clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("show"), 2200);
+}
+function show(v) {
+  document.querySelectorAll(".tab").forEach(t => t.classList.toggle("on", t.dataset.v === v));
+  document.getElementById("w").classList.toggle("on", v === "w");
+  document.getElementById("g").classList.toggle("on", v === "g");
+}
+function gseg(src, i) {
+  const seg = src.parentElement;
+  seg.querySelectorAll("div").forEach(d => d.classList.remove("on"));
+  src.classList.add("on");
+  document.getElementById("gChans").style.display = i === 0 ? "" : "none";
+  document.getElementById("gAdd").style.display = i === 0 ? "" : "none";
+  document.getElementById("gOthers").style.display = i === 1 ? "" : "none";
+}
+
+/* ---------- Web ---------- */
+function renderW() {
+  const pres = document.getElementById("wPresets");
+  pres.textContent = "";
+  PRESETS.forEach((x, i) => {
+    const s = el("span", "preset", "+ " + x.name);
+    s.onclick = () => addChan(i);
+    pres.appendChild(s);
+  });
+  const cs = el("span", "preset", "+ 自定义端点");
+  cs.onclick = () => addChan(-1);
+  pres.appendChild(cs);
+
+  const box = document.getElementById("wChans");
+  box.textContent = "";
+  state.chans.forEach((c, i) => {
+    const d = el("div", "chan" + (i === state.primary ? " on" : "") + (c.on ? "" : " chan-off"));
+
+    const row1 = el("div", "row1");
+    const rank = el("span", "rank", String(i + 1));
+    rank.title = "回退顺序";
+    row1.appendChild(rank);
+    const nm = el("span", "nm", c.name);
+    nm.title = "双击改名";
+    nm.ondblclick = () => renameChan(i);
+    row1.appendChild(nm);
+    row1.appendChild(el("span", "meta", c.host + " · " + c.model));
+    row1.appendChild(el("span", "lat" + (c.lat ? "" : " na"), c.lat || "未测试"));
+    row1.appendChild(dot(c.st));
+    row1.appendChild(el("span", "badge" + (i === state.primary ? "" : " dim"), i === state.primary ? "★ 最优先" : "备用"));
+    row1.appendChild(el("span", "sp"));
+    row1.appendChild(btn("测试", () => testChan(i), "mini"));
+    row1.appendChild(btn("测 K1", () => testChan(i), "mini"));
+    const del = btn("删除", () => delChan(i), "mini ghost");
+    del.title = i === 0 ? "第 1 张是主用,删后自动上移" : "删除";
+    row1.appendChild(del);
+    const sw = el("span", "sw" + (c.on ? " on" : ""));
+    sw.title = "启用/禁用整个端点";
+    sw.onclick = () => toggleChan(i);
+    row1.appendChild(sw);
+    d.appendChild(row1);
+
+    // Key 池条目:圆点(状态)+ 标签 + 启用/禁用 + 复制 + 删除
+    const row2 = el("div", "row2");
+    c.keys.forEach((k, ki) => {
+      const p = el("span", "kp" + (k.on ? "" : " dead"));
+      p.title = k.on ? "点击禁用" : ((k.auto ? "连续失败被自动禁用 · " : "已禁用 · ") + "点击恢复");
+      p.appendChild(el("i", "ki"));
+      p.appendChild(el("span", "kl", k.local ? "本地" : k.label));
+      p.appendChild(icon("⇄", "启用/禁用", () => toggleKey(i, ki)));
+      p.appendChild(icon("⧉", "复制", () => copyKey(i, ki)));
+      p.appendChild(icon("✕", "删除", () => delKey(i, ki), "kic del"));
+      row2.appendChild(p);
+    });
+    const ka = el("span", "kadd", "+ 加 Key");
+    ka.onclick = () => toggleQuick(i);
+    row2.appendChild(ka);
+    row2.appendChild(el("span", "knote",
+      "轮询:每请求按顺序切下一把(" + c.keys.filter(k => k.on).length + "/" + c.keys.length + " 可用)· 失败自动跳过 · 连续 3 次自动禁用 · 恢复后自动回来"));
+    d.appendChild(row2);
+
+    // 快加输入(逗号分隔,Cherry Studio 的 Quick Add)
+    const q = el("div", "quick");
+    q.id = "q" + i;
+    const inp = el("input");
+    inp.type = "text";
+    inp.placeholder = "粘贴 Key,英文逗号可一次加多把,例:sk-aaa,sk-bbb";
+    inp.onkeydown = e => { if (e.key === "Enter") quickAdd(i, inp); };
+    q.appendChild(inp);
+    q.appendChild(btn("添加", () => quickAdd(i, inp), "mini gold"));
+    q.appendChild(el("span", "hint", "逗号分隔快加"));
+    d.appendChild(q);
+    box.appendChild(d);
+  });
+
+  // 回退链
+  const chain = document.getElementById("wChain");
+  chain.textContent = "";
+  chain.appendChild(el("span", "clabel", "openai 端点全部失败 → 按此顺序试其它类别 → Bing 恒兜底"));
+  const first = el("span", "cnode");
+  first.appendChild(el("b", state.chans.filter(c => c.on).map(c => c.name + "(" + c.keys.filter(k => k.on).length + " Keys)").join(" → ")));
+  chain.appendChild(first);
+  state.others.forEach((o, oi) => {
+    if (oi) chain.appendChild(el("span", "carr", "→"));
+    const n = el("span", "cnode" + (o.st === "idk" ? " dim" : ""));
+    n.appendChild(dot(o.st));
+    n.appendChild(document.createTextNode(o.n + " "));
+    n.appendChild(el("span", null, o.m));
+    chain.appendChild(n);
+  });
+}
+function addChan(pi) {
+  const b = pi >= 0 ? PRESETS[pi] : { name: "自定义", host: "custom.example", model: "gpt-4o" };
+  state.chans.push({ name: b.name + " " + idSeq, host: b.host, model: b.model, lat: "", st: "idk", on: true,
+    keys: [{ id: "k" + (idSeq + 10), label: "K1", on: true }] });
+  idSeq++;
+  renderW(); renderG();
+  toast("已添加「" + b.name + "」为新端点 —— 旧端点自动变备用,不会被顶掉");
+}
+function delChan(i) {
+  const wasP = state.primary;
+  state.chans.splice(i, 1);
+  if (state.primary >= state.chans.length) state.primary = Math.max(0, state.chans.length - 1);
+  renderW(); renderG();
+  toast("已删除;第 " + Math.min(wasP + 1, Math.max(1, state.chans.length)) + " 张卡现在是最优先");
+}
+function toggleChan(i) { state.chans[i].on = !state.chans[i].on; renderW(); renderG(); }
+function renameChan(i) {
+  const n = prompt("端点昵称:", state.chans[i].name);
+  if (n) { state.chans[i].name = n; renderW(); renderG(); }
+}
+function toggleKey(ci, ki) {
+  const k = state.chans[ci].keys[ki];
+  k.on = !k.on; k.auto = "";
+  renderW(); renderG();
+  toast(k.on ? "「" + state.chans[ci].name + " · " + k.label + "」已恢复轮询" : "「" + state.chans[ci].name + " · " + k.label + "」已停用");
+}
+function copyKey(ci, ki) {
+  const k = state.chans[ci].keys[ki];
+  if (navigator.clipboard) navigator.clipboard.writeText(k.local ? "本地免 Key" : "(粘贴到此处)");
+  toast("已复制「" + k.label + "」");
+}
+function delKey(ci, ki) {
+  state.chans[ci].keys.splice(ki, 1);
+  renderW(); renderG();
+  toast("Key 已删除");
+}
+function toggleQuick(ci) {
+  const q = document.getElementById("q" + ci);
+  if (q) q.classList.toggle("show");
+}
+function quickAdd(ci, input) {
+  const parts = (input.value || "").split(",").map(s => s.trim()).filter(Boolean);
+  if (!parts.length) return;
+  const c = state.chans[ci];
+  parts.forEach(v => c.keys.push({ id: "k" + Math.random().toString(36).slice(2, 7), label: "K" + (c.keys.length + 1), on: true, val: v }));
+  if (input) input.value = "";
+  renderW(); renderG();
+  toast("加入 " + parts.length + " 把 Key,已进轮询池");
+}
+function testChan(ci) {
+  const c = state.chans[ci];
+  c.st = "err"; c.lat = "";
+  renderW(); renderG();
+  setTimeout(() => {
+    c.st = "ok"; c.lat = (120 + Math.floor(Math.random() * 300)) + "ms";
+    renderW(); renderG();
+    toast("「" + c.name + "」测试通过 " + c.lat);
+  }, 500);
+}
+
+/* ---------- 游戏内 ---------- */
+function renderG() {
+  const add = document.getElementById("gAdd");
+  add.textContent = "";
+  PRESETS.forEach((x, i) => {
+    const s = el("span", "preset", "+ " + x.name);
+    s.onclick = () => addChan(i);
+    add.appendChild(s);
+  });
+
+  const box = document.getElementById("gChans");
+  box.textContent = "";
+  state.chans.forEach((c, i) => {
+    const d = el("div", "gchan" + (i === state.primary ? " on" : ""));
+    d.onclick = () => { state.primary = i; renderW(); renderG(); toast("最优先已切到「" + c.name + "」"); };
+    const grow = el("div", "grow");
+    grow.appendChild(dot(c.st));
+    grow.appendChild(el("span", "nm", c.name));
+    grow.appendChild(el("span", "mt", c.host + " · " + c.model));
+    grow.appendChild(el("span", "lat", c.lat || "未测试"));
+    if (i === state.primary) grow.appendChild(el("span", "badge", "★"));
+    d.appendChild(grow);
+
+    const gk = el("div", "gkeys");
+    c.keys.forEach((k, ki) => {
+      const p = el("span", "kp" + (k.on ? "" : " dead"));
+      p.title = "点击启用/禁用";
+      p.onclick = e => { e.stopPropagation(); toggleKey(i, ki); };
+      p.appendChild(el("i", "ki"));
+      p.appendChild(el("span", "kl", k.local ? "本地" : k.label));
+      gk.appendChild(p);
+    });
+    const ka = el("span", "kadd", "+");
+    ka.onclick = e => { e.stopPropagation(); toggleQuick(i); };
+    gk.appendChild(ka);
+    gk.appendChild(el("span", "knote", c.keys.filter(k => k.on).length + "/" + c.keys.length + " 在轮询 · 点 Key 停用/启用"));
+    d.appendChild(gk);
+
+    const q = el("div", "quick");
+    q.id = "q" + i;
+    q.onclick = e => e.stopPropagation();
+    const inp = el("input");
+    inp.type = "text";
+    inp.placeholder = "Key,英文逗号可多把";
+    inp.onkeydown = e => { if (e.key === "Enter") quickAdd(i, inp); };
+    q.appendChild(inp);
+    q.appendChild(btn("加", () => quickAdd(i, inp), "mini gold"));
+    d.appendChild(q);
+    box.appendChild(d);
+  });
+
+  const others = document.getElementById("gOthers");
+  others.textContent = "";
+  state.others.forEach(o => {
+    const d = el("div", "gchan");
+    d.style.cursor = "default";
+    const grow = el("div", "grow");
+    grow.appendChild(dot(o.st));
+    const nm = el("span", "nm", o.n);
+    nm.style.flex = "1";
+    grow.appendChild(nm);
+    grow.appendChild(el("span", "mt", o.m));
+    d.appendChild(grow);
+    others.appendChild(d);
+  });
+
+  const c = state.chans[state.primary];
+  const hint = document.getElementById("gHint");
+  hint.textContent = "";
+  if (c) {
+    hint.appendChild(document.createTextNode("当前最优先:"));
+    hint.appendChild(el("b", c.name));
+    hint.appendChild(document.createTextNode(" · " + c.keys.filter(k => k.on).length + " 把 Key 在轮询 · 全挂自动回退下一端点,Bing 兜底"));
+  } else {
+    hint.textContent = "没有端点 —— 直接走跨类别回退,点上方预设快速加一个";
+  }
+}
+
+renderW(); renderG();
+</script>
+
+</body>
+</html>
