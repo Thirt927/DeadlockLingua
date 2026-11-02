@@ -14,7 +14,7 @@
   "use strict";
 
   const LOG_PREFIX = "[LCT]";
-  const VERSION = "2.2.1";
+  const VERSION = "2.3.0";
 
   // ---- 原版聊天结构 ID(当前 Deadlock 版本稳定)----
   const CHAT_ROOT_ID = "Chat";
@@ -231,6 +231,7 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
     cache: new Map(), // 签名 -> { translation }
     textCache: new Map(), // 目标语言 + 原文 -> { translation }(跨 HUD/普通行复用)
     pendingText: new Map(), // 同一原文的在途任务别名(避免 HUD/普通行重复请求)
+    lingeringCapsules: new Map(), // textKey -> 顶栏驻留胶囊 { panel, orig, text, filled, deleteAt, fading }
     queue: [], // 待翻译任务
     activeRequests: 0,
     requestSeq: 0,
@@ -240,7 +241,6 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
     panelLogged: false,
     eventsRegistered: false,
     pending: null, // 统一在途桥请求 { id, onResult, deadline, sawAlive }
-    bridgeUp: false,
     panelWarned: false,
     // ---- 桥面板自愈状态(见 resetBridgeChannel) ----
     panelFailStreak: 0, // 面板通道连续失败次数
@@ -316,7 +316,7 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
         };
       }
       return g.__LCT_SHARED_IDENTITY__;
-    } catch (e) {
+    } catch{
       return null;
     }
   }
@@ -339,7 +339,7 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
       }
       if (s.selfName && !State.selfName) State.selfName = s.selfName;
       if (State.selfName) s.selfName = State.selfName;
-    } catch (e) {}
+    } catch{}
   }
 
   // ================= 工具函数 =================
@@ -355,7 +355,7 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
   function safeText(panel) {
     try {
       return String((panel && panel.text) || "").replace(/\s+/g, " ").trim();
-    } catch (e) {
+    } catch{
       return "";
     }
   }
@@ -364,7 +364,7 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
     if (!isValid(panel) || typeof panel.GetChildCount !== "function") return 0;
     try {
       return panel.GetChildCount() || 0;
-    } catch (e) {
+    } catch{
       return 0;
     }
   }
@@ -373,7 +373,7 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
     if (!isValid(panel) || typeof panel.GetChild !== "function") return null;
     try {
       return panel.GetChild(index);
-    } catch (e) {
+    } catch{
       return null;
     }
   }
@@ -382,7 +382,7 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
     if (!isValid(panel) || typeof panel.BHasClass !== "function") return false;
     try {
       return panel.BHasClass(className);
-    } catch (e) {
+    } catch{
       return false;
     }
   }
@@ -392,7 +392,7 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
     try {
       const found = root.FindChildTraverse(id);
       return isValid(found) ? found : null;
-    } catch (e) {
+    } catch{
       return null;
     }
   }
@@ -407,7 +407,7 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
             if (isValid(matches[i])) return matches[i];
           }
         }
-      } catch (e) {}
+      } catch{}
     }
     if (hasClass(root, className)) return root;
     // 兜底递归必须带节点预算:root 可能是整棵 HUD 树,无预算递归会卡死主线程(黑屏)
@@ -444,7 +444,7 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
       budget.visited += 1;
       try {
         if (String(panel.paneltype || "") === type) out.push(panel);
-      } catch (e) {}
+      } catch{}
       const count = childCount(panel);
       for (let i = 0; i < count; i += 1) visit(childAt(panel, i), depth + 1);
     }
@@ -469,28 +469,12 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
           const found = root.FindChildTraverse(ids[i]);
           if (isValid(found)) out.push(found);
         }
-      } catch (e) {}
+      } catch{}
     }
     const count = childCount(root);
     for (let i = 0; i < count; i += 1) collectPanelsByIds(childAt(root, i), ids, maxDepth - 1, out, st);
   }
 
-  function detectTopbarTeamSide(panel) {
-    let current = panel;
-    let depth = 0;
-    while (isValid(current) && depth < 32) {
-      try {
-        const id = String(current.id || "");
-        if (id === "TeamFriendly") return "friendly";
-        if (id === "TeamEnemy") return "enemy";
-        current = current.GetParent && current.GetParent();
-      } catch (e) {
-        current = null;
-      }
-      depth += 1;
-    }
-    return "";
-  }
 
   function collectPanelsByClasses(root, classes, maxDepth, out, budget) {
     if (!isValid(root) || maxDepth < 0) return;
@@ -509,7 +493,7 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
           }
         }
         return;
-      } catch (e) {}
+      } catch{}
     }
     for (let c = 0; c < classes.length; c += 1) {
       if (hasClass(root, classes[c])) {
@@ -537,11 +521,11 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
     try {
       const topBar = findChild(root, TOPBAR_ROOT_ID) || findChild(root, "HudTopBar");
       if (isValid(topBar)) entryScope = topBar;
-    } catch (e) {}
+    } catch{}
     const isEntryType = function (panel) {
       try {
         return TOPBAR_PLAYER_TYPE_ALTS.indexOf(String(panel.paneltype || "")) >= 0;
-      } catch (e) {
+      } catch{
         return false;
       }
     };
@@ -564,13 +548,13 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
           if (isValid(p)) add(p);
         }
       }
-    } catch (e) {}
+    } catch{}
     // 2) TeamsContainer 内按 HeroName 标签反查条目容器(玩家名+英雄名同容器,旧版)
     let scope = null;
     try {
       const topBar = findChild(root, TOPBAR_ROOT_ID);
       if (isValid(topBar)) scope = findChild(topBar, TOPBAR_TEAMS_ID);
-    } catch (e) {}
+    } catch{}
     if (!isValid(scope)) scope = findChild(root, TOPBAR_TEAMS_ID);
     if (isValid(scope)) {
       const heroLabels = [];
@@ -598,11 +582,11 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
       try {
         const m1 = entryScope.FindChildrenWithAttributeTraverse("id", "HeroBadge") || [];
         for (let i = 0; i < m1.length; i += 1) badges.push(m1[i]);
-      } catch (e) {}
+      } catch{}
       try {
         const m2 = entryScope.FindChildrenWithAttributeTraverse("id", "HeroImage") || [];
         for (let i = 0; i < m2.length; i += 1) badges.push(m2[i]);
-      } catch (e) {}
+      } catch{}
     } else {
       collectPanelsByIds(entryScope, ["HeroBadge", "HeroImage"], 80, badges);
     }
@@ -624,7 +608,7 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
           if (isValid(entry)) add(entry);
         }
       }
-    } catch (e) {}
+    } catch{}
     // 5) type 扫描兜底(版本回退):作用域优先顶栏根(小树,预算充足),找不到再回退整树
     if (out.length === 0) {
       if (!State.topbarTypeNextScan || nowMs() >= State.topbarTypeNextScan) {
@@ -682,15 +666,15 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
       try {
         const nameMatches = root.FindChildrenWithClassTraverse ? root.FindChildrenWithClassTraverse("PlayerName") : [];
         for (let i = 0; i < nameMatches.length && i < 12; i += 1) addClue(nameMatches[i], "cls:PlayerName");
-      } catch (e) {}
+      } catch{}
       try {
         const badgeMatches = root.FindChildrenWithAttributeTraverse ? root.FindChildrenWithAttributeTraverse("id", "HeroBadge") : [];
         for (let i = 0; i < badgeMatches.length && i < 12; i += 1) addClue(badgeMatches[i], "id:HeroBadge");
-      } catch (e) {}
+      } catch{}
       try {
         const imgMatches = root.FindChildrenWithAttributeTraverse ? root.FindChildrenWithAttributeTraverse("id", "HeroImage") : [];
         for (let i = 0; i < imgMatches.length && i < 12; i += 1) addClue(imgMatches[i], "id:HeroImage");
-      } catch (e) {}
+      } catch{}
       if (clues.length === 0) {
         diagLog("recon clue: no PlayerName/HeroBadge/HeroImage found in whole tree");
       }
@@ -796,7 +780,7 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
     let local = false;
     try {
       local = hasClass(panel, "IsSelf") || (typeof panel.BAscendantHasClass === "function" && panel.BAscendantHasClass("IsSelf"));
-    } catch (e) {}
+    } catch{}
     return { name: name, hero: hero, account: account, local: local, stats: readTopbarStats(panel) };
   }
 
@@ -836,7 +820,7 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
           break;
         }
       }
-    } catch (e) {}
+    } catch{}
     return stats;
   }
 
@@ -855,30 +839,30 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
           try {
             const v = panel[k];
             if (v !== undefined && v !== null && v !== "" && typeof v !== "function" && typeof v !== "object") vals.push(k + "=" + String(v).slice(0, 60));
-          } catch (e) {}
+          } catch{}
         }
         diagLog("topbar probe keys=" + own.slice(0, 60).join(","));
         if (vals.length) diagLog("topbar probe vals=" + vals.join(" | ").slice(0, 500));
-      } catch (e) {}
+      } catch{}
       try {
         if (panel.GetDialogVariables) {
           let s = "";
-          try { s = JSON.stringify(panel.GetDialogVariables()); } catch (e) { s = String(panel.GetDialogVariables()); }
+          try { s = JSON.stringify(panel.GetDialogVariables()); } catch{ s = String(panel.GetDialogVariables()); }
           diagLog("topbar probe dlg=" + String(s).slice(0, 500));
         }
-      } catch (e) {}
+      } catch{}
       const ids = ["account_id", "accountid", "accountID", "account", "steamid", "steam_id", "steamId", "xuid", "player_id", "playerid", "playerId", "playerID", "m_playerID", "m_nPlayerID", "hero_id", "HeroID", "heroid", "heroId", "team", "team_id", "m_iSteamID", "m_steamID"];
       const attrHits = [];
       for (let i = 0; i < ids.length; i += 1) {
         try {
           if (panel.GetAttributeString) { const v = panel.GetAttributeString(ids[i], ""); if (v) attrHits.push(ids[i] + "=" + v); }
-        } catch (e) {}
+        } catch{}
         try {
           if (panel.GetAttributeInt) { const v = panel.GetAttributeInt(ids[i], -1); if (v > 0) attrHits.push(ids[i] + "=i" + v); }
-        } catch (e) {}
+        } catch{}
       }
       if (attrHits.length) diagLog("topbar probe attr=" + attrHits.join(" | "));
-    } catch (e) {}
+    } catch{}
   }
 
   function refreshTopbarIdentity() {
@@ -907,7 +891,7 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
           // game builds
           if (!State.reconNext || nowMs() >= State.reconNext) {
             State.reconNext = nowMs() + 90000;
-            try { reconScene(); } catch (e) {}
+            try { reconScene(); } catch{}
           }
         }
         return;
@@ -978,10 +962,6 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
   }
 
 
-  function findFirstPanelByType(root, type) {
-    const matches = findAllPanelsByType(root, type);
-    return matches.length ? matches[0] : null;
-  }
 
   // Hud 根上是否挂了 ShowEscapeMenu class(ESC 菜单打开标志,showrank 同款机制)。
   // 沿父链找 paneltype=CitadelHud 且 id=Hud 的祖先再 BHasClass,兼容 getRoot 顶点差异。
@@ -989,15 +969,15 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
     if (!isValid(root)) return false;
     try {
       if (typeof root.BHasClass === "function" && root.BHasClass(ESCAPE_OPEN_CLASS)) return true;
-    } catch (e) {}
+    } catch{}
     try {
       if (typeof root.BAscendantHasClass === "function" && root.BAscendantHasClass(ESCAPE_OPEN_CLASS)) return true;
-    } catch (e) {}
+    } catch{}
     for (let p = root, d = 0; isValid(p) && d < 24; p = (p.GetParent ? p.GetParent() : null), d += 1) {
       try {
         if (String(p.paneltype || "") === "CitadelHud" && (String(p.id || "") === "Hud" || panelId(p) === "Hud") &&
             typeof p.BHasClass === "function" && p.BHasClass(ESCAPE_OPEN_CLASS)) return true;
-      } catch (e) {}
+      } catch{}
     }
     // getRoot() 可能走到比 CitadelHud 更顶层的容器(root=顶层 Panel,CitadelHud 是子孙):
     // 向下原生遍历 ShowEscapeMenu class(无预算限制,recon 验证 FindChildrenWithClassTraverse 可用)
@@ -1006,7 +986,7 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
         const m = root.FindChildrenWithClassTraverse(ESCAPE_OPEN_CLASS) || [];
         if (m.length > 0) return true;
       }
-    } catch (e) {}
+    } catch{}
     return false;
   }
 
@@ -1022,14 +1002,14 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
           if (p.visible === false) return false;
         }
       }
-    } catch (e) {}
+    } catch{}
     if (isValid(root) && hudHasEscapeClass(root)) return true;
     // showrank 同款:从 escapeRoot 沿父链找 CitadelHud/Hud 根再查 class
     for (let p = escapeRoot, d = 0; isValid(p) && d < 24; p = (p.GetParent ? p.GetParent() : null), d += 1) {
       try {
         if (String(p.paneltype || "") === "CitadelHud" && (String(p.id || "") === "Hud" || panelId(p) === "Hud") &&
             typeof p.BHasClass === "function" && p.BHasClass(ESCAPE_OPEN_CLASS)) return true;
-      } catch (e) {}
+      } catch{}
     }
     // 不再用 PlayersTab.visible 兑底判定:常驻面板在菜单关闭时 visible 仍为 undefined(误判打开),
     // 导致 captureEscapeRosterAccounts/scanSteamIdRows/probeEscapeTooltip 持续全树扫描(掉帧+刷屏)
@@ -1049,7 +1029,7 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
       const clsPanels = [];
       collectPanelsByClasses(root, [LCT_PROFILE_CARD_CLASS], 40, clsPanels);
       if (clsPanels.length && isValid(clsPanels[0])) return clsPanels[0];
-    } catch (e) {}
+    } catch{}
     for (let t = 0; t < PROFILE_CARD_TYPE_ALTS.length; t += 1) {
       const m = scanPanelsByType(root, PROFILE_CARD_TYPE_ALTS[t], 20, 1200);
       if (m.length && isValid(m[0])) return m[0];
@@ -1073,7 +1053,7 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
       const clsPanels = [];
       collectPanelsByClasses(root, [LCT_PROFILE_CARD_CLASS], 40, clsPanels);
       for (let i = 0; i < clsPanels.length; i += 1) add(clsPanels[i]);
-    } catch (e) {}
+    } catch{}
     // 2) type 扫描兜底(多版本兼容;预算收紧)
     for (let t = 0; t < PROFILE_CARD_TYPE_ALTS.length; t += 1) {
       const m = scanPanelsByType(root, PROFILE_CARD_TYPE_ALTS[t], 32, 2000);
@@ -1121,7 +1101,7 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
       } else {
         $.DispatchEvent("DropInputFocus");
       }
-    } catch (ignoreFocus) {}
+    } catch{}
   }
 
   function closePlayerCards() {
@@ -1131,7 +1111,7 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
       } else {
         $.DispatchEvent("DismissAllContextMenus");
       }
-    } catch (ignoreDismiss) {}
+    } catch{}
     dropInputFocus();
   }
 
@@ -1167,7 +1147,7 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
       const escRoot = isValid(State.escRoot) ? State.escRoot : null;
       if (isValid(escRoot)) {
         let escOpen = false;
-        try { escOpen = isEscapeMenuOpen(escRoot, root); } catch (e) {}
+        try { escOpen = isEscapeMenuOpen(escRoot, root); } catch{}
         if (escOpen) {
           const listRows = [];
           collectPanelsByClasses(escRoot, [LCT_PLAYER_ROW_CLASS], 40, listRows);
@@ -1184,7 +1164,7 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
       for (let i = 0; i < candidates.length; i += 1) {
         const row = candidates[i];
         let hovered = false;
-        try { hovered = !!(row.BHasHoverStyle && row.BHasHoverStyle()); } catch (e) {}
+        try { hovered = !!(row.BHasHoverStyle && row.BHasHoverStyle()); } catch{}
         if (!hovered) continue;
         let name = safeText(findClass(row, TOPBAR_PLAYER_NAME_CLASS));
         if (!name) name = safeText(findChild(row, "PlayerName")) || safeText(findChild(row, "UserName"));
@@ -1194,7 +1174,7 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
         State.hoverRow = { panel: row, hero: hero, name: name, t: nowMs() };
         break;
       }
-    } catch (e) {}
+    } catch{}
   }
 
   // 名单签名:英雄|昵称 组合,换局(顶栏阵容变化)后强制重采 steamid
@@ -1223,7 +1203,7 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
       detectHoverRow(true); // 资料卡出现时立即刷新悬停行,供配对使用(绕过节流)
       const panels = findVisibleProfilePanels(root);
       for (let i = 0; i < panels.length; i += 1) rememberProfileIdentity(panels[i]);
-    } catch (e) {}
+    } catch{}
   }
 
   function finishSteamIdRoster(session, complete) {
@@ -1266,7 +1246,7 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
           learnDiscoveredAccount(hits);
         }
         if (cards.length) session.lastCardFp = dumpProfileFingerprint(cards[0]);
-      } catch (e) {}
+      } catch{}
       State.accountByHero = State.accountByHero || {};
       State.accountByHero[row.hero] = account;
       State.accountByName = State.accountByName || {};
@@ -1325,16 +1305,16 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
       // 悬停模拟:MouseOver 优先(资料卡由 hover 触发),异常再退到 Activated
       try {
         $.DispatchEvent("MouseOver", row.mainContents, "mouse");
-      } catch (eOver) {
+      } catch{
         try {
           $.DispatchEvent("Activated", row.mainContents, "mouse");
-        } catch (eAct) {
+        } catch{
           session.index += 1;
           probeNextSteamIdRow(session);
           return;
         }
       }
-    } catch (e) {
+    } catch{
       session.index += 1;
       probeNextSteamIdRow(session);
       return;
@@ -1368,7 +1348,7 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
           row = row.GetParent ? row.GetParent() : null;
         }
       }
-    } catch (e) {}
+    } catch{}
     return out;
   }
 
@@ -1385,7 +1365,7 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
       const clsPanels = [];
       collectPanelsByClasses(root, [LCT_PLAYER_ROW_CLASS], 60, clsPanels);
       for (let i = 0; i < clsPanels.length; i += 1) addRowPanel(clsPanels[i]);
-    } catch (e) {}
+    } catch{}
     // 2) type 扫描兜底(多版本兼容)
     for (let t = 0; t < PLAYER_ROW_TYPE_ALTS.length; t += 1) {
       const m = findAllPanelsByType(root, PLAYER_ROW_TYPE_ALTS[t]);
@@ -1413,7 +1393,7 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
             cur = cur.GetParent ? cur.GetParent() : null;
           }
         }
-      } catch (e) {}
+      } catch{}
     }
     const rows = [];
     for (let i = 0; i < panels.length; i += 1) {
@@ -1458,31 +1438,6 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
     probeNextSteamIdRow(session);
   }
 
-  function startSteamIdRosterPass(root, escapeRoot) {
-    if (State.steamIdRosterCollected && State.steamIdRosterSignature === rowRosterSignature()) return;
-    if (State.steamIdRosterNextAttempt && nowMs() < State.steamIdRosterNextAttempt) return;
-    if (State.steamIdEscape && State.steamIdEscape.escapeRoot === escapeRoot && State.steamIdEscape.started) return;
-    // 阵容/局次变化重置轮次计数;超过上限后本局不再主动悬停模拟(保险网,防止任何误判场景反复打开资料卡)
-    if (State.steamIdRosterSignature !== rowRosterSignature()) State.steamIdRosterAttempts = 0;
-    if ((State.steamIdRosterAttempts || 0) >= STEAMID_ROSTER_MAX_ATTEMPTS) {
-      State.steamIdRosterCollected = true;
-      State.steamIdRosterSignature = rowRosterSignature();
-      return;
-    }
-    State.steamIdRosterAttempts = (State.steamIdRosterAttempts || 0) + 1;
-    State.steamIdRosterCollected = false; // 换局/阵容变化后重新采集
-    State.steamIdEscape = { root: root, escapeRoot: escapeRoot, rows: [], index: 0, started: true, finished: false };
-    closePlayerCards();
-    const playersTab = findChild(escapeRoot, "PlayersTab") || findChild(root, "PlayersTab");
-    if (isValid(playersTab)) {
-      try {
-        $.DispatchEvent("Activated", playersTab);
-      } catch (e) {}
-    }
-    $.Schedule(STEAMID_ROW_DELAYS[0], function () {
-      collectSteamIdRows(State.steamIdEscape, 0);
-    });
-  }
 
   function findEscapeMenuRoot(root) {
     if (!isValid(root)) return null;
@@ -1507,7 +1462,7 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
           cur = parent;
         }
       }
-    } catch (e) {}
+    } catch{}
     // 3) id 兜底:ESC 菜单固定子元素反查根
     for (let i = 0; i < ESCAPE_MENU_IDS.length; i += 1) {
       const p = findChild(root, ESCAPE_MENU_IDS[i]);
@@ -1527,7 +1482,7 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
     // 4) root 兜底:Hud 根带 ShowEscapeMenu class 时,ESC 根可能是其子面板
     try {
       if (typeof root.BHasClass === "function" && root.BHasClass(ESCAPE_OPEN_CLASS)) return root;
-    } catch (e) {}
+    } catch{}
     return null;
   }
 
@@ -1563,7 +1518,7 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
           diagLog("tooltip steamid text=" + h.text + " id=" + h.id + " class=" + h.cls + " chain=" + chain.join(" <- "));
         }
       }
-    } catch (e) {}
+    } catch{}
   }
 
   // ESC 玩家列表被动采集(零交互,只读不派发事件):打开 ESC 时玩家行渲染即绑定
@@ -1573,12 +1528,12 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
     try {
       if (!isValid(escapeRoot)) return;
       let escOpen = false;
-      try { escOpen = isEscapeMenuOpen(escapeRoot, root); } catch (e) {}
+      try { escOpen = isEscapeMenuOpen(escapeRoot, root); } catch{}
       if (!escOpen) {
         // class 判据失效的版本兜底:BIsVisible 为真即视为 ESC 打开(常驻面板关闭时不可见)
         try {
           if (typeof escapeRoot.BIsVisible === "function" && escapeRoot.BIsVisible()) escOpen = true;
-        } catch (e) {}
+        } catch{}
       }
       if (!escOpen) return;
       if (State.escRosterNextScan && nowMs() < State.escRosterNextScan) return;
@@ -1625,7 +1580,7 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
       if (gainedHero || gainedName) {
         diagOnce("steamid_gained", "steamid roster rows=" + rows.length + " gainedHero=" + gainedHero + " gainedName=" + gainedName + " totalAccounts=" + Object.keys(State.accountByName || {}).length);
       }
-    } catch (e) {}
+    } catch{}
   }
 
   // ESC 左栏注入「翻译设置」入口:把现有 LCTSettingsPanel 临时挂到 ESC 根,
@@ -1651,7 +1606,7 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
     const top = getRoot();
     if (!isValid(top)) return false;
     if (!settingsHomeParent || !isValid(settingsHomeParent)) {
-      try { settingsHomeParent = panel.GetParent ? panel.GetParent() : null; } catch (e) { settingsHomeParent = null; }
+      try { settingsHomeParent = panel.GetParent ? panel.GetParent() : null; } catch{ settingsHomeParent = null; }
     }
     if (!escHostParent || !isValid(escHostParent)) escHostParent = settingsHomeParent;
     let moved = false;
@@ -1670,7 +1625,7 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
     if (escBackdrop && isValid(escBackdrop)) return;
     try {
       let existing = null;
-      try { existing = findChild(escRoot, "LCTSettingsBackdrop"); } catch (e) {}
+      try { existing = findChild(escRoot, "LCTSettingsBackdrop"); } catch{}
       if (existing) { escBackdrop = existing; return; }
       const bd = $.CreatePanel("Panel", escRoot, "LCTSettingsBackdrop");
       if (!bd) return;
@@ -1695,12 +1650,12 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
       ? escHostedPanel
       : findChild(getRoot(), SETTINGS_PANEL_ID);
     if (escBackdrop && isValid(escBackdrop)) {
-      try { escBackdrop.DeleteAsync(0); } catch (e) {}
+      try { escBackdrop.DeleteAsync(0); } catch{}
     }
     escBackdrop = null;
     const home = (escHostParent && isValid(escHostParent)) ? escHostParent : settingsHomeParent;
     if (panel && isValid(panel) && home && isValid(home)) {
-      try { panel.SetParent(home); } catch (e) {}
+      try { panel.SetParent(home); } catch{}
     }
     escHostParent = null;
     settingsHomeParent = null;
@@ -1719,7 +1674,7 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
       return;
     }
     if (!escHostParent) {
-      try { escHostParent = panel.GetParent ? panel.GetParent() : null; } catch (e) {}
+      try { escHostParent = panel.GetParent ? panel.GetParent() : null; } catch{}
     }
     escHostedPanel = panel;
     ensureEscapeBackdrop(escRoot);
@@ -1737,15 +1692,15 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
   // 读面板 id / 文本:id 属性在这版引擎上不一定挂在 .id 上,两个来源都试
   function panelIdOf(p) {
     let id = "";
-    try { id = String(p.id || ""); } catch (e) {}
-    if (!id) { try { id = String(p.GetAttributeString("id") || ""); } catch (e) {} }
+    try { id = String(p.id || ""); } catch{}
+    if (!id) { try { id = String(p.GetAttributeString("id") || ""); } catch{} }
     return id;
   }
 
   function panelTextOf(p) {
     let tx = "";
-    try { tx = String(p.text || ""); } catch (e) {}
-    if (!tx) { try { tx = String(p.GetAttributeString("text") || ""); } catch (e) {} }
+    try { tx = String(p.text || ""); } catch{}
+    if (!tx) { try { tx = String(p.GetAttributeString("text") || ""); } catch{} }
     return tx;
   }
 
@@ -1761,7 +1716,7 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
       visited += 1;
       const id = panelIdOf(p);
       let type = "";
-      try { type = String(p.paneltype || ""); } catch (e) {}
+      try { type = String(p.paneltype || ""); } catch{}
       let tx = panelTextOf(p);
       if (tx.length > 12) tx = tx.slice(0, 12);
       if (id || tx) out.push(item.path + ":" + id + ":" + type + (tx ? ":" + tx : ""));
@@ -1778,7 +1733,7 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
     let guard = 0;
     while (guard < 40 && isValid(root)) {
       let parent = null;
-      try { parent = root.GetParent ? root.GetParent() : null; } catch (e) {}
+      try { parent = root.GetParent ? root.GetParent() : null; } catch{}
       if (!isValid(parent)) break;
       root = parent;
       guard += 1;
@@ -1810,10 +1765,10 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
   // 这里照做:优先 #SubOptions 作宿主,尽量排在 #quit 之前。
   function findEscapeSubOptions(escapeRoot) {
     let sub = null;
-    try { sub = findChild(escapeRoot, "SubOptions"); } catch (e) {}
+    try { sub = findChild(escapeRoot, "SubOptions"); } catch{}
     if (isValid(sub)) return sub;
     const top = findEscapeLayoutRoot(escapeRoot);
-    try { sub = findChild(top, "SubOptions"); } catch (e) {}
+    try { sub = findChild(top, "SubOptions"); } catch{}
     if (isValid(sub)) return sub;
     sub = findPanelByIdWalk(top, "SubOptions", 3000);
     if (isValid(sub)) return sub;
@@ -1823,7 +1778,7 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
   // 原生「设置」行作锚点:入口插在「玩家反馈」与「设置」之间,即 QOL 的位置
   function findEscapeRowAnchor(sub) {
     let settings = null;
-    try { settings = findChild(sub, "Settings"); } catch (e) {}
+    try { settings = findChild(sub, "Settings"); } catch{}
     if (!isValid(settings)) settings = findPanelByIdWalk(sub, "Settings", 400);
     if (!isValid(settings)) {
       // 文本兜底:QOL 布局可能改了 id,直接找「设置 / Settings」标签
@@ -1888,11 +1843,11 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
       btn.style.marginLeft = "0px";
       btn.style.marginTop = "2px";
       btn.style.marginBottom = "2px";
-    } catch (e) {}
+    } catch{}
     const label = findChild(btn, ESC_SETTINGS_BUTTON_ID + "Label");
     if (isValid(label)) {
       label.text = "DEADLOCKLINGUA";
-      try { label.style.height = "fit-children"; } catch (e) {}
+      try { label.style.height = "fit-children"; } catch{}
     }
     const icon = findChild(btn, ESC_SETTINGS_BUTTON_ID + "Icon");
     if (isValid(icon)) {
@@ -1900,21 +1855,21 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
         try {
           if (typeof icon.MoveChildAfter === "function") icon.MoveChildAfter(label);
           else if (typeof label.MoveChildBefore === "function") label.MoveChildBefore(icon);
-        } catch (e) {}
+        } catch{}
       }
-      try { icon.style.visibility = "visible"; } catch (e) {}
-      try { icon.style.opacity = "0.35"; } catch (e) {}
-      try { icon.style.width = "20px"; } catch (e) {}
-      try { icon.style.height = "20px"; } catch (e) {}
-      try { icon.style.marginLeft = "8px"; } catch (e) {}
-      try { icon.style.marginRight = "0px"; } catch (e) {}
+      try { icon.style.visibility = "visible"; } catch{}
+      try { icon.style.opacity = "0.35"; } catch{}
+      try { icon.style.width = "20px"; } catch{}
+      try { icon.style.height = "20px"; } catch{}
+      try { icon.style.marginLeft = "8px"; } catch{}
+      try { icon.style.marginRight = "0px"; } catch{}
     }
   }
 
   function ensureEscapeSettingsButton(escapeRoot) {
     if (!isValid(escapeRoot)) return;
     let pick;
-    try { pick = pickEscapeSettingsHost(escapeRoot); } catch (e) { pick = { host: escapeRoot, anchor: null }; }
+    try { pick = pickEscapeSettingsHost(escapeRoot); } catch{ pick = { host: escapeRoot, anchor: null }; }
     const host = pick.host;
     const anchor = pick.anchor;
     const placeBefore = function (panel) {
@@ -1922,14 +1877,14 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
       // 三种排序方式依次尝试:本作 MoveChild* 在子面板上表现不可靠,所以都试一遍
       try {
         if (typeof panel.MoveChildBefore === "function") panel.MoveChildBefore(anchor);
-      } catch (e) {}
+      } catch{}
       try {
         const par = panel.GetParent ? panel.GetParent() : null;
         if (isValid(par) && typeof par.MoveChildBefore === "function") par.MoveChildBefore(panel, anchor);
-      } catch (e) {}
+      } catch{}
       try {
         if (typeof anchor.MoveChildAfter === "function") anchor.MoveChildAfter(panel);
-      } catch (e) {}
+      } catch{}
       // 兜底:从锚点起(含锚点)到底的兄弟依次重挂一次父节点,
       // SetParent 会把它追加到末尾,结果入口被挤到锚点之前
       try {
@@ -1945,10 +1900,10 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
             if (hit && sib !== panel) tail.push(sib);
           }
           for (let i = 0; i < tail.length; i += 1) {
-            try { tail[i].SetParent(par); } catch (e) {}
+            try { tail[i].SetParent(par); } catch{}
           }
         }
-      } catch (e) {}
+      } catch{}
     };
     // 排序结果核对:把宿主当前子项按顺序打印一次
     const logOrder = function () {
@@ -1964,18 +1919,18 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
           parts.push(i + ":" + (panelIdOf(p) || "-") + (tx ? "(" + tx + ")" : ""));
         }
         diagLog("escorder", "PANORAMA: ESC order host=" + panelIdOf(host) + " [" + parts.join(",") + "]");
-      } catch (e) {}
+      } catch{}
     };
     try {
       let existing = null;
-      try { existing = findChild(getRoot(), ESC_SETTINGS_BUTTON_ID); } catch (e) {}
-      if (!isValid(existing)) { try { existing = findChild(escapeRoot, ESC_SETTINGS_BUTTON_ID); } catch (e) {} }
+      try { existing = findChild(getRoot(), ESC_SETTINGS_BUTTON_ID); } catch{}
+      if (!isValid(existing)) { try { existing = findChild(escapeRoot, ESC_SETTINGS_BUTTON_ID); } catch{} }
       if (!isValid(existing)) existing = findPanelByIdWalk(findEscapeLayoutRoot(escapeRoot), ESC_SETTINGS_BUTTON_ID, 3000);
       if (isValid(existing)) {
         // 旧构建曾把它挂在 #LeftStripe / 布局根下(排在屏幕外),这里纠正父节点与外观
         const cur = existing.GetParent ? existing.GetParent() : null;
         if (cur !== host) {
-          try { existing.SetParent(host); } catch (e) {}
+          try { existing.SetParent(host); } catch{}
           escSettingsButtonLogged = false;
         }
         styleEscapeSettingsButton(existing);
@@ -1987,7 +1942,7 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
       if (!btn) return;
       btn.AddClass("nav_menu_item");
       btn.AddClass("minor");
-      try { btn.style.flowChildren = "right"; } catch (e) {}
+      try { btn.style.flowChildren = "right"; } catch{}
       // 先建文字、后建齿轮,保证齿轮在文字右侧(不依赖 MoveChildAfter)
       const label = $.CreatePanel("Label", btn, ESC_SETTINGS_BUTTON_ID + "Label");
       if (label) {
@@ -2006,7 +1961,7 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
       const hasSetPanelEvent = typeof btn.SetPanelEvent === "function";
       if (hasSetPanelEvent) btn.SetPanelEvent("onactivate", handler);
       else {
-        try { btn.SetAttributeString("onactivate", "LCTEscapeOpenSettings();"); } catch (e) {}
+        try { btn.SetAttributeString("onactivate", "LCTEscapeOpenSettings();"); } catch{}
       }
       if (!escSettingsButtonLogged) {
         escSettingsButtonLogged = true;
@@ -2053,7 +2008,7 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
         State.steamIdDiagLogged = true;
         diagLog("steamid roster: escape menu not found yet");
       }
-    } catch (e) {}
+    } catch{}
   }
 
 
@@ -2065,29 +2020,29 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
           const v = panel.GetDialogVariableString(keys[i], "");
           if (v) return String(v);
         }
-      } catch (e) {}
+      } catch{}
       try {
         if (panel.GetDialogVariable) {
           const v = panel.GetDialogVariable(keys[i]);
           if (v !== undefined && v !== null && v !== "") return String(v);
         }
-      } catch (e) {}
+      } catch{}
       try {
         if (panel.GetDialogVariableInt) {
           const v = panel.GetDialogVariableInt(keys[i], -1);
           if (v > 0) return String(v);
         }
-      } catch (e) {}
+      } catch{}
       try {
         if (panel.GetAttributeString) {
           const v = panel.GetAttributeString(keys[i], "");
           if (v) return String(v);
         }
-      } catch (e) {}
+      } catch{}
       try {
         const v = panel[keys[i]];
         if (v !== undefined && v !== null && v !== "" && typeof v !== "object") return String(v);
-      } catch (e) {}
+      } catch{}
     }
     return "";
   }
@@ -2114,7 +2069,7 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
     const fp = { byId: {}, byClass: {}, texts: [], dlg: {}, attrs: {}, props: {} };
     try {
       collectLabelFingerprint(panel, 0, PROFILE_DISCOVERY_MAX_DEPTH, fp, { visited: 0, labels: 0 });
-    } catch (e) {}
+    } catch{}
     for (let i = 0; i < PROFILE_DISCOVERY_DLG_KEYS.length; i += 1) {
       const k = PROFILE_DISCOVERY_DLG_KEYS[i];
       const v = profileString(panel, [k]);
@@ -2132,9 +2087,9 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
         try {
           const v = panel[k];
           if (v !== undefined && v !== null && v !== "" && typeof v !== "function" && typeof v !== "object") fp.props[k] = String(v);
-        } catch (e) {}
+        } catch{}
       }
-    } catch (e) {}
+    } catch{}
     return fp;
   }
 
@@ -2232,7 +2187,7 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
     const out = { texts: [] };
     try {
       collectLabelFingerprint(panel, 0, PROFILE_DISCOVERY_MAX_DEPTH, out, { visited: 0, labels: 0 });
-    } catch (e) {}
+    } catch{}
     for (let i = 0; i < out.texts.length; i += 1) {
       const t = String(out.texts[i] || "").trim();
       if (/^7656119\d{10}$/.test(t)) return t;
@@ -2377,7 +2332,7 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
         if (isValid(page) && (PROFILE_PAGE_TYPE_ALTS.indexOf(page.paneltype) >= 0 || page.paneltype === "CitadelProfileCard")) add(page);
       }
       for (let i = 0; i < profiles.length; i += 1) rememberProfileIdentity(profiles[i]);
-    } catch (e) {}
+    } catch{}
   }
 
   function scanProfileCardsLoop() {
@@ -2407,7 +2362,7 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
       for (let p = team, d = 0; isValid(p) && d < 12; p = (p.GetParent ? p.GetParent() : null), d += 1) {
         if (String(p.paneltype || "") === SCOREBOARD_TYPE) return true;
       }
-    } catch (e) {}
+    } catch{}
     // MatchID 是赛后记分板独有(局内 Tab 计分板没有);TimeLabel 太通用,不作判据
     return isValid(findChild(root, SCOREBOARD_MATCH_ID));
   }
@@ -2421,11 +2376,11 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
         if (!isValid(team)) continue;
         // 只认赛后记分板:Team 容器里有 Player 行,且根/祖先类型或 MatchID 匹配
         const hasPlayers = team.FindChildrenWithClassTraverse
-          ? (function () { try { return (team.FindChildrenWithClassTraverse(SCOREBOARD_PLAYER_CLASS) || []).length > 0; } catch (e) { return false; } })()
+          ? (function () { try { return (team.FindChildrenWithClassTraverse(SCOREBOARD_PLAYER_CLASS) || []).length > 0; } catch{ return false; } })()
           : false;
         if (hasPlayers && isPostGameScoreboardRoot(root, team)) return root;
       }
-    } catch (e) {}
+    } catch{}
     return null;
   }
 
@@ -2445,7 +2400,7 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
     }
     try {
       p.local = hasClass(row, SCOREBOARD_LOCAL_CLASS) || (typeof row.BAscendantHasClass === "function" && row.BAscendantHasClass(SCOREBOARD_LOCAL_CLASS));
-    } catch (e) {}
+    } catch{}
     // passive steamid: post-game scoreboard rows may carry account data
     p.steamid = readProfileAccount(row);
     if (!State.scoreboardProbeLogged && p.steamid) {
@@ -2516,7 +2471,7 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
         diagLog("post-game scoreboard identities captured=" + idLines.length);
         bridgePost("log", { matchId: matchId, lines: idLines }, function () {});
       }
-    } catch (e) {}
+    } catch{}
   }
 
   // 收集面板下所有 Label 文本(处理 Text/Ping 等不同 contents 结构)
@@ -2560,7 +2515,7 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
       try {
         const v = panel.GetAttributeString ? panel.GetAttributeString(attr, "") : "";
         if (v) return String(v);
-      } catch (e) {}
+      } catch{}
     }
     return "";
   }
@@ -2573,11 +2528,11 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
           const v = panel.GetAttributeInt(attr, -1);
           if (v > 0) return String(v);
         }
-      } catch (e) {}
+      } catch{}
       try {
         const v = panel.GetAttributeString ? panel.GetAttributeString(attr, "") : "";
         if (v && v !== "0") return String(v);
-      } catch (e) {}
+      } catch{}
     }
     return "";
   }
@@ -2590,7 +2545,7 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
       try {
         const v = panel[attrs[i]];
         if (v !== undefined && v !== null && v !== "") return String(v);
-      } catch (e) {}
+      } catch{}
     }
     return "";
   }
@@ -2601,7 +2556,7 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
       try {
         const v = panel[attrs[i]];
         if (v !== undefined && v !== null && v !== "" && Number(v) > 0) return String(v);
-      } catch (e) {}
+      } catch{}
     }
     return "";
   }
@@ -2616,19 +2571,19 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
           const v = panel.GetDialogVariableString(keys[i], "");
           if (v) return String(v);
         }
-      } catch (e) {}
+      } catch{}
       try {
         if (panel.GetDialogVariable) {
           const v = panel.GetDialogVariable(keys[i]);
           if (v !== undefined && v !== null && v !== "") return String(v);
         }
-      } catch (e) {}
+      } catch{}
       try {
         if (panel.GetDialogVariableInt) {
           const v = panel.GetDialogVariableInt(keys[i], -1);
           if (v > 0) return String(v);
         }
-      } catch (e) {}
+      } catch{}
     }
     return "";
   }
@@ -2641,7 +2596,7 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
           const v = panel.GetDialogVariableInt(keys[i], -1);
           if (v > 0) return String(v);
         }
-      } catch (e) {}
+      } catch{}
     }
     return "";
   }
@@ -2650,13 +2605,13 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
   function panelId(panel) {
     try {
       return String((panel.GetAttributeString ? panel.GetAttributeString("id", "") : "") || "");
-    } catch (e) { return ""; }
+    } catch{ return ""; }
   }
 
   function panelClass(panel) {
     try {
       return String((panel.GetAttributeString ? panel.GetAttributeString("class", "") : "") || "");
-    } catch (e) { return ""; }
+    } catch{ return ""; }
   }
 
   function panelPropSummary(panel) {
@@ -2664,12 +2619,12 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
     try {
       const own = Object.keys(panel) || [];
       for (let i = 0; i < own.length && i < 40; i += 1) keys.push(own[i]);
-    } catch (e) {}
+    } catch{}
     const out = [];
     for (let i = 0; i < keys.length; i += 1) {
       const k = keys[i];
       let v = "";
-      try { v = String(panel[k]); } catch (e) {}
+      try { v = String(panel[k]); } catch{}
       if (v && v.length <= 80) out.push(k + "=" + v);
     }
     return out.join(",");
@@ -2682,7 +2637,7 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
       try {
         const v = panelDialogString(panel, [keys[i]]);
         if (v) out.push(keys[i] + "=" + v);
-      } catch (e) {}
+      } catch{}
     }
     return out.join(",");
   }
@@ -2694,7 +2649,7 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
       try {
         const v = panel.GetAttributeString ? panel.GetAttributeString(attrs[i], "") : "";
         if (v) out.push(attrs[i] + "=" + v);
-      } catch (e) {}
+      } catch{}
     }
     return out.join(",");
   }
@@ -2729,7 +2684,7 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
     try {
       const own = Object.keys(img) || [];
       diagLog("heroimg probe ownKeys=" + own.slice(0, 60).join(","));
-    } catch (e) {}
+    } catch{}
     try {
       const protoNames = [];
       let proto = Object.getPrototypeOf(img);
@@ -2739,12 +2694,12 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
         proto = Object.getPrototypeOf(proto);
       }
       diagLog("heroimg probe proto=" + protoNames.join(","));
-    } catch (e) {}
+    } catch{}
     const tryGet = function (label, fn) {
       try {
         const v = fn();
         if (v !== undefined && v !== null && v !== "") diagLog("heroimg probe " + label + "=" + String(v));
-      } catch (e) {}
+      } catch{}
     };
     tryGet("src", function () { return img.src; });
     tryGet("GetSource", function () { return img.GetSource ? img.GetSource() : ""; });
@@ -2766,7 +2721,7 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
     tryGet("dv all", function () {
       if (!img.GetDialogVariables) return "";
       let s = "";
-      try { s = JSON.stringify(img.GetDialogVariables()); } catch (e) { s = String(img.GetDialogVariables()); }
+      try { s = JSON.stringify(img.GetDialogVariables()); } catch{ s = String(img.GetDialogVariables()); }
       return s.slice(0, 300);
     });
     tryGet("data", function () { return img.data ? JSON.stringify(img.data).slice(0, 300) : ""; });
@@ -2792,9 +2747,9 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
 
   function readImageSource(img) {
     if (!isValid(img)) return "";
-    try { if (img.src) return String(img.src); } catch (e) {}
-    try { if (typeof img.GetSource === "function") { const v = img.GetSource(); if (v) return String(v); } } catch (e) {}
-    try { if (img.style && img.style.backgroundImage) return String(img.style.backgroundImage); } catch (e) {}
+    try { if (img.src) return String(img.src); } catch{}
+    try { if (typeof img.GetSource === "function") { const v = img.GetSource(); if (v) return String(v); } } catch{}
+    try { if (img.style && img.style.backgroundImage) return String(img.style.backgroundImage); } catch{}
     return "";
   }
 
@@ -2835,7 +2790,7 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
           const v = img[nameFns[i]]();
           if (v) return normalizeHeroName(normName(String(v)));
         }
-      } catch (e) {}
+      } catch{}
     }
     const idFns = ["GetHeroID", "GetHeroId", "GetHeroIndex", "GetHeroIDValue"];
     for (let i = 0; i < idFns.length; i += 1) {
@@ -2844,7 +2799,7 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
           const v = img[idFns[i]]();
           if (v !== undefined && v !== null && Number(v) > 0 && HERO_ID_TO_NAME[String(v)]) return HERO_ID_TO_NAME[String(v)];
         }
-      } catch (e) {}
+      } catch{}
     }
     return "";
   }
@@ -2874,14 +2829,14 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
         if (pv) return normalizeHeroName(String(pv));
         const dv = panelDialogString(p, ["hero_name", "heroName", "heroname", "hero", "character_name", "selected_hero", "hero_id", "heroid", "heroId", "heroID", "HeroID", "m_nHeroID", "selected_hero_id", "selectedHeroId"]);
         if (dv) return normalizeHeroName(String(dv));
-        try { if (p.hero) return normalizeHeroName(String(p.hero)); } catch (e) {}
+        try { if (p.hero) return normalizeHeroName(String(p.hero)); } catch{}
         const img = findChild(p, "HeroImage");
         if (isValid(img)) {
           const iv = panelAttrString(img, attrs);
           if (iv) return normalizeHeroName(String(iv));
           const ipv = panelPropString(img, attrs);
           if (ipv) return normalizeHeroName(String(ipv));
-          try { if (img.hero) return normalizeHeroName(String(img.hero)); } catch (e) {}
+          try { if (img.hero) return normalizeHeroName(String(img.hero)); } catch{}
         }
       }
       const heroImg = findChild(row, "HeroImage");
@@ -2895,7 +2850,7 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
           if (imgHero2) return imgHero2;
         }
       }
-    } catch (e) {}
+    } catch{}
     return "";
   }
 
@@ -2922,7 +2877,7 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
       }
       const hero = readHeroFromRow(row);
       if (hero && HERO_NAME_TO_ID[hero]) return HERO_NAME_TO_ID[hero];
-    } catch (e) {}
+    } catch{}
     return "";
   }
 
@@ -2960,7 +2915,7 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
           if (ipv) return String(ipv);
         }
       }
-    } catch (e) {}
+    } catch{}
     return "";
   }
 
@@ -3017,7 +2972,7 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
       try {
         const v = obj[keys[i]];
         if (v !== undefined && v !== null && v !== "" && typeof v !== "object") return String(v);
-      } catch (e) {}
+      } catch{}
     }
     return "";
   }
@@ -3029,7 +2984,7 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
         const v = obj[keys[i]];
         const n = Number(v);
         if (Number.isFinite(n) && n > 0) return n;
-      } catch (e) {}
+      } catch{}
     }
     return -1;
   }
@@ -3065,20 +3020,20 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
         const id = Number(Game.GetLocalPlayerID());
         if (Number.isFinite(id) && id >= 0) return id;
       }
-    } catch (e) {}
+    } catch{}
     try {
       if (typeof Players !== "undefined" && isCallable(Players.GetLocalPlayer)) {
         const id = Number(Players.GetLocalPlayer());
         if (Number.isFinite(id) && id >= 0) return id;
       }
-    } catch (e) {}
+    } catch{}
     return -1;
   }
 
   function gameLocalPlayerInfo() {
     try {
       if (typeof Game !== "undefined" && isCallable(Game.GetLocalPlayerInfo)) return Game.GetLocalPlayerInfo();
-    } catch (e) {}
+    } catch{}
     return null;
   }
 
@@ -3086,11 +3041,11 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
     let pi = null;
     try {
       if (typeof Game !== "undefined" && isCallable(Game.GetPlayerInfo)) pi = Game.GetPlayerInfo(id);
-    } catch (e) {}
+    } catch{}
     if (!pi) {
       try {
         if (typeof Players !== "undefined" && isCallable(Players.GetPlayerInfo)) pi = Players.GetPlayerInfo(id);
-      } catch (e) {}
+      } catch{}
     }
     return pi;
   }
@@ -3111,7 +3066,7 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
           return ids;
         }
       }
-    } catch (e) {}
+    } catch{}
     for (let i = 0; i < PLAYER_INFO_SCAN_LIMIT; i += 1) ids.push(i);
     return ids;
   }
@@ -3135,7 +3090,7 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
           if (acc) info.steamid = normalizeSteamValue(acc);
         }
       }
-    } catch (e) {}
+    } catch{}
   }
 
   function playerInfoName(pi) {
@@ -3175,20 +3130,20 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
           if (typeof Players !== "undefined" && isCallable(Players.GetPlayerSteamID)) {
             for (let i = 0; i < PLAYER_INFO_SCAN_LIMIT; i += 1) {
               let pn = "";
-              try { pn = Players.GetPlayerName ? Players.GetPlayerName(i) : ""; } catch (e) {}
+              try { pn = Players.GetPlayerName ? Players.GetPlayerName(i) : ""; } catch{}
               if (normName(pn) === key) {
                 info.steamid = String(Players.GetPlayerSteamID(i) || "");
                 break;
               }
             }
           }
-        } catch (e) {}
+        } catch{}
       }
       if (info.hero || info.heroId || info.steamid) {
         State.nickInfoCache[key] = info;
         return info;
       }
-    } catch (e) {}
+    } catch{}
     return null;
   }
 
@@ -3205,9 +3160,9 @@ const STEAMID_ROSTER_MAX_ATTEMPTS = 3; // 每局主动采集轮次上限(防异�
             const n = Players.GetPlayerName(localId);
             if (n) return String(n);
           }
-        } catch (e) {}
+        } catch{}
       }
-    } catch (e) {}
+    } catch{}
     return "";
   }
 
@@ -3277,7 +3232,7 @@ function resolveSteamId(record) {
         const v = Convars.GetStr(name, "");
         if (v) return String(v).trim();
       }
-    } catch (e) {}
+    } catch{}
     return "";
   }
 
@@ -3300,7 +3255,7 @@ function resolveSteamId(record) {
         id = clean(v);
         if (id) return id;
       }
-    } catch (e) {}
+    } catch{}
     try {
       if (typeof GameStateAPI !== "undefined") {
         // 常见无参 API 名(大小写变体;返回 string 或 { match_id|matchId|id })
@@ -3313,7 +3268,7 @@ function resolveSteamId(record) {
               else id = clean(v);
               if (id) return id;
             }
-          } catch (e) {}
+          } catch{}
         }
         // GetGameInfo / GetServerInfo:遍历键,取含 match/game_id/server 的字符串字段
         for (const fn of ["GetGameInfo", "GetServerInfo"]) {
@@ -3331,13 +3286,13 @@ function resolveSteamId(record) {
                       if (id) return id;
                     }
                   }
-                } catch (e) {}
+                } catch{}
               }
             }
-          } catch (e) {}
+          } catch{}
         }
       }
-    } catch (e) {}
+    } catch{}
     // Game / GameUI 命名空间(Deadlock 特有;与 Dota 的 GameStateAPI 并存)
     for (const ns of [typeof Game !== "undefined" ? Game : null, typeof GameUI !== "undefined" ? GameUI : null]) {
       if (!ns) continue;
@@ -3349,7 +3304,7 @@ function resolveSteamId(record) {
             else id = clean(v);
             if (id) return id;
           }
-        } catch (e) {}
+        } catch{}
       }
     }
     // GameInterfaceAPI 设置键(多候选)
@@ -3363,10 +3318,10 @@ function resolveSteamId(record) {
               id = clean(v);
               if (id) return id;
             }
-          } catch (e) {}
+          } catch{}
         }
       }
-    } catch (e) {}
+    } catch{}
     return "";
   }
 
@@ -3383,14 +3338,14 @@ function resolveSteamId(record) {
           for (const k of Object.keys(ns)) {
             if (typeof ns[k] === "function" && /match|game|server|map/i.test(k)) names.push(prefix + k);
           }
-        } catch (e) {}
+        } catch{}
       };
       scan(typeof GameStateAPI !== "undefined" ? GameStateAPI : null, "GameStateAPI.");
       scan(typeof GameInterfaceAPI !== "undefined" ? GameInterfaceAPI : null, "GameInterfaceAPI.");
       scan(typeof Game !== "undefined" ? Game : null, "Game.");
       scan(typeof GameUI !== "undefined" ? GameUI : null, "GameUI.");
       diagLog("matchId diagnostic: " + (names.length ? names.join(" | ") : "(no match-related API found)"));
-    } catch (e) {}
+    } catch{}
   }
 
   function getMatchId() {
@@ -3412,7 +3367,7 @@ function resolveSteamId(record) {
   function log(msg) {
     try {
       $.Msg(LOG_PREFIX + " " + msg);
-    } catch (e) {}
+    } catch{}
   }
 
   // 诊断日志:带 key 去重,同 key 5s 内只打一次(防 hot-path 刷屏)
@@ -3427,14 +3382,14 @@ function resolveSteamId(record) {
     _diagKeys.set(key, now);
     // 只走 console.log:桥端 tail 会把它写进 bridge.log(格式与旧 /api/v1/diag 一致)。
     // 刻意不再走 BTIPC —— 位信道是 10 字节/轮,一条诊断要好几秒,会把单槽翻译队列堵死。
-    try { $.Msg(LOG_PREFIX + " [diag] " + msg); } catch (e) {}
+    try { $.Msg(LOG_PREFIX + " [diag] " + msg); } catch{}
   }
   // 仅执行一次的诊断日志(无节流)
   const _diagOnceKeys = new Set();
   function diagOnce(key, msg) {
     if (_diagOnceKeys.has(key)) return;
     _diagOnceKeys.add(key);
-    try { $.Msg(LOG_PREFIX + " [diag] " + msg); } catch (e) {}
+    try { $.Msg(LOG_PREFIX + " [diag] " + msg); } catch{}
   }
 
   // ================= 悬浮窗出站通道(console.log) =================
@@ -3456,7 +3411,7 @@ function resolveSteamId(record) {
         k: String(entry.kind || "chat").slice(0, 16),
         t: String(entry.text || "").slice(0, 400),
       }));
-    } catch (e) {}
+    } catch{}
   }
 
   // djb2 哈希:用于生成稳定的译文 Label id(滚动回收后重建用)
@@ -3482,6 +3437,8 @@ function resolveSteamId(record) {
     timeoutMs: 15000,
     chatLog: true, // 聊天日志开关(按比赛 ID 存本地)
     translateOwn: true, // 自己的发言也翻译(默认开)
+    hudLinger: true, // 顶栏气泡驻留:译文在途/刚送达时不让官方气泡消失
+    hudLingerSeconds: 8, // 译文送达后驻留时长(秒);0 = 送达后不驻留,只在途保活
   };
 
   const UI_CONVAR = "lct_ui";
@@ -3491,16 +3448,16 @@ function resolveSteamId(record) {
     let raw = "";
     try {
       if (typeof Convars !== "undefined" && Convars.GetStr) raw = Convars.GetStr(UI_CONVAR, "");
-    } catch (e) {}
+    } catch{}
     if (!raw) {
       try {
         raw = $.GetContextPanel().GetAttributeString(UI_CONVAR, "");
-      } catch (e) {}
+      } catch{}
     }
     if (raw) {
       try {
         Object.assign(cfg, JSON.parse(raw));
-      } catch (e) {}
+      } catch{}
     }
     return cfg;
   }
@@ -3509,13 +3466,13 @@ function resolveSteamId(record) {
     try {
       const json = JSON.stringify(State.cfg);
       $.GetContextPanel().SetAttributeString(UI_CONVAR, json);
-    } catch (e) {}
+    } catch{}
     try {
       if (typeof Convars !== "undefined") {
         if (Convars.RegisterConVar) Convars.RegisterConVar(UI_CONVAR, "{}", 0, "LinguaChat UI settings");
         if (Convars.SetValue) Convars.SetValue(UI_CONVAR, json);
       }
-    } catch (e) {}
+    } catch{}
   }
 
   // 消息行 steamid 兜底:行面板读不到时用资料卡采集的昵称 -> steamid 映射
@@ -3571,14 +3528,20 @@ function resolveSteamId(record) {
         State.hudRowDiagLogged = true;
         try {
           let rowClasses = "";
-          try { if (typeof row.GetPanelClassList === "function") rowClasses = String(row.GetPanelClassList().join(",")); } catch (e) {}
-          diagLog("hud row diag: senderName=" + safeText(findClass(row, SENDER_NAME_CLASS)) + " bubble=" + (!!findClass(row, HUD_BUBBLE_CLASS)) + " heroBadge=" + (!!findChild(row, "HeroBadge")) + " heroImage=" + (!!findChild(row, "HeroImage")) + " classes=" + rowClasses);
-        } catch (e) {}
+          try { if (typeof row.GetPanelClassList === "function") rowClasses = String(row.GetPanelClassList().join(",")); } catch{}
+          diagLog("hud row diag: senderName=" + safeText(findClass(row, SENDER_NAME_CLASS)) + " bubble=" + (!!findClass(row, HUD_BUBBLE_CLASS)) + " heroBadge=" + (!!findChild(row, "HeroBadge")) + " heroImage=" + (!!findChild(row, "HeroImage")) + " classes=" + rowClasses + " ping=" + hasClass(row, "Ping") + " pingText=" + safeText(findChild(row, "PingLabel")));
+        } catch{}
       }
       // 新版气泡行若带 SenderName 直接读;否则保持 <unknown> 走 recentRows 回填
       const inlineSender = safeText(findClass(row, SENDER_NAME_CLASS)) || "";
       const sender = inlineSender || UNKNOWN_NAME;
-      return { sender: sender, channel: "hud", text: text, isOwn: isOwn, hero: readHeroFromRow(row) || fallbackHeroForSender(sender), heroId: readHeroIdFromRow(row), steamid: readSteamIdFromRow(row) || steamIdByName(sender), hud: true, quick: !!(findChild(row, "PingLabel") || findChild(row, "TargetHeroImage")) };
+      // Ping/快捷行判定只用「行类名 + PingLabel 确实有文字」,不用 findChild 结构存在性:
+      // 新版顶栏气泡每行都挂着 HeroBadge/HeroImage 等结构性子节点,findChild 必命中 → v2.2.0
+      // 的 `quick: findChild("TargetHeroImage")` 把顶栏所有普通聊天都误判成快捷发言跳过,
+      // 导致气泡不再出译文(2026-11-02 用户实机报告,聊天框仍秒翻译而顶栏没有)。
+      const hudPingLabel = findChild(row, "PingLabel");
+      const hudQuick = !!(hasClass(row, "Ping") || hasClass(row, "PingRepeatable") || hasClass(row, "PingRepeated") || (hudPingLabel && safeText(hudPingLabel)));
+      return { sender: sender, channel: "hud", text: text, isOwn: isOwn, hero: readHeroFromRow(row) || fallbackHeroForSender(sender), heroId: readHeroIdFromRow(row), steamid: readSteamIdFromRow(row) || steamIdByName(sender), hud: true, quick: hudQuick };
     }
     const source = findChild(row, MESSAGE_SOURCE_ID);
     const contents = findChild(row, MESSAGE_CONTENTS_ID);
@@ -3592,6 +3555,8 @@ function resolveSteamId(record) {
     const text = collectText(contents);
     if (!text) return null;
     const isOwn = hasClass(row, "IsSelf") || !!findChild(row, LOCAL_CLIENT_ID);
+    const bottomPingLabel = findChild(row, "PingLabel");
+    const bottomQuick = !!(hasClass(row, "Ping") || hasClass(row, "PingRepeatable") || hasClass(row, "PingRepeated") || (bottomPingLabel && safeText(bottomPingLabel)) || (contents && hasClass(contents, "Ping")));
     return {
       sender: sender,
       channel: channel,
@@ -3600,7 +3565,7 @@ function resolveSteamId(record) {
       hero: readHeroFromRow(row) || fallbackHeroForSender(sender),
       heroId: readHeroIdFromRow(row),
       steamid: readSteamIdFromRow(row) || steamIdByName(sender),
-      quick: !!(findChild(row, "PingLabel") || findChild(row, "TargetHeroImage") || (contents && hasClass(contents, "Ping"))),
+      quick: bottomQuick,
     };
   }
 
@@ -3623,6 +3588,7 @@ function resolveSteamId(record) {
   }
 
   function addPendingTextAlias(key, row, sig, record) {
+    try { if (isValid(row)) row.__lctPendingAt = nowMs(); } catch{} // linger:该行的译文开始等待
     const pending = State.pendingText.get(key);
     if (!pending) return false;
     for (let i = 0; i < pending.length; i += 1) {
@@ -3711,22 +3677,22 @@ function resolveSteamId(record) {
         if (typeof child.SetParent !== "function") break;
         try {
           child.SetParent(wrap);
-        } catch (e) {
+        } catch{
           break;
         }
         guard += 1;
       }
       if (childCount(row) > 1) {
         // 移动失败:回滚,保持原行布局
-        try { wrap.DeleteAsync(0); } catch (e) {}
+        try { wrap.DeleteAsync(0); } catch{}
         return false;
       }
       try {
         row.style.flowChildren = "down";
-      } catch (e) {}
+      } catch{}
       row.__lctLobbyWrapped = true;
       return true;
-    } catch (e) {
+    } catch{
       return false;
     }
   }
@@ -3776,13 +3742,14 @@ function resolveSteamId(record) {
       st.fontStyle = "italic";
       st.textShadow = "0px 1px 2px rgba(0, 0, 0, 0.9)";
       st.whiteSpace = "normal";
-    } catch (e) {}
+    } catch{}
   }
 
 function injectTranslation(row, sig, text) {
-    if (!isValid(row)) return;
-    const hud = isHudRow(row);
-    const lobby = isLobbyRow(row);
+if (!isValid(row)) return;
+const hud = isHudRow(row);
+if (hud) { try { row.__lctTransAt = nowMs(); } catch{} } // linger:驻留窗口起点(注入时刻)
+const lobby = isLobbyRow(row);
     // HUD 行:译文 label 挂到 MessageContents(ChatBubble 正下方);大厅行:行内容下方;普通行:MessageBody 下
     const body = hud ? hudLabelHost(row) : (lobby ? lobbyLabelHost(row) : (findClass(row, MESSAGE_BODY_CLASS) || row));
     let label = getTransLabel(row, sig);
@@ -3790,23 +3757,23 @@ function injectTranslation(row, sig, text) {
       try {
         label = $.CreatePanel("Label", body, transLabelId(sig));
         label.AddClass(hud ? TRANS_LABEL_HUD_CLASS : (lobby ? TRANS_LABEL_LOBBY_CLASS : TRANS_LABEL_CLASS));
-      } catch (e) {
+      } catch{
         return;
       }
     } else {
       try {
         label.RemoveClass(TRANS_ERROR_CLASS);
-      } catch (e) {}
+      } catch{}
     }
     try {
       label.text = String(text);
-    } catch (e) {}
+    } catch{}
     applyTransLabelStyle(label, false);
     // 保证 HUD 译文永远排在 ChatBubble 之后,而不是受子节点创建/复用时序影响。
     if (hud) {
       const bubble = findClass(row, HUD_BUBBLE_CLASS);
       if (isValid(bubble) && typeof label.MoveChildAfter === "function") {
-        try { label.MoveChildAfter(bubble); } catch (e) {}
+        try { label.MoveChildAfter(bubble); } catch{}
       }
     }
     // 只显示译文模式:隐藏原文(快捷对话/Ping 行保留气泡,避免消息"消失")
@@ -3817,11 +3784,11 @@ function injectTranslation(row, sig, text) {
         let isPing = false;
         try {
           isPing = hasClass(contents, "Ping") || !!findChild(contents, "PingLabel");
-        } catch (e) {}
+        } catch{}
         if (!isPing) {
           try {
             contents.style.visibility = "collapse";
-          } catch (e) {}
+          } catch{}
         }
       }
     }
@@ -3837,7 +3804,7 @@ function injectTranslation(row, sig, text) {
       try {
         label = $.CreatePanel("Label", body, transLabelId(sig));
         label.AddClass(hud ? TRANS_LABEL_HUD_CLASS : (lobby ? TRANS_LABEL_LOBBY_CLASS : TRANS_LABEL_CLASS));
-      } catch (e) {
+      } catch{
         return;
       }
     }
@@ -3845,7 +3812,7 @@ function injectTranslation(row, sig, text) {
       label.AddClass(TRANS_ERROR_CLASS);
       label.text = "翻译失败: " + String(message || "未知错误").slice(0, 120);
       applyTransLabelStyle(label, true);
-    } catch (e) {}
+    } catch{}
   }
 
   // 滚动回收重建:已翻译过的行重新出现时,从缓存恢复译文
@@ -3874,6 +3841,7 @@ function injectTranslation(row, sig, text) {
   function enqueue(row, sig, record) {
     const textKey = translationTextKey(record.text);
     if (addPendingTextAlias(textKey, row, sig, record)) return;
+    try { row.__lctPendingAt = nowMs(); } catch{}
     State.pendingText.set(textKey, [{ row: row, sig: sig, record: record }]);
     State.queue.push({
       kind: "chat", row: row, sig: sig, record: record, attempts: 0,
@@ -3908,7 +3876,7 @@ function injectTranslation(row, sig, text) {
   const BRIDGE_STARVE_MS = 10000;
 
   function btipcChannelBusy() {
-    try { return typeof BTIPC !== "undefined" && BTIPC.busy(); } catch (e) { return false; }
+    try { return typeof BTIPC !== "undefined" && BTIPC.busy(); } catch{ return false; }
   }
 
   function pumpQueue() {
@@ -4003,7 +3971,7 @@ function injectTranslation(row, sig, text) {
     if (!root) return null;
     State.panel = findChild(root, BRIDGE_PANEL_ID);
     if (isValid(State.panel)) {
-      try { State.panelParent = State.panel.GetParent ? State.panel.GetParent() : null; } catch (e) {}
+      try { State.panelParent = State.panel.GetParent ? State.panel.GetParent() : null; } catch{}
       if (!State.panelLogged) {
         State.panelLogged = true;
         log("bridge panel found; SetURL=" + (typeof State.panel.SetURL === "function" ? "yes" : "NO"));
@@ -4056,7 +4024,7 @@ function injectTranslation(row, sig, text) {
 
   function scheduleHttpsProbe() {
     if (!HTTPS_PANEL_ENABLED || State.httpsProbeDone || !State.httpsCapable) return;
-    try { $.Schedule(HTTPS_PROBE_DELAY_MS / 1000, probeHttpsPanel); } catch (e) {}
+    try { $.Schedule(HTTPS_PROBE_DELAY_MS / 1000, probeHttpsPanel); } catch{}
   }
 
   // 硬失败 = 请求从未到达桥(页面没加载 / 面板不可用) → 交回 BTIPC 重做,不消耗 attempts;
@@ -4074,7 +4042,7 @@ function injectTranslation(row, sig, text) {
     if (job._httpsDemoted) return;
     job._httpsDemoted = true;
     // 交接前必须撤掉出站超时句柄:否则它稍后触发会二次 done/finishJob,击穿单槽
-    if (job._timeout) { try { clearTimeout(job._timeout); } catch (e) {} job._timeout = null; }
+    if (job._timeout) { try { clearTimeout(job._timeout); } catch{} job._timeout = null; }
     if (job._timedOut) return;
     log("https panel -> BTIPC demote (" + reason + ")");
     dispatchViaBtipc(job);
@@ -4105,113 +4073,21 @@ function injectTranslation(row, sig, text) {
       if (!err) State.httpsHardFails = 0;
       handleBridgePayload(job, payload || { ok: false, error: "bad_bridge_payload" });
     };
-    try { panel.SetURL(url); } catch (e) {
+    try { panel.SetURL(url); } catch{
       demoteHttps(job, "bridge_nav_failed");
       return;
     }
     setPending(job.id, onResult, Math.min(tm + 1000, 12000));
   }
 
-  // 直连桥(GET /api/v1/*,经 $.AsyncWebRequest)。
-  // 背景:HTML 面板方案在连续导航时会失效(第一条成功,后续 SetURL 导航可能不触发
-  // title 更新,导致"几条消息后翻译失效/测试卡住/发送前翻译不可用")。
-  // $.AsyncWebRequest 是引擎级 HTTP API(chat_translator 版本验证可用),每条请求独立,无导航竞争。
-  function buildApiUrl(job) {
-    const base = "http://" + BRIDGE_HOST + ":" + BRIDGE_PORT + "/api/v1/";
-    if (job.kind === "bridge") {
-      // data 已由 bridgePost 做过 encodeURIComponent,这里不能再次编码,
-      // 否则服务端 URLSearchParams 只解码一次,JSON.parse 会失败(日志/配置保存丢失)
-      return base + job.op + "?d=" + (job.data || "{}");
-    }
-    const text = encodeURIComponent(job.record.text);
-    const target = encodeURIComponent(job.target || (job.kind === "outgoing" ? resolveOutgoingTarget() : targetLanguage()));
-    // provider 不传:由桥按 config.json 的 provider 执行(设置面板保存或手改 config.json 均生效,
-    // 避免游戏侧 State.cfg.provider 与桥不同步导致 OpenAI/DeepSeek 配置不生效)
-    // 显式传 timeoutMs:出站翻译用设置面板的"超时(ms)"(未配则回退 OUTGOING_TIMEOUT_MS),
-    // 普通翻译用用户配置,避免桥端先于游戏侧放弃(否则首次长文本会"发原文,二次才发译文")
-    const tm = job.kind === "outgoing" ? outgoingTimeoutMs() : (State.cfg.timeoutMs || 12000);
-    return base + "translate?text=" + text + "&source=auto&target=" + target + "&timeoutMs=" + tm;
-  }
 
-  // 引擎级 HTTP GET 封装(超时兜底,settled 防双触发)
-  function httpGetJson(url, cb, timeoutMs) {
-    let settled = false;
-    const done = function (payload) {
-      if (settled) return;
-      settled = true;
-      try { cb(payload || { ok: false, error: "bad_response" }); } catch (e) {}
-    };
-    try {
-      if (typeof $.AsyncWebRequest !== "function") {
-        done({ ok: false, error: "no_asyncwebrequest" });
-        return;
-      }
-    } catch (e) {
-      done({ ok: false, error: "no_asyncwebrequest" });
-      return;
-    }
-    let timer = null;
-    try {
-      timer = setTimeout(function () {
-        done({ ok: false, error: "http_timeout" });
-      }, timeoutMs || 10000);
-    } catch (e) {
-      timer = null;
-    }
-    if (!timer) {
-      // Panorama 无 setTimeout 时用 $.Schedule 兜底(秒级;settled 保证单次)
-      try {
-        $.Schedule(Math.max(1, Math.round((timeoutMs || 10000) / 1000)), function () {
-          done({ ok: false, error: "http_timeout" });
-        });
-      } catch (e) {}
-    }
-    const parseBody = function (body) {
-      if (timer) { try { clearTimeout(timer); } catch (e) {} }
-      try {
-        if (typeof body === "string" && body) { done(JSON.parse(body)); return; }
-      } catch (e) {}
-      done({ ok: false, error: "bad_response" });
-    };
-    // 真实引擎 API(chat_translator 同款):$.AsyncWebRequest(url, {type:"GET", timeout}) 返回 Promise<string>
-    try {
-      const promise = $.AsyncWebRequest(url, { type: "GET", timeout: timeoutMs || 10000 });
-      if (promise && typeof promise.then === "function") {
-        promise.then(
-          function (body) { parseBody(body); },
-          function (err) {
-            if (timer) { try { clearTimeout(timer); } catch (e) {} }
-            done({ ok: false, error: (err && err.message) ? String(err.message) : "request_failed" });
-          }
-        );
-        return;
-      }
-    } catch (e) {}
-    // 兜底:SendRequest 回调风格(仅模拟测试/旧引擎)
-    try {
-      let req = null;
-      try { req = $.AsyncWebRequest(url); } catch (e) {}
-      if (req && typeof req.SendRequest === "function") {
-        req.SendRequest(function (status, body) {
-          if (timer) { try { clearTimeout(timer); } catch (e) {} }
-          try {
-            if (typeof body === "string" && body) { done(JSON.parse(body)); return; }
-          } catch (e) {}
-          done({ ok: false, error: "bad_response_" + String(status) });
-        });
-        return;
-      }
-    } catch (e) {}
-    if (timer) { try { clearTimeout(timer); } catch (e) {} }
-    done({ ok: false, error: "http_exception" });
-  }
 
   // 统一桥响应处理(直连通道与 HTML 面板 fallback 共用)
   function handleBridgePayload(job, payload) {
     if (job.kind === "outgoing") {
       // 已超时:done+finishJob 已由超时回调完成,这里直接退出
       if (job._timedOut) return;
-      if (job._timeout) { try { clearTimeout(job._timeout); } catch (e) {} job._timeout = null; }
+      if (job._timeout) { try { clearTimeout(job._timeout); } catch{} job._timeout = null; }
       if (payload && payload.ok && payload.translation) {
         job.done(payload.translation, payload.detectedLanguage || null);
         finishJob();
@@ -4238,46 +4114,12 @@ function injectTranslation(row, sig, text) {
     }
   }
 
-  // ---- 传输通道探测 ----
-  // 当前 Deadlock 版本已移除 $.AsyncWebRequest(函数仍存在,但调用即同步抛
-  // "AsyncWebRequest has been removed"),只用 typeof 检查会误判可用,导致每次
-  // 请求都失败、桥永远显示离线。启动后实际调用一次探测:
-  //   - 同步抛异常   -> 不可用,回退 HTML 面板通道(SetURL + document.title 轮询)
-  //   - 返回 Promise -> 可用,走直连 GET(引擎内置翻译器同款用法)
-  function detectAsyncWebRequest() {
-    if (State.canHttp !== null) return State.canHttp;
-    let ok = false;
-    try {
-      if (typeof $.AsyncWebRequest === "function") {
-        const probe = $.AsyncWebRequest(
-          "http://" + BRIDGE_HOST + ":" + BRIDGE_PORT + "/api/v1/health",
-          { type: "GET", timeout: 3000 }
-        );
-        ok = !!(probe && typeof probe.then === "function");
-        if (ok) {
-          // 吞掉探测结果(桥未启动时 Promise 会 reject,避免未处理 rejection)
-          try { probe.then(function () {}, function () {}); } catch (e) {}
-        }
-      }
-    } catch (e) {
-      ok = false;
-    }
-    State.canHttp = ok;
-    log("bridge transport: AsyncWebRequest " + (ok ? "available (direct)" : "removed/unavailable, using HTML panel channel"));
-    return ok;
-  }
 
-  // 直连通道的传输层错误(引擎移除 API / 同步异常):换成 HTML 面板通道重试才有意义;
-  // 桥未启动/超时等业务性失败不算,继续走直连即可。
-  function isTransportError(err) {
-    const s = String(err || "");
-    return s === "http_exception" || s === "no_asyncwebrequest" || s.indexOf("removed") !== -1;
-  }
 
   // 桥侧即时返回的操作(健康探测/日志/诊断/配置):用短超时。
   // 否则一次断线会把面板在途请求卡住十几秒(健康探测每 5s 一轮,全被 pending 挡掉),
   // 自愈检测要等好几个周期才发现面板已僵死。
-  const BRIDGE_FAST_OPS = { health: 8000, diag: 8000, log: 8000, config: 8000 };
+
   const OUTGOING_TIMEOUT_MIN_MS = 8000; // 用户可配出站超时的下限。
   // 为什么从 3000 提到 8000:位信道单程 2~4s(60B 约 4s),3s 下限会让正常翻译被掐断后
   // 按原文发送,用户看到的就是"发送前翻译没效果"。
@@ -4289,49 +4131,6 @@ function injectTranslation(row, sig, text) {
     const v = State.cfg ? Number(State.cfg.timeoutMs) : 0;
     if (v > 0) return Math.max(OUTGOING_TIMEOUT_MIN_MS, Math.min(OUTGOING_TIMEOUT_MAX_MS, v));
     return OUTGOING_TIMEOUT_MS;
-  }
-
-  function jobTimeoutMs(job) {
-    if (job.kind === "outgoing") return outgoingTimeoutMs();
-    if (job.kind === "bridge" && BRIDGE_FAST_OPS[job.op]) return BRIDGE_FAST_OPS[job.op];
-    return State.cfg.timeoutMs || 15000;
-  }
-
-  // HTML 面板通道:SetURL 导航 /bridge 页面,轮询 document.title 读回
-  // (AsyncWebRequest 被移除的游戏版本唯一可用通道;DLCT 同款机制)
-  function dispatchViaPanel(job) {
-    const panel = ensurePanel();
-    if (!isValid(panel) || typeof panel.SetURL !== "function") {
-      if (job.kind === "outgoing") {
-        job.done(null, null);
-        finishJob();
-      } else if (job.kind === "bridge") {
-        job.done({ ok: false, error: "bridge_panel_unavailable" });
-        finishJob();
-      } else {
-        failJob(job, "bridge_panel_unavailable");
-      }
-      return;
-    }
-    const url = buildBridgeUrl(job);
-    setPending(job.id, function (payload) {
-      handleBridgePayload(job, payload);
-    }, jobTimeoutMs(job));
-    try {
-      panel.SetURL(url);
-    } catch (e) {
-      State.pending = null;
-      log("SetURL failed: " + (e && e.message ? e.message : String(e)));
-      if (job.kind === "outgoing") {
-        job.done(null, null);
-        finishJob();
-      } else if (job.kind === "bridge") {
-        job.done({ ok: false, error: "bridge_load_failed" });
-        finishJob();
-      } else {
-        failJob(job, "bridge_load_failed");
-      }
-    }
   }
 
   // ================= BTIPC:唯一的双向通道 =================
@@ -4501,7 +4300,7 @@ function injectTranslation(row, sig, text) {
       }
       // 有些版本回传的是面板 id 字符串/带 id 的对象,退化按后缀解析
       let id = "";
-      try { id = String(arg.id || arg); } catch (e) { id = ""; }
+      try { id = String(arg.id || arg); } catch{ id = ""; }
       if (id.indexOf(PANEL_PREFIX) === 0) {
         const n = parseInt(id.slice(PANEL_PREFIX.length), 10);
         if (!isNaN(n) && n >= 0 && n < PANEL_COUNT) return n;
@@ -4525,7 +4324,7 @@ function injectTranslation(row, sig, text) {
       const made = [];
       for (let i = 0; i < PANEL_COUNT; i += 1) {
         let p = null;
-        try { p = $.CreatePanel("Image", root, PANEL_PREFIX + i); } catch (e) { p = null; }
+        try { p = $.CreatePanel("Image", root, PANEL_PREFIX + i); } catch{ p = null; }
         if (!isValid(p)) return false;
         // 引擎只为"真的会被渲染"的面板发起图片加载:必须留可见尺寸,不能用 visibility:collapse
         try {
@@ -4533,11 +4332,11 @@ function injectTranslation(row, sig, text) {
           p.style.height = "2px";
           p.style.opacity = "0.01";
           p.style.position = "0px 0px 0px";
-        } catch (e) {}
+        } catch{}
         try {
           // 事件白名单里的 ImageLoaded;RegisterEventHandler 恰好 3 参,第 2 参可传面板对象
           $.RegisterEventHandler("ImageLoaded", p, onImageLoaded);
-        } catch (e) {}
+        } catch{}
         made.push(p);
       }
       panels = made;
@@ -4553,7 +4352,7 @@ function injectTranslation(row, sig, text) {
         " len=" + bytes.length +
         " crc=" + hex(crc16(bytes), 4) +
         " b64=" + b64Encode(bytes);
-      try { $.Msg(line); } catch (e) {}
+      try { $.Msg(line); } catch{}
     }
 
     // ---- 轮次 ----
@@ -4566,7 +4365,7 @@ function injectTranslation(row, sig, text) {
         // t 必须每次 SHOT 都不同:同一个 URL 撞引擎缓存后不再触发 ImageLoaded,
         // 会让"同轮重投"变成必然失败(实测过 frameFails 1->9 的死循环)。
         const u = url + "&p=" + i + "&t=" + t.win + "-" + t.idHex + "-" + t.round + "-" + t.shotSeq;
-        try { p.SetImage(u); } catch (e) {}
+        try { p.SetImage(u); } catch{}
       }
     }
 
@@ -4584,11 +4383,11 @@ function injectTranslation(row, sig, text) {
       const r = t.round;
       try {
         $.Schedule(tcl / 1000, function () { closeRound(r); });
-      } catch (e) {}
+      } catch{}
       // T_HARD 兜底:即便 T_CLOSE 定时器没能跑起来也必须闭合,绝不无限等
       try {
         $.Schedule(T_HARD_MS / 1000, function () { closeRound(r); });
-      } catch (e) {}
+      } catch{}
     }
 
     function assembleAndSettle() {
@@ -4660,7 +4459,7 @@ function injectTranslation(row, sig, text) {
             cur.round = r + 1;
             startRound();
           });
-        } catch (e) {}
+        } catch{}
         return;
       }
 
@@ -4686,7 +4485,7 @@ function injectTranslation(row, sig, text) {
       State.bridgeUp = true;
       State.bridgeLastError = "";
       refreshBridgeStatus();
-      try { t.onDone(text); } catch (e) {}
+      try { t.onDone(text); } catch{}
     }
 
     function settleFail(err) {
@@ -4703,7 +4502,7 @@ function injectTranslation(row, sig, text) {
         State.bridgeLastError = kind;
         refreshBridgeStatus();
       }
-      try { t.onFail(err || { kind: "unknown", message: "" }); } catch (e) {}
+      try { t.onFail(err || { kind: "unknown", message: "" }); } catch{}
     }
 
     // ---- 对外 API ----
@@ -4755,12 +4554,12 @@ function injectTranslation(row, sig, text) {
         $.Schedule(INITIAL_SHOT_DELAY_MS / 1000, function () {
           if (transfer === t && !t.done) startRound();
         });
-      } catch (e) {}
+      } catch{}
       try {
         $.Schedule(timeoutMs / 1000, function () {
           if (transfer === t && !t.done) settleFail({ kind: "timeout", message: "REQ 超时" });
         });
-      } catch (e) {}
+      } catch{}
       return true;
     }
 
@@ -4829,7 +4628,7 @@ function injectTranslation(row, sig, text) {
       let body = String(job.data === undefined || job.data === null ? "{}" : job.data);
       try {
         if (typeof decodeURIComponent === "function") body = decodeURIComponent(body);
-      } catch (e) {}
+      } catch{}
       return "op=" + job.op + "\n" + body;
     }
     const target = String(job.target || (job.kind === "outgoing" ? resolveOutgoingTarget() : targetLanguage()));
@@ -4850,7 +4649,7 @@ function injectTranslation(row, sig, text) {
         setOutgoingHint("");
         // 与超时回调同一约定:done 只允许触发一次
         if (job._timedOut) return;
-        if (job._timeout) { try { clearTimeout(job._timeout); } catch (e) {} job._timeout = null; }
+        if (job._timeout) { try { clearTimeout(job._timeout); } catch{} job._timeout = null; }
         job.done(null, null);
         finishJob();
       } else if (job.kind === "bridge") {
@@ -4870,7 +4669,7 @@ function injectTranslation(row, sig, text) {
       if (isOutgoing) {
         // 用户在等:抢占在途的入站翻译(被抢的那条会自动重排),并给出可见反馈 ——
         // 位信道单程 2~4s,没有提示的话用户会以为"没反应"而重复按回车。
-        try { BTIPC.preempt("outgoing"); } catch (e) {}
+        try { BTIPC.preempt("outgoing"); } catch{}
         setOutgoingHint("翻译中…约 2~4 秒");
       }
       BTIPC.request(text, {
@@ -4880,7 +4679,7 @@ function injectTranslation(row, sig, text) {
           if (job.kind === "outgoing") setOutgoingHint("");
           if (job.kind === "bridge") {
             let payload = null;
-            try { payload = JSON.parse(reply); } catch (e) { payload = null; }
+            try { payload = JSON.parse(reply); } catch{ payload = null; }
             handleBridgePayload(job, payload || { ok: false, error: "bad_bridge_payload" });
             return;
           }
@@ -4917,7 +4716,7 @@ function injectTranslation(row, sig, text) {
           }
         }, otm);
         scheduled = true;
-      } catch (e) {}
+      } catch{}
       if (!scheduled) {
         // Panorama 无 setTimeout 时用 $.Schedule 兑底(秒级;_timedOut 保证单次)
         try {
@@ -4928,7 +4727,7 @@ function injectTranslation(row, sig, text) {
               finishJob();
             }
           });
-        } catch (e) {}
+        } catch{}
       }
     }
     // 通道选择:https 面板(快,<1s)→ BTIPC 位泵(兜底,零摩擦可用)。
@@ -4957,7 +4756,7 @@ function injectTranslation(row, sig, text) {
       State.pending = null;
       try {
         old.onResult({ ok: false, error: "superseded" });
-      } catch (e) {}
+      } catch{}
     }
     State.pending = {
       id: id,
@@ -4973,19 +4772,19 @@ function injectTranslation(row, sig, text) {
     if (arg == null) return "";
     try {
       if (typeof arg === "string") return arg;
-    } catch (e) {}
+    } catch{}
     try {
       if (typeof arg.title === "string") return arg.title;
-    } catch (e) {}
+    } catch{}
     try {
       if (typeof arg.url === "string") return arg.url;
-    } catch (e) {}
+    } catch{}
     try {
       if (typeof arg.src === "string") return arg.src;
-    } catch (e) {}
+    } catch{}
     try {
       if (typeof arg.text === "string") return arg.text;
-    } catch (e) {}
+    } catch{}
     try {
       if (typeof arg.GetAttributeString === "function") {
         return String(
@@ -4995,7 +4794,7 @@ function injectTranslation(row, sig, text) {
           ""
         );
       }
-    } catch (e) {}
+    } catch{}
     return "";
   }
 
@@ -5009,7 +4808,7 @@ function injectTranslation(row, sig, text) {
     let payload = null;
     try {
       payload = JSON.parse(hay.slice(idx + marker.length));
-    } catch (e) {}
+    } catch{}
     if (!payload) return false;
     State.pending = null;
     pending.onResult(payload);
@@ -5035,7 +4834,7 @@ function injectTranslation(row, sig, text) {
     for (let i = 0; i < BRIDGE_EVENT_CANDIDATES.length; i += 1) {
       try {
         $.RegisterForUnhandledEvent(BRIDGE_EVENT_CANDIDATES[i], onBridgeEvent);
-      } catch (e) {}
+      } catch{}
     }
     log("bridge events registered");
   }
@@ -5065,17 +4864,17 @@ function injectTranslation(row, sig, text) {
     // 主通道:页面 document.title;备选:属性 / GetTitle()
     try {
       if (typeof panel.title === "string" && panel.title) return panel.title;
-    } catch (e) {}
+    } catch{}
     try {
       const attr = panel.GetAttributeString ? panel.GetAttributeString("title", "") : "";
       if (attr) return attr;
-    } catch (e) {}
+    } catch{}
     try {
       if (typeof panel.GetTitle === "function") {
         const t = panel.GetTitle();
         if (t) return String(t);
       }
-    } catch (e) {}
+    } catch{}
     return null;
   }
 
@@ -5092,7 +4891,7 @@ function injectTranslation(row, sig, text) {
       let payload = null;
       try {
         payload = JSON.parse(title.slice((TITLE_PREFIX + pending.id).length));
-      } catch (e) {}
+      } catch{}
       State.pending = null;
       pending.onResult(payload || { ok: false, error: "bad_bridge_payload" });
       return;
@@ -5159,20 +4958,20 @@ function injectTranslation(row, sig, text) {
     if (State.pending) {
       const oldPending = State.pending;
       State.pending = null;
-      try { oldPending.onResult({ ok: false, error: "panel_reset" }); } catch (e) {}
+      try { oldPending.onResult({ ok: false, error: "panel_reset" }); } catch{}
     }
     State.bridgeUp = false;
     State.canHttp = null; // 下次 dispatchJob 重新探测直连通道
 
     const panel = ensurePanel();
-    try { if (isValid(panel)) panel.SetURL("about:blank"); } catch (e) {}
+    try { if (isValid(panel)) panel.SetURL("about:blank"); } catch{}
     log("bridge self-heal #" + State.panelResetLevel + " [blank] (" + reason + ")");
 
     // 重置后立即重新探测:通道已恢复的话这一轮就能连上
     $.Schedule(0.6, function () {
       State.panelFailStreak = 0;
-      try { pumpQueue(); } catch (e) {}
-      try { healthCheck(); } catch (e) {}
+      try { pumpQueue(); } catch{}
+      try { healthCheck(); } catch{}
     });
   }
 
@@ -5189,24 +4988,30 @@ function injectTranslation(row, sig, text) {
       // 的副本一起补上译文,避免重复占用 BTIPC 单槽。
       const pending = State.pendingText.get(textKey) || [];
       State.pendingText.delete(textKey);
+      let aliveHudAlias = false; // 同文是否有存活的 HUD 行译文(避免与胶囊重复)
       for (let i = 0; i < pending.length; i += 1) {
         const alias = pending[i];
         if (!alias || (alias.row === job.row && alias.sig === job.sig)) continue;
         if (!isValid(alias.row) || alias.row.__lctSig !== alias.sig) continue;
         State.cache.set(alias.sig, { translation: translation });
         injectTranslation(alias.row, alias.sig, translation);
+        if (alias.record && alias.record.channel === "hud") aliveHudAlias = true;
       }
 
       // 行可能已被回收复用:只有行仍持有同一条消息时才注入,避免旧译文贴到新消息
       if (isValid(job.row) && job.row.__lctSig === job.sig) {
         injectTranslation(job.row, job.sig, translation);
+        if (job.record.channel === "hud") aliveHudAlias = true;
         log("translated [" + (job.record.channel || "chat") + "] " + job.record.sender + ": " + translation.slice(0, 60));
       } else {
         // 诊断:翻译成功但行已失效(游戏可能在 2 秒内清理了顶栏消息行)
         log("translated skipped: row=" + (isValid(job.row) ? "valid" : "GONE") + " sig=" + ((job.row && job.row.__lctSig === job.sig) ? "match" : "MISMATCH") + " text=" + String(job.record.text || "").slice(0, 30));
-        // 真实消息行被回收时不再往顶栏根节点挂浮层;那种兜底会跑到气泡上方。
-        // 只保留 !lcttest 自检行的可视化兜底,真实消息依赖 textCache 在后续行副本恢复。
         if (job.test) tryRecreateHudTranslation(job, translation);
+        // 顶栏真实行被游戏回收 → 译文落入顶栏驻留胶囊(hudLinger 开且驻留秒数>0);
+        // 同文还有存活 HUD 行时不再挂胶囊,避免两处重复显示
+        else if (job.record.channel === "hud" && !aliveHudAlias && State.cfg.hudLinger !== false && hudLingerMs() > 0) {
+          fillLingeringCapsule(textKey, translation, job.record, Number(job.row && job.row.__lctHudIdx) || 0);
+        }
       }
       finishJob();
     } else {
@@ -5236,10 +5041,129 @@ function injectTranslation(row, sig, text) {
       $.Schedule(5.0, function () {
         try {
           if (isValid(overlay)) overlay.DeleteAsync(0);
-        } catch (e) {}
+        } catch{}
       });
     } catch (e) {
       log("HUD test: recreate failed: " + (e && e.message ? e.message : String(e)));
+    }
+  }
+
+  // ================= 顶栏气泡驻留(hudLinger) =================
+  // 游戏端 C++ 给顶栏行加 Expired class、并按自己的计时器回收行;计时器没法 patch,
+  // 只能在 poll 里逐轮反应:
+  // 1) keep-alive:译文在途(或刚送达、仍在驻留窗口)的行被加 Expired 时移除该类 →
+  //    官方气泡不会在翻译没显示出来前就淡出;
+  // 2) 驻留胶囊:行已被 C++ 整行删掉时,在顶栏 chat 根下挂「原文 + 译文(或翻译中…)」
+  //    胶囊,驻留窗口结束后自动淡出删除(lingeringCapsules 按 textKey 管理,上限 LINGER_CAP)。
+  const LINGER_CAP = 6; // 同时驻留胶囊上限(超出挤掉最旧的)
+  const PENDING_LINGER_CAP_MS = 30000; // 在途译文未送达时气泡最长保活(防翻译失败/通道没了永远挂着)
+
+  function hudLingerMs() {
+    const s = Number((State.cfg || {}).hudLingerSeconds);
+    if (!Number.isFinite(s) || s < 0) return 0;
+    return Math.min(s, 60) * 1000;
+  }
+
+  function lingerHudRows() {
+    if (!State.cfg || State.cfg.hudLinger === false) return;
+    const now = nowMs();
+    const lingerMs = hudLingerMs();
+    // 1) keep-alive:在途 / 刚送达的行不被 Expired 淡出
+    for (let i = 0; i < State.hudMessages.length; i += 1) {
+      const messages = State.hudMessages[i];
+      if (!isValid(messages)) continue;
+      const n = childCount(messages);
+      for (let j = 0; j < n; j += 1) {
+        const row = childAt(messages, j);
+        if (!isValid(row)) continue;
+        try { row.__lctHudIdx = i; } catch{} // 胶囊挂到对应阵营一侧顶栏
+        const pending = !!row.__lctPendingAt && !row.__lctTransAt && (now - row.__lctPendingAt) < PENDING_LINGER_CAP_MS;
+        const fresh = !!row.__lctTransAt && lingerMs > 0 && (now - row.__lctTransAt) <= lingerMs;
+        if ((pending || fresh) && hasClass(row, "Expired")) {
+          try { row.RemoveClass("Expired"); } catch{}
+        }
+      }
+    }
+    // 2) 在途胶囊:该原文所有 HUD 行都已被回收、译文还在途 → 先亮「翻译中…」胶囊
+    if (lingerMs === 0) return;
+    for (const [textKey, aliases] of State.pendingText) {
+      let record = null;
+      let idx = 0;
+      let aliveHud = false;
+      for (const a of aliases || []) {
+        if (!a || !a.record || a.record.channel !== "hud") continue;
+        record = a.record;
+        idx = Number(a.row && a.row.__lctHudIdx) || 0;
+        if (isValid(a.row)) aliveHud = true;
+      }
+      if (record && !aliveHud) ensureLingeringCapsule(textKey, record, idx);
+    }
+  }
+
+  function ensureLingeringCapsule(textKey, record, hudIdx) {
+    const existed = State.lingeringCapsules.get(textKey);
+    if (existed && isValid(existed.panel)) return existed;
+    try {
+      let parent = null;
+      const c = State.hudMessages[hudIdx] || State.hudMessages[0];
+      if (isValid(c) && typeof c.GetParent === "function") parent = c.GetParent();
+      if (!isValid(parent)) parent = getRoot();
+      if (!isValid(parent)) return null;
+      if (State.lingeringCapsules.size >= LINGER_CAP) {
+        const oldestKey = State.lingeringCapsules.keys().next().value;
+        const oldest = oldestKey !== undefined ? State.lingeringCapsules.get(oldestKey) : null;
+        if (oldestKey !== undefined) State.lingeringCapsules.delete(oldestKey);
+        if (oldest && isValid(oldest.panel)) { try { oldest.panel.DeleteAsync(0); } catch{} }
+      }
+      const cap = $.CreatePanel("Panel", parent, "LCTLingering" + nowMs());
+      cap.AddClass("LCTLingeringCapsule");
+      const orig = $.CreatePanel("Label", cap, "");
+      orig.AddClass("LCTLingeringOrig");
+      orig.text = String(record && record.text || "").slice(0, 120);
+      const tr = $.CreatePanel("Label", cap, "");
+      tr.AddClass("LCTLingeringText");
+      tr.text = "翻译中…";
+      State.lingeringCapsules.set(textKey, { panel: cap, orig: orig, text: tr, filled: false, deleteAt: 0, fading: false });
+      log("linger: pending capsule (" + (record && record.sender || "?") + "): " + String(record && record.text || "").slice(0, 30));
+      return State.lingeringCapsules.get(textKey);
+    } catch (e) {
+      log("linger: capsule create failed: " + ((e && e.message) || e));
+      return null;
+    }
+  }
+
+  function fillLingeringCapsule(textKey, translation, record, hudIdx) {
+    let cap = State.lingeringCapsules.get(textKey);
+    if (!cap || !isValid(cap.panel)) cap = ensureLingeringCapsule(textKey, record, hudIdx);
+    if (!cap || !isValid(cap.panel) || cap.fading) return;
+    cap.filled = true;
+    try { cap.text.text = String(translation || ""); } catch{}
+    cap.deleteAt = nowMs() + hudLingerMs();
+    log("linger: capsule filled: " + String(translation || "").slice(0, 40));
+  }
+
+  function sweepLingeringCapsules() {
+    if (State.lingeringCapsules.size === 0) return;
+    const now = nowMs();
+    for (const [textKey, cap] of State.lingeringCapsules) {
+      if (!isValid(cap.panel)) { State.lingeringCapsules.delete(textKey); continue; }
+      // 未填充且译文已不再在途(通道 gone / 已释放)→ 直接撤掉,别让「翻译中…」挂着
+      if (!cap.filled && !State.pendingText.has(textKey)) {
+        try { cap.panel.DeleteAsync(0); } catch{}
+        State.lingeringCapsules.delete(textKey);
+        continue;
+      }
+      // 已填充且驻留窗口走完 → 淡出后删除
+      if (cap.filled && !cap.fading && cap.deleteAt > 0 && now >= cap.deleteAt) {
+        cap.fading = true;
+        try { cap.panel.AddClass("LCTLingeringFade"); } catch{}
+        const p = cap.panel;
+        const tk = textKey;
+        $.Schedule(0.6, function () {
+          try { if (isValid(p)) p.DeleteAsync(0); } catch{}
+          State.lingeringCapsules.delete(tk);
+        });
+      }
     }
   }
 
@@ -5299,7 +5223,7 @@ function injectTranslation(row, sig, text) {
       // 失败后允许同一文本在新行上重试(旧行已注入错误;seen 去重不应永久吞掉重试)
       if (job.kind === "chat" && job.textKey) State.pendingText.delete(job.textKey);
       if (job.kind === "chat" && job.sig) {
-        try { State.seen.delete(job.sig); } catch (e) {}
+        try { State.seen.delete(job.sig); } catch{}
       }
       if (isValid(job.row) && job.row.__lctSig === job.sig) {
         injectError(job.row, job.sig, String(error || "unknown_error").slice(0, 120));
@@ -5580,7 +5504,6 @@ function injectTranslation(row, sig, text) {
     const text = String(record.text || "").slice(0, 2000);
     if (!text) return;
     let sender = String(record.sender || "").trim();
-    const channel = String(record.channel || "");
 
     // HUD 顶栏行是左下聊天行的重复展示:
     // - 同文本最近已有完整记录 -> 跳过,避免 <unknown>/hud 重复条目
@@ -5734,7 +5657,7 @@ function injectTranslation(row, sig, text) {
     if (label) {
       try {
         label.text = "桥状态: " + String(text || "");
-      } catch (e) {}
+      } catch{}
     }
     // 状态灯:绿=在线 / 红=已知错误 / 灰=尚未连上
     const dot = findChild(getRoot(), "LCTBridgeDot");
@@ -5742,7 +5665,7 @@ function injectTranslation(row, sig, text) {
       let color = "#6b7684";
       if (State.bridgeUp) color = "#7fd8a8";
       else if (State.bridgeLastError) color = "#e0755f";
-      try { dot.style.color = color; } catch (e) {}
+      try { dot.style.color = color; } catch{}
     }
   }
 
@@ -5772,7 +5695,7 @@ function injectTranslation(row, sig, text) {
       if (contents && contents.style) {
         contents.style.visibility = "visible";
       }
-    } catch (e) {}
+    } catch{}
     // 收集译文标签所在容器(普通行:MessageBody;HUD 行:MessageContents)
     const containers = [];
     const body = findClass(row, MESSAGE_BODY_CLASS);
@@ -5791,10 +5714,10 @@ function injectTranslation(row, sig, text) {
         if (!hasClass(child, TRANS_LABEL_CLASS) && !hasClass(child, TRANS_LABEL_HUD_CLASS) && !hasClass(child, TRANS_LABEL_LOBBY_CLASS)) continue;
         try {
           child.DeleteAsync(0);
-        } catch (e) {
+        } catch{
           try {
             child.RemoveAndDeleteChildren();
-          } catch (e2) {}
+          } catch{}
         }
       }
     }
@@ -5957,7 +5880,7 @@ function injectTranslation(row, sig, text) {
     }
     // 兜底:class 遍历(万一游戏改了 id)
     const chats = root.FindChildrenWithClassTraverse
-      ? (() => { try { return root.FindChildrenWithClassTraverse(HUD_CHAT_CLASS) || []; } catch (e) { return []; } })()
+      ? (() => { try { return root.FindChildrenWithClassTraverse(HUD_CHAT_CLASS) || []; } catch{ return []; } })()
       : [];
     for (const chat of chats) tryAdd(chat);
     // 面板树变化时重建列表(游戏可能动态增删顶栏聊天实例)
@@ -5978,7 +5901,7 @@ function injectTranslation(row, sig, text) {
     if (found.length === 0 && !State.hudLogged) {
       State.hudLogged = true;
       let cls = "?";
-      try { if (root.GetPanelClassList) cls = root.GetPanelClassList().join(","); } catch (e) {}
+      try { if (root.GetPanelClassList) cls = root.GetPanelClassList().join(","); } catch{}
       log("HUD chat not found yet: root=" + (root.id || "?") + " classes=[" + cls + "] (retrying each poll)");
     }
   }
@@ -6004,6 +5927,9 @@ function injectTranslation(row, sig, text) {
       State.hudRowsLogged = true;
       diagLog("hud scan: rows present (" + State.hudMessages.length + " containers)");
     }
+    // linger:keep-alive + 驻留胶囊(独立 try/catch,失败不中断扫描循环)
+    try { lingerHudRows(); } catch (e) { pollScanError("lingerHudRows", e); }
+    try { sweepLingeringCapsules(); } catch (e) { pollScanError("sweepLingeringCapsules", e); }
     return touched;
   }
 
@@ -6076,16 +6002,16 @@ function injectTranslation(row, sig, text) {
       $.Schedule(1.0, function () {
         if (!isValid(checkRow)) { log("HUD test: row GONE at 1s"); return; }
         let vis = "?";
-        try { vis = String(checkRow.style.visibility); } catch (e) {}
+        try { vis = String(checkRow.style.visibility); } catch{}
         let expired = false;
-        try { expired = checkRow.BHasClass("Expired"); } catch (e) {}
+        try { expired = checkRow.BHasClass("Expired"); } catch{}
         const hasLabel = findClass(checkRow, TRANS_LABEL_HUD_CLASS);
         log("HUD test: row alive@1s vis=" + vis + " expired=" + expired + " label=" + (hasLabel ? "yes" : "no"));
       });
       $.Schedule(3.0, function () {
         if (!isValid(checkRow)) { log("HUD test: row GONE at 3s"); return; }
         let vis = "?";
-        try { vis = String(checkRow.style.visibility); } catch (e) {}
+        try { vis = String(checkRow.style.visibility); } catch{}
         const hasLabel = findClass(checkRow, TRANS_LABEL_HUD_CLASS);
         log("HUD test: row alive@3s vis=" + vis + " label=" + (hasLabel ? "yes" : "no"));
       });
@@ -6101,7 +6027,7 @@ function injectTranslation(row, sig, text) {
   function submitEventName() {
     try {
       if (findChild(getRoot(), CHAT_LINES_PANEL_ID)) return "CitadelChatTextSubmitted";
-    } catch (e) {}
+    } catch{}
     return "CitadelChatInputSubmitted";
   }
 
@@ -6177,7 +6103,7 @@ function injectTranslation(row, sig, text) {
     try {
       const input = State.input || findChild(getRoot(), CHAT_INPUT_ID);
       if (input) input.text = "";
-    } catch (e) {}
+    } catch{}
   }
 
   // 统一提交处理;带防重(函数调用 + 事件监听双通道可能同时触发)
@@ -6228,7 +6154,7 @@ function injectTranslation(row, sig, text) {
       if (State.cfg.enabled === false || (!State.bridgeUp && State.bridgeOfflineSince)) {
         setStatus(State.cfg.enabled === false ? "翻译已关闭,已按原文发送" : "翻译通道不可用,已按原文发送");
         clearInput();
-        try { input.text = ovBody; } catch (e) {}
+        try { input.text = ovBody; } catch{}
         triggerStockSubmit(input);
         clearInput();
         return;
@@ -6255,10 +6181,10 @@ function injectTranslation(row, sig, text) {
         if (send !== ovBody) setStatus("已按 " + ovTarget + " 发送: " + String(send).slice(0, 40));
         log("lang override " + ovTarget + " detected=" + (detected || "-") + " -> " + send.slice(0, 80));
         const cur = safeText(input);
-        try { input.text = send; } catch (e) {}
+        try { input.text = send; } catch{}
         triggerStockSubmit(input);
         if (cur !== "" && cur !== ovBody) {
-          try { input.text = cur; } catch (e) {}
+          try { input.text = cur; } catch{}
         } else {
           clearInput();
         }
@@ -6288,7 +6214,7 @@ function injectTranslation(row, sig, text) {
       if (!State.bridgeUp && State.bridgeOfflineSince) {
         log("outgoing: bridge unreachable, sending original without waiting");
         setStatus("翻译通道不可用,已按原文发送");
-        try { input.text = outgoingText; } catch (e) {}
+        try { input.text = outgoingText; } catch{}
         triggerStockSubmit(input);
         return;
       }
@@ -6335,13 +6261,13 @@ function injectTranslation(row, sig, text) {
         const cur = safeText(input);
         try {
           input.text = send;
-        } catch (e) {}
+        } catch{}
         triggerStockSubmit(input);
         if (cur !== "" && cur !== trimmed) {
           // 用户已输入新内容:恢复它,让用户自行提交
           try {
             input.text = cur;
-          } catch (e) {}
+          } catch{}
         } else {
           clearInput();
         }
@@ -6352,7 +6278,7 @@ function injectTranslation(row, sig, text) {
     // 常规发送:确保文本就位后触发原版发送(与 DLCT commitChatText 行为一致)
     try {
       input.text = outgoingText;
-    } catch (e) {}
+    } catch{}
     triggerStockSubmit(input);
     clearInput();
   }
@@ -6379,7 +6305,7 @@ function injectTranslation(row, sig, text) {
     try {
       el.text = text || "";
       el.style.visibility = text ? "visible" : "collapse";
-    } catch (e) {}
+    } catch{}
   }
 
   function setStatus(text) {
@@ -6387,7 +6313,7 @@ function injectTranslation(row, sig, text) {
     if (label) {
       try {
         label.text = text || "";
-      } catch (e) {}
+      } catch{}
     }
   }
 
@@ -6412,6 +6338,8 @@ function injectTranslation(row, sig, text) {
       if (!uiTouched("force") && typeof c.ui.force === "boolean") { State.cfg.force = c.ui.force; changed = true; }
       if (!uiTouched("provider") && typeof c.ui.provider === "string") { State.cfg.provider = c.ui.provider; changed = true; }
       if (!uiTouched("timeoutMs") && typeof c.ui.timeoutMs === "number") { State.cfg.timeoutMs = c.ui.timeoutMs; changed = true; }
+      if (!uiTouched("hudLinger") && typeof c.ui.hudLinger === "boolean") { State.cfg.hudLinger = c.ui.hudLinger; changed = true; }
+      if (!uiTouched("hudLingerSeconds") && Number.isFinite(Number(c.ui.hudLingerSeconds))) { State.cfg.hudLingerSeconds = Number(c.ui.hudLingerSeconds); changed = true; }
     }
     // op=ui 直接回 keys;保留旧形状(hasApiKey)的兼容分支,便于与 /api/v1/config 复用
     const k = c.keys || {};
@@ -6421,6 +6349,13 @@ function injectTranslation(row, sig, text) {
       deepl: !!(k.deepl || (c.deepl && c.deepl.hasApiKey)),
       google: !!(k.google || (c.google && c.google.hasApiKey)),
     };
+    // v2.3.0 多端点摘要(op=ui 带 openaiRows):游戏内「服务商」页只读展示 + 调顺序/整行开关
+    if (Array.isArray(c.openaiRows)) {
+      State.cfg.openaiRows = c.openaiRows.map(function (r) {
+        return { id: r.id, name: r.n, builtin: !!r.bc, k: r.k || 0, ke: r.ke || 0, on: !!r.on };
+      });
+      State.cfg._oaiTouched = false;
+    }
     // https 面板通道能力由桥声明(证书存在 && https.enabled)。没声明就不探,
     // 保证"证书没装"的用户一条死请求都不发。
     if (typeof c.httpsPanel === "boolean") State.httpsCapable = c.httpsPanel;
@@ -6462,7 +6397,6 @@ function injectTranslation(row, sig, text) {
   //   3) 端点类字段(region/baseUrl/model/deeplEndpoint)为空时**不下发** ——
   //      下发空串会把已配好的端点清掉(applyMaskedUpdate 对空串是按需清空的语义)。
   // 常用开关用 `/tr` 或输入框右侧的「译」按钮打开。
-  const SETTINGS_BUTTON_ID = "LCTSettingsButton";
   const SETTINGS_PANEL_ID = "LCTSettingsPanel";
   const SETTINGS_VISIBLE_CLASS = "LCTVisible";
 
@@ -6479,11 +6413,11 @@ function injectTranslation(row, sig, text) {
     let text = "未配置";
     if (prov === "bing") text = "免 Key";
     else if ((State.cfg._providerKeys || {})[prov]) text = "已保存";
-    try { label.text = text; } catch (e) {}
+    try { label.text = text; } catch{}
     try {
       if (text === "未配置") label.AddClass("LCTPillOff");
       else label.RemoveClass("LCTPillOff");
-    } catch (e) {}
+    } catch{}
   }
 
   // 启动时从桥同步 config.json 的 UI 设置(失败重试,避免桥尚未就绪时丢同步)
@@ -6499,7 +6433,7 @@ function injectTranslation(row, sig, text) {
       if (r && typeof r.FindChildrenWithClassTraverse === "function") {
         all = r.FindChildrenWithClassTraverse("LCTSettingsPanel");
       }
-    } catch (e) {}
+    } catch{}
     if (!all || !all.length) {
       const one = findChild(getRoot(), SETTINGS_PANEL_ID);
       return one ? [one] : [];
@@ -6517,20 +6451,20 @@ function injectTranslation(row, sig, text) {
       const bits = [];
       bits.push("self=" + (panel.actuallayoutwidth || "?") + "x" + (panel.actuallayoutheight || "?"));
       let par = null;
-      try { par = panel.GetParent ? panel.GetParent() : null; } catch (e) {}
+      try { par = panel.GetParent ? panel.GetParent() : null; } catch{}
       const parOk = !!(par && isValid(par));
       bits.push("par=" + (parOk ? (panelIdOf(par) || String(par.paneltype || "?")) : "none"));
       if (parOk) bits.push("parSize=" + (par.actuallayoutwidth || "?") + "x" + (par.actuallayoutheight || "?"));
       try {
         const top = getRoot();
         if (isValid(top)) bits.push("rootSize=" + (top.actuallayoutwidth || "?") + "x" + (top.actuallayoutheight || "?"));
-      } catch (e) {}
+      } catch{}
       if (typeof panel.GetPositionWithinWindow === "function") {
         const p = panel.GetPositionWithinWindow();
         bits.push("win=" + Math.round(p.x) + "," + Math.round(p.y));
       }
       diagLog(tag, "PANORAMA: settings geometry " + bits.join(" "));
-    } catch (e) {}
+    } catch{}
   }
 
   function openSettingsPanel() {
@@ -6547,19 +6481,19 @@ function injectTranslation(row, sig, text) {
       let desc = "";
       for (let i = 0; i < insts.length; i += 1) {
         let vis = "?";
-        try { vis = String(insts[i].visible); } catch (e) {}
+        try { vis = String(insts[i].visible); } catch{}
         let own = "?";
-        try { own = insts[i].id || "(no id)"; } catch (e) {}
+        try { own = insts[i].id || "(no id)"; } catch{}
         desc += " [" + i + " id=" + own + " visible=" + vis + "]";
       }
       diagLog("pinst", "PANORAMA: settings panel instances=" + insts.length + desc);
-    } catch (e) {}
+    } catch{}
     // /tr 用紧凑第一版(600×480 顶部分段);ESC 入口保持 800×620 左导航
     const chatMode = !(escHostedPanel && isValid(escHostedPanel));
     try {
       if (chatMode) panel.AddClass("LCTChatMode");
       else panel.RemoveClass("LCTChatMode");
-    } catch (e) {}
+    } catch{}
     diagLog("setmode", "PANORAMA: settings mode=" + (chatMode ? "chat" : "esc"));
     // /tr 路径也要挂全局根:否则面板留在 <CitadelChat>(350px 宽)里被裁,聊天收起时整块消失
     if (chatMode) hostSettingsPanel(panel);
@@ -6570,21 +6504,21 @@ function injectTranslation(row, sig, text) {
       if (finishBtn) finishBtn.style.visibility = chatMode ? "collapse" : "visible";
       const chatCloseBtn = findChild(panel, "LCTChatCloseBtn");
       if (chatCloseBtn) chatCloseBtn.style.visibility = chatMode ? "visible" : "collapse";
-    } catch (e) {}
+    } catch{}
     diagLog("setfoot", "PANORAMA: settings footer finish=" + (chatMode ? "hidden" : "shown") + " closeX=" + (chatMode ? "shown" : "hidden"));
     try {
       panel.AddClass(SETTINGS_VISIBLE_CLASS);
-    } catch (e) {}
+    } catch{}
     try {
       if (typeof panel.SetHasClass === "function") panel.SetHasClass(SETTINGS_VISIBLE_CLASS, true);
-    } catch (e) {}
+    } catch{}
     // 可见性与子控件是否就位都记一行 —— 否则"面板打不开/点了没反应"完全无法从日志判断
     let vis = "?";
-    try { vis = String(panel.style.visibility); } catch (e) {}
+    try { vis = String(panel.style.visibility); } catch{}
     let saveBtn = false;
-    try { saveBtn = !!findChild(panel, "LCTSaveBtn"); } catch (e) {}
+    try { saveBtn = !!findChild(panel, "LCTSaveBtn"); } catch{}
     let insideChat = false;
-    try { insideChat = !!panel.BAscendantHasClass("CitadelChat"); } catch (e) {}
+    try { insideChat = !!panel.BAscendantHasClass("CitadelChat"); } catch{}
     diagLog("setopen", "PANORAMA: settings opened vis=" + vis + " saveBtn=" + (saveBtn ? "yes" : "no") + " inChat=" + (insideChat ? "yes" : "no"));
     logPanelGeometry("setgeom", panel);
     syncPanelFromConfig();
@@ -6597,7 +6531,7 @@ function injectTranslation(row, sig, text) {
     // 就不会把 config.json 里已配好的端点清掉(见 collectPanelConfig)。
     keyVisible = false;
     const showKeyLabel = findChild(panel, "LCTShowKeyLabel");
-    if (showKeyLabel) { try { showKeyLabel.text = "显示"; } catch (e) {} }
+    if (showKeyLabel) { try { showKeyLabel.text = "显示"; } catch{} }
     if ((State.cfg._providerKeys || {})[State.cfg.provider || "bing"]) {
       setFieldText("LCTApiKey", "********");
     }
@@ -6605,7 +6539,7 @@ function injectTranslation(row, sig, text) {
     updateKeyStateLabel();
     // 桥状态:先用已知值渲染(可能已是当前值),再主动探一次拿最新
     refreshBridgeStatus();
-    try { healthCheck(); } catch (e) {}
+    try { healthCheck(); } catch{}
     // 焦点策略(2026-10-15 定稿):面板拿不到鼠标指针(聊天布局在 Tab 界面下层,
     // 引擎里也拿不到 free cursor),所以面板按**纯键盘**设计:打开即聚焦第一个控件,
     // 用 Tab / 方向键切换、Enter 确认、ESC 关闭 —— 全程不需要鼠标指针。
@@ -6618,7 +6552,7 @@ function injectTranslation(row, sig, text) {
         else if (panel.SetFocus) { panel.SetFocus(); focused = "panel"; }
         diagLog("focus", "PANORAMA: settings focus -> " + (focused || "none") + " tab=" + settingsTab);
       }
-    } catch (e) {}
+    } catch{}
   }
 
   function closeSettingsPanel() {
@@ -6626,7 +6560,7 @@ function injectTranslation(row, sig, text) {
     if (panel) {
       try {
         panel.RemoveClass(SETTINGS_VISIBLE_CLASS);
-      } catch (e) {}
+      } catch{}
     }
     // 先隐藏,再把面板从 ESC 根挂回聊天布局,最后释放输入焦点
     restoreEscPanel();
@@ -6659,16 +6593,17 @@ function injectTranslation(row, sig, text) {
       const page = findChild(root, defs[i][1]);
       const nav = findChild(root, defs[i][2]);
       if (page) {
-        try { if (on) page.AddClass(SETTINGS_VISIBLE_CLASS); else page.RemoveClass(SETTINGS_VISIBLE_CLASS); } catch (e) {}
+        try { if (on) page.AddClass(SETTINGS_VISIBLE_CLASS); else page.RemoveClass(SETTINGS_VISIBLE_CLASS); } catch{}
       }
       if (nav) {
-        try { if (on) nav.AddClass("LCTTabActive"); else nav.RemoveClass("LCTTabActive"); } catch (e) {}
+        try { if (on) nav.AddClass("LCTTabActive"); else nav.RemoveClass("LCTTabActive"); } catch{}
       }
     }
     settingsTab = tab;
     if (tab === "service") {
       syncProviderRows();
       syncProviderCards();
+      syncOaiRows();
     } else if (tab === "advanced") {
       setStatus("高级选项一般保持默认");
     } else {
@@ -6710,7 +6645,7 @@ function injectTranslation(row, sig, text) {
     if (field) {
       try {
         field.text = text;
-      } catch (e) {}
+      } catch{}
     }
   }
 
@@ -6795,7 +6730,7 @@ function injectTranslation(row, sig, text) {
         const c = btn.GetChild(i);
         if (c && isValid(c) && String(c.paneltype).indexOf("Label") >= 0) return c;
       }
-    } catch (e) {}
+    } catch{}
     return null;
   }
 
@@ -6805,7 +6740,7 @@ function injectTranslation(row, sig, text) {
     if (label) {
       try {
         label.text = text;
-      } catch (e) {
+      } catch{
         diagLog("seltext_fail", "PANORAMA: setSelectText 赋值失败 " + buttonId);
       }
     } else {
@@ -6842,7 +6777,7 @@ function injectTranslation(row, sig, text) {
       if (m) {
         try {
           m.RemoveClass(SETTINGS_VISIBLE_CLASS);
-        } catch (e) {}
+        } catch{}
       }
     }
   }
@@ -6857,13 +6792,13 @@ function injectTranslation(row, sig, text) {
       try {
         if (State.cfg.targetLanguage === "custom") t.AddClass(SETTINGS_VISIBLE_CLASS);
         else t.RemoveClass(SETTINGS_VISIBLE_CLASS);
-      } catch (e) {}
+      } catch{}
     }
     if (o) {
       try {
         if (State.cfg.outgoingTarget === "custom") o.AddClass(SETTINGS_VISIBLE_CLASS);
         else o.RemoveClass(SETTINGS_VISIBLE_CLASS);
-      } catch (e) {}
+      } catch{}
     }
   }
 
@@ -6875,12 +6810,12 @@ function injectTranslation(row, sig, text) {
     // Button 自身不渲染 text,必须更新内嵌 Label(命名约定:<按钮id>Label)
     const label = findButtonLabel(panel, id);
     if (label) {
-      try { label.text = on ? "是" : "否"; } catch (e) {}
+      try { label.text = on ? "是" : "否"; } catch{}
       // 开/关用颜色区分,扫一眼就能看出状态
       try {
         if (on) label.AddClass("LCTOn");
         else label.RemoveClass("LCTOn");
-      } catch (e) {}
+      } catch{}
     }
     // 第一版开关是轨道 + 圆点:状态类加在 Button 上,Label 只做无头状态位
     const toggle = findChild(panel, id);
@@ -6888,7 +6823,7 @@ function injectTranslation(row, sig, text) {
       try {
         if (on) toggle.AddClass("LCTOn");
         else toggle.RemoveClass("LCTOn");
-      } catch (e) {}
+      } catch{}
     } else {
       diagLog("tg_" + id, "PANORAMA: setToggleText 找不到 " + id);
     }
@@ -6902,7 +6837,7 @@ function injectTranslation(row, sig, text) {
       try {
         if (on) b.AddClass("LCTSegOn");
         else b.RemoveClass("LCTSegOn");
-      } catch (e) {}
+      } catch{}
     };
     const d = State.cfg.displayMode || "bilingual";
     setSeg("LCTSegDisplayBilingual", d === "bilingual");
@@ -6932,19 +6867,91 @@ function injectTranslation(row, sig, text) {
         try {
           if (value === p) card.AddClass("LCTProvOn");
           else card.RemoveClass("LCTProvOn");
-        } catch (e) {}
+        } catch{}
       }
       if (state) {
-        const text = value === "bing" ? "免 Key" : (keys[value] ? "已配置" : "未配置");
-        try { state.text = text; } catch (e) {}
+        // v2.3.0:openai 类有端点列表时显示「N 端点」,不再是单 Key 的已配/未配
+        let text;
+        if (value === "bing") text = "免 Key";
+        else if (value === "openai" && Array.isArray(State.cfg.openaiRows) && State.cfg.openaiRows.length) {
+          text = State.cfg.openaiRows.length + " 端点";
+        } else {
+          text = keys[value] ? "已配置" : "未配置";
+        }
+        try { state.text = text; } catch{}
       }
     }
     const nav = findChild(root, "LCTNavProvider");
     if (nav) {
       for (let i = 0; i < defs.length; i += 1) {
-        if (defs[i][0] === p) { try { nav.text = defs[i][3]; } catch (e) {} }
+        if (defs[i][0] === p) { try { nav.text = defs[i][3]; } catch{} }
       }
     }
+  }
+
+  // ===== v2.3.0 OpenAI 多端点列表(游戏内只读展示 + 调顺序/整行开关)=====
+  // 数据来自 op=ui 的 openaiRows(启动同步);Key 的增删/启用在网页设置页,
+  // 游戏内只下发 [{id,enabled}] id 合并形态(调顺序+整行开关),不碰 Key 明文。
+  const OAI_ROW_MAX = 4;
+
+  function syncOaiRows() {
+    const rows = Array.isArray(State.cfg.openaiRows) ? State.cfg.openaiRows : [];
+    for (let i = 0; i < OAI_ROW_MAX; i += 1) {
+      const slot = findChild(getRoot(), "LCTOaiRow" + i);
+      if (!slot) continue;
+      const r = rows[i];
+      if (!r) {
+        try { slot.style.visibility = "collapse"; } catch{}
+        continue;
+      }
+      try { slot.style.visibility = "visible"; } catch{}
+      const name = findChild(getRoot(), "LCTOaiName" + i);
+      const meta = findChild(getRoot(), "LCTOaiMeta" + i);
+      const toggleLbl = findChild(getRoot(), "LCTOaiToggleLbl" + i);
+      const up = findChild(getRoot(), "LCTOaiUp" + i);
+      const down = findChild(getRoot(), "LCTOaiDown" + i);
+      if (name) {
+        try { name.text = (i === 0 ? "★ " : "") + r.name; } catch{}
+      }
+      if (meta) {
+        try { meta.text = r.ke + "/" + r.k + " Keys" + (r.builtin ? " · 内置" : "") + (r.on ? "" : " · 已停用"); } catch{}
+      }
+      if (toggleLbl) {
+        try { toggleLbl.text = r.on ? "停用" : "启用"; } catch{}
+      }
+      // 首行不能上移,末行不能下移
+      if (up) { try { up.style.visibility = (i === 0 || rows.length === 1) ? "collapse" : "visible"; } catch{} }
+      if (down) { try { down.style.visibility = (i === rows.length - 1 || rows.length === 1) ? "collapse" : "visible"; } catch{} }
+    }
+    // 列表整卡:没有端点时收起来,免得空标题碍眼
+    const card = findChild(getRoot(), "LCTOaiListCard");
+    if (card) { try { card.style.visibility = rows.length ? "visible" : "collapse"; } catch{} }
+    const secTitle = findChild(getRoot(), "LCTOaiListTitle");
+    if (secTitle) { try { secTitle.style.visibility = rows.length ? "visible" : "collapse"; } catch{} }
+  }
+
+  function LCTOaiMove(i, d) {
+    const rows = State.cfg.openaiRows;
+    if (!Array.isArray(rows)) return;
+    const j = i + d;
+    if (j < 0 || j >= rows.length) return;
+    const t = rows[i];
+    rows[i] = rows[j];
+    rows[j] = t;
+    State.cfg._oaiTouched = true;
+    syncOaiRows();
+    setStatus("端点顺序已调整 · 点保存生效");
+    diagLog("oaimove", "PANORAMA: oai move " + i + " -> " + j);
+  }
+
+  function LCTOaiToggle(i) {
+    const rows = State.cfg.openaiRows;
+    if (!Array.isArray(rows) || !rows[i]) return;
+    rows[i].on = !rows[i].on;
+    State.cfg._oaiTouched = true;
+    syncOaiRows();
+    setStatus(rows[i].on ? "「" + rows[i].name + "」已启用 · 点保存生效" : "「" + rows[i].name + "」已停用 · 点保存生效");
+    diagLog("oaitoggle", "PANORAMA: oai toggle " + rows[i].id + " -> " + (rows[i].on ? "on" : "off"));
   }
 
   function LCTShowKey() {
@@ -6959,16 +6966,16 @@ function injectTranslation(row, sig, text) {
     keyVisible = !keyVisible;
     setFieldText("LCTApiKey", keyVisible ? key : "********");
     if (btnLabel) {
-      try { btnLabel.text = keyVisible ? "隐藏" : "显示"; } catch (e) {}
+      try { btnLabel.text = keyVisible ? "隐藏" : "显示"; } catch{}
     }
   }
 
   function LCTSaveAndClose() {
-    try { LCTSave(); } catch (e) {}
+    try { LCTSave(); } catch{}
     try {
       settingsOpen = false;
       closeSettingsPanel();
-    } catch (e) {}
+    } catch{}
   }
 
   function LCTOnToggle(which) {
@@ -7005,7 +7012,7 @@ function injectTranslation(row, sig, text) {
       if (!row) return;
       try {
         row.style.visibility = show ? "visible" : "collapse";
-      } catch (e) {}
+      } catch{}
     };
     // 高级设置整体折叠:收起时连服务商专属行一起隐藏,展开后才按服务商显示
     setRow("LCTCredSection", p !== "bing");
@@ -7020,7 +7027,7 @@ function injectTranslation(row, sig, text) {
     setRow("LCTRowOutgoingTarget", (State.cfg.outgoing || "off") !== "off");
     const advLabel = findChild(getRoot(), "LCTAdvancedLabel");
     if (advLabel) {
-      try { advLabel.text = uiAdvancedOpen ? "展开" : "收起"; } catch (e) {}
+      try { advLabel.text = uiAdvancedOpen ? "展开" : "收起"; } catch{}
     }
     let hint = "";
     if (p === "bing") hint = "免 Key 公共接口,可能有隐形限流;失败可配置自动回退";
@@ -7037,7 +7044,7 @@ function injectTranslation(row, sig, text) {
     syncPanelFromConfig();
     keyVisible = false;
     const showKeyLabel = findChild(getRoot(), "LCTShowKeyLabel");
-    if (showKeyLabel) { try { showKeyLabel.text = "显示"; } catch (e) {} }
+    if (showKeyLabel) { try { showKeyLabel.text = "显示"; } catch{} }
     // 该服务商已配置 Key:回填占位符,避免面板显示空白
     if ((State.cfg._providerKeys || {})[value]) setFieldText("LCTApiKey", "********");
     updateKeyStateLabel();
@@ -7081,7 +7088,7 @@ function injectTranslation(row, sig, text) {
     if (!isOpen) {
       try {
         menu.AddClass(SETTINGS_VISIBLE_CLASS);
-      } catch (e) {}
+      } catch{}
     }
     log("menu: " + field + (isOpen ? " close" : " open"));
     diagLog("menu_" + field, "PANORAMA: menu: " + field + (isOpen ? " close" : " open"));
@@ -7109,7 +7116,7 @@ function injectTranslation(row, sig, text) {
       if (custom && custom.SetFocus) {
         try {
           custom.SetFocus();
-        } catch (e) {}
+        } catch{}
       }
     }
   }
@@ -7171,6 +7178,8 @@ function injectTranslation(row, sig, text) {
         targetLanguage: targetLang,
         force: !!State.cfg.force,
         timeoutMs: Number(fieldValue("LCTTimeout")) || 15000,
+        hudLinger: State.cfg.hudLinger !== false,
+        hudLingerSeconds: Number(State.cfg.hudLingerSeconds) || 0,
       },
     };
     // 端点类字段为空 -> 不下发。applyMaskedUpdate 对空串是按需清空的语义,发空串会把
@@ -7179,6 +7188,15 @@ function injectTranslation(row, sig, text) {
     for (let i = 0; i < endpointKeys.length; i += 1) {
       if (!patch[endpointKeys[i]]) delete patch[endpointKeys[i]];
     }
+    // v2.3.0 多端点:游戏内调过顺序/整行开关才下发 id 合并形态(只改顺序+enabled,
+    // 不碰 baseUrl/model/Key —— 那些在网页设置页管)。未动过就完全不下发。
+    if (State.cfg._oaiTouched && Array.isArray(State.cfg.openaiRows)) {
+      patch.openai = {
+        providers: State.cfg.openaiRows.map(function (r) {
+          return { id: r.id, enabled: !!r.on };
+        }),
+      };
+    }
     return patch;
   }
 
@@ -7186,7 +7204,7 @@ function injectTranslation(row, sig, text) {
     diagLog("saveclick", "PANORAMA: save clicked");
     closeSelectMenus();
     const p = collectPanelConfig();
-    for (const f of ["provider", "targetLanguage", "displayMode", "outgoing", "outgoingTarget", "enabled", "force", "timeoutMs", "chatLog", "translateOwn"]) markUiTouched(f);
+    for (const f of ["provider", "targetLanguage", "displayMode", "outgoing", "outgoingTarget", "enabled", "force", "timeoutMs", "chatLog", "translateOwn", "hudLinger", "hudLingerSeconds"]) markUiTouched(f);
     bridgePost("config", { config: p }, function (res) {
       if (res && res.ok) {
         State.cfg.provider = p.provider || State.cfg.provider;
@@ -7199,6 +7217,10 @@ function injectTranslation(row, sig, text) {
         State.cfg.timeoutMs = p.timeoutMs;
         State.cfg.chatLog = p.chatLog !== false;
         State.cfg.translateOwn = p.translateOwn !== false;
+        if (p.ui) {
+          State.cfg.hudLinger = p.ui.hudLinger !== false;
+          State.cfg.hudLingerSeconds = Number(p.ui.hudLingerSeconds) || 0;
+        }
         // 保存成功:同步 Key 状态(新填 Key / 保留占位符都视为已有 Key)
         if (State.cfg._providerKeys) {
           State.cfg._providerKeys[p.provider || "bing"] = !!(p.apiKey && p.apiKey !== "");
@@ -7230,7 +7252,7 @@ function injectTranslation(row, sig, text) {
   function summarizeIdentityValue(value) {
     if (value === undefined || value === null) return "";
     if (typeof value === "object") {
-      try { return JSON.stringify(value).slice(0, 400); } catch (e) {}
+      try { return JSON.stringify(value).slice(0, 400); } catch{}
       return Object.prototype.toString.call(value);
     }
     return String(value).slice(0, 400);
@@ -7239,7 +7261,7 @@ function injectTranslation(row, sig, text) {
   function probePlayerApiDiagnostics() {
     try {
       let globalKeys = [];
-      try { globalKeys = Object.keys(globalThis); } catch (e) {}
+      try { globalKeys = Object.keys(globalThis); } catch{}
       diagLog("player global keys(" + globalKeys.length + ")=" + globalKeys.slice(0, 250).join(","));
       const relevant = [];
       for (let i = 0; i < globalKeys.length; i += 1) {
@@ -7248,7 +7270,7 @@ function injectTranslation(row, sig, text) {
       diagLog("player global relevant=" + (relevant.length ? relevant.join(",") : "(none)"));
 
       let ownNames = [];
-      try { ownNames = Object.getOwnPropertyNames(globalThis); } catch (e) {}
+      try { ownNames = Object.getOwnPropertyNames(globalThis); } catch{}
       const ownRelevant = [];
       for (let i = 0; i < ownNames.length; i += 1) {
         if (/player|hero|steam|account|match|lobby|game|citadel|deadlock|net|convar|entity|team|score|ui|conv/i.test(ownNames[i])) ownRelevant.push(ownNames[i]);
@@ -7256,21 +7278,21 @@ function injectTranslation(row, sig, text) {
       diagLog("player global own relevant=" + (ownRelevant.length ? ownRelevant.join(",") : "(none)"));
 
       const ctx = $.GetContextPanel();
-      try { diagLog("player ctx keys=" + Object.keys(ctx).slice(0, 200).join(",")); } catch (e) {}
-      try { diagLog("player $ keys=" + Object.keys($).slice(0, 200).join(",")); } catch (e) {}
+      try { diagLog("player ctx keys=" + Object.keys(ctx).slice(0, 200).join(",")); } catch{}
+      try { diagLog("player $ keys=" + Object.keys($).slice(0, 200).join(",")); } catch{}
 
       const root = getRoot();
       let chain = [];
       let cur = root;
       for (let depth = 0; isValid(cur) && depth < 10; depth += 1) {
         let id = "";
-        try { id = String(cur.id || ""); } catch (e) {}
+        try { id = String(cur.id || ""); } catch{}
         let type = "";
-        try { type = String(cur.paneltype || ""); } catch (e) {}
+        try { type = String(cur.paneltype || ""); } catch{}
         let layout = "";
-        try { layout = String(cur.layoutfile || ""); } catch (e) {}
+        try { layout = String(cur.layoutfile || ""); } catch{}
         chain.push(type + "#" + id + "(" + layout + ")");
-        try { cur = cur.GetParent && cur.GetParent(); } catch (e) { cur = null; }
+        try { cur = cur.GetParent && cur.GetParent(); } catch{ cur = null; }
       }
       diagLog("player root chain=" + chain.join(" > "));
 
@@ -7280,16 +7302,16 @@ function injectTranslation(row, sig, text) {
         const name = cands[c];
         try {
           if (globalThis[name] !== undefined && globalThis[name] !== null) present.push(name);
-        } catch (e) {}
+        } catch{}
       }
       diagLog("player ns present=" + (present.length ? present.join(",") : "(none)"));
       for (let c = 0; c < cands.length; c += 1) {
         const name = cands[c];
         let ns = null;
-        try { ns = globalThis[name]; } catch (e) {}
+        try { ns = globalThis[name]; } catch{}
         if (ns === undefined || ns === null) continue;
         let keys = [];
-        try { keys = Object.keys(ns); } catch (e) {}
+        try { keys = Object.keys(ns); } catch{}
         const rel = [];
         for (let k = 0; k < keys.length; k += 1) {
           if (/player|hero|team|steam|account|local|name|id|match|game/i.test(keys[k])) rel.push(keys[k]);
@@ -7314,7 +7336,7 @@ function injectTranslation(row, sig, text) {
       }
       if (typeof Players !== "undefined") {
         if (localId >= 0 && isCallable(Players.GetPlayerName)) {
-          try { diagLog("player Players.GetPlayerName(local)=" + String(Players.GetPlayerName(localId) || "")); } catch (e) {}
+          try { diagLog("player Players.GetPlayerName(local)=" + String(Players.GetPlayerName(localId) || "")); } catch{}
         }
       }
     } catch (e) {
@@ -7334,7 +7356,7 @@ function injectTranslation(row, sig, text) {
     try {
       const dk = Object.keys($);
       diagOnce("inbound-dollar", "$ keys(" + dk.length + ")=" + dk.join(","));
-    } catch (e) {}
+    } catch{}
   }
   function boot() {
     State.cfg = loadUiConfig();
@@ -7386,6 +7408,8 @@ function injectTranslation(row, sig, text) {
   exportGlobal("LCTToggleMenu", LCTToggleMenu);
   exportGlobal("LCTPickLang", LCTPickLang);
   exportGlobal("LCTPickProvider", LCTPickProvider);
+  exportGlobal("LCTOaiMove", LCTOaiMove);
+  exportGlobal("LCTOaiToggle", LCTOaiToggle);
   exportGlobal("LCTPickOption", LCTPickOption);
   exportGlobal("LCTSave", LCTSave);
   exportGlobal("LCTTest", LCTTest);
@@ -7403,12 +7427,12 @@ function injectTranslation(row, sig, text) {
       if (!hero) hero = readHeroFromHeroImage(findChild(panel, "HeroBadge")) || readHeroFromHeroImage(findChild(panel, "HeroImage"));
       if (!hero) hero = fallbackHeroForSender(name);
       State.hoverRow = { panel: panel, hero: hero, name: name, t: nowMs() };
-    } catch (e) {}
+    } catch{}
   });
   exportGlobal("LCTRowUnhovered", function (panel) {
     try {
       if (State.hoverRow && (!panel || State.hoverRow.panel === panel)) State.hoverRow = null;
-    } catch (e) {}
+    } catch{}
   });
 
   boot();

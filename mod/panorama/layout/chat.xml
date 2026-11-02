@@ -90,7 +90,7 @@
 					<Label class="LCTBrandSub" text="CHAT TRANSLATION" />
 				</Panel>
 				<Panel class="LCTHeaderSpacer" />
-				<Label class="LCTVersion" text="v2.2.1" />
+				<Label class="LCTVersion" text="v2.3.0" />
 				<Button id="LCTCloseBtn" class="LCTHeaderClose" onactivate="LCTCloseSettings();">
 					<Label text="X" />
 				</Button>
@@ -312,9 +312,59 @@
 								<Label class="LCTCredHint" text="OpenAI 兼容接口可接 DeepSeek、Ollama、LM Studio、OneAPI;Base URL 需带 /v1。" />
 							</Panel>
 						</Panel>
-						</Panel>
+					</Panel>
 
-						<Label class="LCTSectionTitle" text="失败回退" />
+					<!-- v2.3.0 OpenAI 多端点列表(行序=回退顺序;Key 在网页设置页管,游戏内只调顺序/整行开关) -->
+					<Label class="LCTSectionTitle" text="OpenAI 端点列表" />
+					<Panel class="LCTCard" id="LCTOaiListCard">
+						<Panel id="LCTOaiRow0" class="LCTOaiRow" visible="false">
+							<Panel class="LCTRowText">
+								<Label id="LCTOaiName0" class="LCTRowLabel" text="" />
+								<Label id="LCTOaiMeta0" class="LCTRowDesc" text="" />
+							</Panel>
+							<Panel class="LCTOaiOps">
+								<Button id="LCTOaiUp0" class="LCTOaiBtn" onactivate="LCTOaiMove(0,-1);"><Label text="↑" /></Button>
+								<Button id="LCTOaiDown0" class="LCTOaiBtn" onactivate="LCTOaiMove(0,1);"><Label text="↓" /></Button>
+								<Button id="LCTOaiToggle0" class="LCTOaiBtn" onactivate="LCTOaiToggle(0);"><Label id="LCTOaiToggleLbl0" text="停用" /></Button>
+							</Panel>
+						</Panel>
+						<Panel id="LCTOaiRow1" class="LCTOaiRow" visible="false">
+							<Panel class="LCTRowText">
+								<Label id="LCTOaiName1" class="LCTRowLabel" text="" />
+								<Label id="LCTOaiMeta1" class="LCTRowDesc" text="" />
+							</Panel>
+							<Panel class="LCTOaiOps">
+								<Button id="LCTOaiUp1" class="LCTOaiBtn" onactivate="LCTOaiMove(1,-1);"><Label text="↑" /></Button>
+								<Button id="LCTOaiDown1" class="LCTOaiBtn" onactivate="LCTOaiMove(1,1);"><Label text="↓" /></Button>
+								<Button id="LCTOaiToggle1" class="LCTOaiBtn" onactivate="LCTOaiToggle(1);"><Label id="LCTOaiToggleLbl1" text="停用" /></Button>
+							</Panel>
+						</Panel>
+						<Panel id="LCTOaiRow2" class="LCTOaiRow" visible="false">
+							<Panel class="LCTRowText">
+								<Label id="LCTOaiName2" class="LCTRowLabel" text="" />
+								<Label id="LCTOaiMeta2" class="LCTRowDesc" text="" />
+							</Panel>
+							<Panel class="LCTOaiOps">
+								<Button id="LCTOaiUp2" class="LCTOaiBtn" onactivate="LCTOaiMove(2,-1);"><Label text="↑" /></Button>
+								<Button id="LCTOaiDown2" class="LCTOaiBtn" onactivate="LCTOaiMove(2,1);"><Label text="↓" /></Button>
+								<Button id="LCTOaiToggle2" class="LCTOaiBtn" onactivate="LCTOaiToggle(2);"><Label id="LCTOaiToggleLbl2" text="停用" /></Button>
+							</Panel>
+						</Panel>
+						<Panel id="LCTOaiRow3" class="LCTOaiRow" visible="false">
+							<Panel class="LCTRowText">
+								<Label id="LCTOaiName3" class="LCTRowLabel" text="" />
+								<Label id="LCTOaiMeta3" class="LCTRowDesc" text="" />
+							</Panel>
+							<Panel class="LCTOaiOps">
+								<Button id="LCTOaiUp3" class="LCTOaiBtn" onactivate="LCTOaiMove(3,-1);"><Label text="↑" /></Button>
+								<Button id="LCTOaiDown3" class="LCTOaiBtn" onactivate="LCTOaiMove(3,1);"><Label text="↓" /></Button>
+								<Button id="LCTOaiToggle3" class="LCTOaiBtn" onactivate="LCTOaiToggle(3);"><Label id="LCTOaiToggleLbl3" text="停用" /></Button>
+							</Panel>
+						</Panel>
+						<Label class="LCTCredHint" text="行序 = 回退顺序;Key 的增删/启用在网页设置页(http://127.0.0.1:8791/settings)管理,这里只调顺序和整行开关。" />
+					</Panel>
+
+					<Label class="LCTSectionTitle" text="失败回退" />
 						<Panel class="LCTCard">
 							<Panel id="LCTRowFallback" class="LCTSettingsRow">
 								<Panel class="LCTRowText">

@@ -626,6 +626,43 @@
   text-shadow: 0px 1px 2px rgba(0, 0, 0, 0.95);
 }
 
+/* 顶栏气泡驻留胶囊:行被 C++ 回收后,在顶栏根下挂「原文 + 译文(或翻译中…)」 */
+.LCTLingeringCapsule {
+  background: rgba(10, 12, 16, 0.92);
+  border: 1px solid rgba(255, 210, 127, 0.55);
+  border-radius: 4px;
+  margin: 4px;
+  padding: 6px 10px;
+  flow-children: down;
+  width: fit-children;
+  height: fit-children;
+  z-index: 120;
+  transition-property: opacity;
+  transition-duration: 0.4s;
+}
+
+.LCTLingeringOrig {
+  font-size: 12px;
+  color: #8a93a3;
+  max-width: 300px;
+  white-space: normal;
+  text-shadow: 0px 1px 2px rgba(0, 0, 0, 0.95);
+}
+
+.LCTLingeringText {
+  color: #ffd27f;
+  font-size: 15px;
+  font-weight: bold;
+  letter-spacing: 0.2px;
+  max-width: 300px;
+  white-space: normal;
+  text-shadow: 0px 1px 2px rgba(0, 0, 0, 0.95);
+}
+
+.LCTLingeringFade {
+  opacity: 0;
+}
+
 .LCTPanelSub {
   font-size: 13px;
   color: #8a94a3;
@@ -1147,6 +1184,56 @@
 
 .LCTProvCard.LCTProvOn .LCTProvCheck {
   visibility: visible;
+}
+
+/* v2.3.0 OpenAI 多端点行(游戏内:只调顺序/整行开关,Key 在网页设置页管) */
+.LCTOaiRow {
+  width: 100%;
+  min-height: 44px;
+  flow-children: across;
+  align: center;
+  padding: 6px 10px;
+  margin-bottom: 6px;
+  background-color: #151b22;
+  border: 1px solid rgba(255, 255, 255, 0.065);
+  border-radius: 8px;
+}
+.LCTOaiRow .LCTRowText {
+  width: fill-parent-flow( 1 );
+  flow-children: down;
+  margin-right: 8px;
+}
+.LCTOaiRow .LCTRowLabel {
+  font-size: 11.5px;
+  font-weight: bold;
+}
+.LCTOaiRow .LCTRowDesc {
+  font-size: 9.5px;
+}
+.LCTOaiOps {
+  flow-children: right;
+  vertical-align: center;
+}
+.LCTOaiBtn {
+  width: 30px;
+  height: 26px;
+  margin-left: 5px;
+  background-color: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.LCTOaiBtn:hover {
+  border: 1px solid rgba(231, 185, 107, 0.4);
+}
+.LCTOaiBtn Label {
+  horizontal-align: center;
+  vertical-align: middle;
+  color: #8a93a3;
+  font-size: 11px;
+}
+.LCTOaiBtn:hover Label {
+  color: #e7b96b;
 }
 
 /* 凭据卡 */

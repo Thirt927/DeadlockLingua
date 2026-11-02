@@ -2,6 +2,48 @@
 
 所有重要变更都会记录在此文件。
 
+## v2.3.0 (2026-11-02)
+
+### 新增
+
+- **服务商管理 v4(DSH 行式,多端点 + 多 Key 池)**:
+  - 一行一个提供商,行序 = 回退顺序;行内可挂多把 Key(自动轮询躲限额),
+    失败 Key 自动冷却跳过(429→60s,401/403→300s)、恢复后自动回池。
+  - 端点级测试、模型目录获取(打端点 /models)、内置目录(DeepSeek/OpenAI/Ollama 本地)
+    与自定义 OpenAI 兼容端点双模式添加、删除两步确认。
+  - **Key 只写**:保存后任何读口(游戏面板/网页/API)只回脱敏描述符(如 `sk-…abcd`),
+    明文只存本地 config/config.json。
+  - 旧 `openai.apiKey` 单端点首次读取时自动包成第 1 行,不丢数据。
+  - 网页设置页(`/settings`)行式端点分组;游戏内 /tr「服务商」页新增「OpenAI 端点列表」
+    紧凑行(调顺序/整行启停;Key 增删在网页页管)。
+  - 桥端新增 `POST /api/v1/providers/test` 与 `POST /api/v1/providers/models`;
+    `op=ui` 下行新增 `openaiRows` 端点摘要;全部端点挂后隐式补 Bing 免 Key 兜底。
+
+### 修复
+
+- `lingua_chat.js` 清理 8 个死函数与 347 处未用 catch 参数(ES2019 可选 catch 绑定)。
+
+## v2.2.2 (2026-11-02)
+
+### 新增
+
+- **顶栏气泡驻留（linger）**：官方顶栏气泡在 `.ChatMessage.Expired` + 0.3s CSS 淡出后
+  立即消失，而 BTIPC 译文常是 10~30s 后才到，导致「翻译没完气泡就没影」。
+  新增驻留胶囊：译文在途/刚送达时不让气泡视觉消失，送达后再驻留可配置秒数
+  （`ui.hudLinger` 默认开、`ui.hudLingerSeconds` 默认 8s，0 = 只在途保活；
+  Web 设置页「顶栏气泡驻留」可开关）。
+- 桥端 `POST /api/v1/config` 接受 `ui.hudLinger` / `ui.hudLingerSeconds`。
+
+### 修复
+
+- **v2.2.0 快捷判定误伤顶栏普通聊天（回归）**：`readMessageRow` 的 HUD 分支用
+  `findChild(row, "TargetHeroImage")` 判「快捷发言」，但新版顶栏**每一行**都挂着
+  HeroBadge/HeroImage 等结构性子节点，`findChild` 必命中 → 顶栏所有普通聊天气泡
+  被 `shouldSkip` 整局跳过，气泡不再出译文（聊天框仍秒翻译，用户 2026-11-02 实机报告）。
+  改为内容感知判定：行类名 `Ping`/`PingRepeatable`/`PingRepeated` + `PingLabel`
+  确实有文字才算快捷；`TargetHeroImage` 结构存在性不再参与判定（仅保留注释说明）。
+  底部聊天行同步收紧为同一判定（含 `MessageContents.Ping`）。
+
 ## v2.2.0 (2026-10-27)
 
 ### 新增

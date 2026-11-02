@@ -2195,3 +2195,65 @@ ode -e "JSON.parse(...)" 通过)。
 - **验证方式**: chat.xml 用 Python ElementTree 解析通过（root 只有一个子面板）；`node --check` / LSP 干净；`build.ps1` 编译 7 个文件全 ok，`dist/pak22_dir.vpk` 已部署到 addons（421028 字节）。
 - **仍需用户测试**: 重启 Deadlock 后 ①ESC → 翻译设置,确认面板真正屏幕居中、底边「完成并关闭」可见可点;②`/tr` 打开,确认汉字不再被裁、聊天收起/展开都不消失、右下角是叉号且能关闭;③桥日志里新增的 `PANORAMA: settings hosted=root`、`PANORAMA: settings geometry ...` 两行可作为下一轮排障依据(若 `host=unchanged` 或 `par=CitadelChat` 说明 reparent 没生效)。
 - **补丁(m00411)**: 用户指出 `/tr` 页脚是「**换成**叉号」而不是「多一个叉号」。根因:`chat.xml` 里「完成并关闭」的 Button 只写了 `class="LCTPrimary"`,**没有 `LCTFinishBtn` 类**,所以 `.LCTChatMode .LCTFinishBtn { visibility: collapse }` 从来没生效 → 两个按钮同时出现。修法三层:①`chat.xml` 补 `class="LCTPrimary LCTFinishBtn"`;②CSS 同时写 `.LCTChatMode .LCTFinishBtn, .LCTChatMode #LCTFinishBtn`(id 兜底);③`openSettingsPanel()` 里按入口用内联 `style.visibility` 强制 `LCTFinishBtn` collapse / `LCTChatCloseBtn` visible(ESC 版反过来),并打 `diagLog("setfoot", ...)`。叉号点击语义保持 `LCTSaveAndClose()`(与原来的「完成并关闭」一致,不会丢改动)。
+
+## 第九十八轮(2026-11-02): 顶栏气泡驻留(linger) + v2.2.0 快捷判定误伤修复(v2.2.2)
+
+- **需求**: ①(m00001)官方顶栏气泡消失太快,"有时候翻译没翻译完就消失了,我还要去聊天框里找"；
+  ②(m00529,用户实机)聊天框都是秒翻译,但**顶栏气泡完全不显示译文**——用户怀疑 v2.2.0
+  的快捷发言改动"不小心都去掉了",要求检查并判断本次修改是否有必要。
+- **根因**:
+  - ①官方气泡淡出由游戏端 C++ 计时器驱动(`.ChatMessage.Expired` + 0.3s CSS 淡出,
+    `citadel_hud_top_bar_chat.vcss_c`),引擎无 JS hook、计时器不可 patch;而 BTIPC 译文
+    常 10~30s 才到 → 译文到达时气泡已消失。
+  - ②v2.2.0(commit 26a3e13)把 HUD 行判定改成
+    `quick: !!(findChild(row, "PingLabel") || findChild(row, "TargetHeroImage"))`,
+    但**新版顶栏每一行**都挂着 HeroBadge/HeroImage/TargetHero 等结构性子节点
+    (二进制布局探测:TargetHero 节点在通用 ChatMessage snippet 内,所有行实例化;
+    运行期 diag 每行 `heroImage=true`、零 channel=hud 译文)→
+    `findChild`(FindChildTraverse)**只看结构存在性、不看可见/有无内容**,必命中 →
+    顶栏所有普通聊天气泡被 `shouldSkip` 整局跳过。经验教训:结构性子节点存在性
+    不能用来做 ping 行判定,要用行类名或内容。
+- **改动**:
+  - `mod/panorama/scripts/lingua_chat.js`:
+    - **快捷判定修复**:HUD 分支改为 `hudQuick = !!(hasClass(row, "Ping") || hasClass(row, "PingRepeatable") || hasClass(row, "PingRepeated") || (hudPingLabel && safeText(hudPingLabel)))`——
+      只用行类名 + PingLabel 确实有文字;`TargetHeroImage` 结构存在性不再参与(留注释说明);
+      底部聊天行同步收紧(`bottomQuick` 含 `contents && hasClass(contents, "Ping")`);
+      一次性 `hud row diag` 增加 `ping=` / `pingText=` 信号,方便下一轮实机核验。
+    - **顶栏气泡驻留(linger)**:`State.lingeringCapsules` Map(textKey → 胶囊节点);
+      `addPendingTextAlias` 打 `row.__lctPendingAt`(译文开始等待);`injectTranslation`
+      注入时刻打 `row.__lctTransAt`;`lingerHudRows()` 周期扫描:
+      在途(pending 未送达且在 PENDING_LINGER_CAP_MS 内)或刚送达(在 `hudLingerSeconds`
+      窗口内)的行若被加了 `Expired` 类就 `RemoveClass("Expired")` 保活;行被游戏回收时
+      把译文塞进顶栏驻留胶囊(`fillLingeringCapsule`,按 textKey 复用,上限 LINGER_CAP,
+      驻留结束后自动淡出删除)。
+  - `mod/panorama/styles/lingua_chat.css`: `.LCTLingeringCapsule` / `.LCTLingeringOrig` /
+    `.LCTLingeringText` 胶囊样式(37 行)。
+  - `core/config.js`: `ui.hudLinger`(默认 true)+ `ui.hudLingerSeconds`(默认 8,0=只在途保活,
+    上限 60)及 `POST /api/v1/config` 白名单。
+  - `core/settings_page.html`: Web 设置页「顶栏气泡驻留」开关 + 驻留时长时间字段。
+  - 版本号 2.2.1 → **2.2.2**(lingua_chat.js `VERSION`、chat.xml `LCTVersion`、`VERSION`、
+    README/README_EN 徽标、CHANGELOG 新增 v2.2.2)。
+- **验证方式**: `node --check` 通过;离线测试绿(btipc 5 套 + live_http +
+  `scripts/lingua_chat_simtest.js`);`build.ps1` 编译成功;`dist/pak22_dir.vpk`(432066 字节,
+  md5 4f6cd384...)已部署到 addons,用 `vpkeditcli --extract` 抽出后 grep 新代码独有标记
+  `pingText=` / `hudQuick` / `PingRepeatable` / `hudLinger` 全部命中,确认新构建已含全部改动。
+- **仍需用户测试**: 启动 Deadlock(带 `-condebug`)进一局:①顶栏普通聊天气泡应重新出译文;
+  ②气泡被游戏判 Expired 后,译文在途/刚送达时不消失,送达后再驻留 8s(可关/调时长);
+  ③打一条 Ping/快捷发言,确认仍不翻译;④桥日志 `hud row diag` 行里 `ping=`/`pingText=`
+  信号可确认普通行 ping=0、Ping 行 ping=1。
+
+## 第九十九轮(2026-11-02): v4 多端点服务商管理(DSH 行式)落地 (v2.3.0)
+
+- **优化主题**: 服务商设置从「单端点单 Key」升级为 v4 原型(DSH 行式)的完整实现:一行一个提供商(行序=回退顺序)、行内多 Key 轮询池(逗号快加/单独启停/删除)、Key 只写脱敏(保存后只回 `sk-…abcd` 描述符)、模型列表一等公民(网页页可「获取可用模型」打端点 /models)、端点级测试、内置目录+自定义双模式添加、删除两步确认;旧 `openai.apiKey` 单端点自动包成第 1 行不丢数据。
+- **改动文件**:
+  - `core/config.js`:新增 `openai.providers` 端点列表(行序=回退序),Key 池写口(完整重写/打码哨兵保持原值),`migrateOpenaiProviders` 旧单 Key 自动包成第 1 行,`mask()` 只回脱敏描述符,导出 `normalize/migrateOpenaiProviders/maskKeyValue`。
+  - `core/providers/openai.js`:新增多端点+Key 轮询池——`buildCandidatePlan`(行序×行内游标轮询,跳过冷却中 Key)、`translateRows`(行级回退:5xx/超时/404 跳整行,401/403/429 跳下一把 Key)、Key 自动冷却(429→60s,401/403→300s,成功即回池)、`testRow`/`fetchModels`(打端点 /models 拉目录)。
+  - `core/bridge_server.js`:`runTranslate` 在 openai 类走多端点,全挂后隐式补 Bing 兜底;`op=ui` 新增 `openaiRows` 端点摘要(游戏内只读展示+调顺序/整行开关,不碰 Key 明文);新增 `/api/v1/providers/test` 与 `/api/v1/providers/models`。
+  - `core/settings_page.html`:网页设置页新增 v4 行式「OpenAI 兼容端点」分组——行列表(状态点/徽章/★最优先/↑↓/编辑/删除两步确认)、单编辑卡、Key 池(逗号快加/单把启停/复制/删除)、模型获取+手填、测试连接、内置目录|自定义双模式添加;旧 openai.apiKey 字段由端点列表接管。
+  - `mod/panorama/layout/chat.xml` + `mod/panorama/scripts/lingua_chat.js` + `mod/panorama/styles/lingua_chat.css`:游戏内 /tr「服务商」页新增「OpenAI 端点列表」紧凑行(只读展示+↑↓调顺序+整行启停,Key 增删/启用在网页页管),`op=ui` 同步 `openaiRows`,`collectPanelConfig` 下发 `openai.providers`(id 合并形态)。
+  - `tests/providers.test.js`:新增 9 项离线测试(migration/mask/applyMaskedUpdate 只写/候选计划轮询)。
+  - 顺带清理 lingua_chat.js 8 个死函数(detectTopbarTeamSide/findFirstPanelByType/startSteamIdRosterPass/buildApiUrl/httpGetJson/detectAsyncWebRequest/isTransportError/dispatchViaPanel)与 3 个未用变量。
+- **原因/效果**: 一个服务商能挂多个 Key(自动轮询躲限额)+ 多端点按序回退 + 失败 Key 自动冷却跳过/恢复回池;旧数据零迁移成本(首读自动包行);Key 只写,任何读口都只拿脱敏描述符。
+- **验证方式**: `node tests/providers.test.js` 9/9 通过;`node --check` 过 bridge_server/openai/config/lingua_chat;网页 `/settings` 行式端点分组;游戏内 /tr 服务商页端点列表行(需重启游戏)。
+- **是否需用户测试**: 是。需重启游戏 + 桥;网页设置页可见新端点分组;旧 DeepSeek Key 应自动出现在第 1 行。
+

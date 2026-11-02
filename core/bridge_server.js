@@ -757,34 +757,56 @@ async function runTranslate(cfg, payload) {
     timeoutMs: Number(payload.timeoutMs) || cfg.timeoutMs,
   };
   const errors = [];
-  try {
-    // 主服务商单次最多 20s(出站总预算 30s),给回退链(例如 bing)留足时间,避免主服务商超时后回退仍赶不上而发原文
-    const primaryTimeoutMs = Math.min(Number(baseOpts.timeoutMs) || 15000, 20000);
-    const result = await provider.translate(text, Object.assign({}, baseOpts, {
-      apiKey: providerCfg.apiKey,
-      region: providerCfg.region,
-      endpoint: providerCfg.endpoint,
-      baseUrl: providerCfg.baseUrl,
-      model: providerCfg.model,
-      timeoutMs: primaryTimeoutMs,
-      // DeepSeek v4 等默认开思考的模型:翻译任务关闭思考,降低延迟
-      disableThinking: !!providerCfg.disableThinking,
-    }));
-    return Object.assign(result, { provider: provider.id });
-  } catch (e) {
-    errors.push(provider.id + ": " + (e && e.message ? e.message : String(e)));
+  // v2.3.0:openai 类走多端点 + Key 池(行序回退,行内 Key 轮询/自动冷却)
+  const openaiRows = Array.isArray(providerCfg.providers) ? providerCfg.providers : [];
+  if (provider.id === "openai" && openaiRows.length) {
+    const rowsResult = await provider.translateRows(text, baseOpts, openaiRows);
+    if (!rowsResult.error) {
+      return rowsResult;
+    }
+    errors.push(rowsResult.error.message);
+  } else {
+    try {
+      // 主服务商单次最多 20s(出站总预算 30s),给回退链(例如 bing)留足时间,避免主服务商超时后回退仍赶不上而发原文
+      const primaryTimeoutMs = Math.min(Number(baseOpts.timeoutMs) || 15000, 20000);
+      const result = await provider.translate(text, Object.assign({}, baseOpts, {
+        apiKey: providerCfg.apiKey,
+        region: providerCfg.region,
+        endpoint: providerCfg.endpoint,
+        baseUrl: providerCfg.baseUrl,
+        model: providerCfg.model,
+        timeoutMs: primaryTimeoutMs,
+        // DeepSeek v4 等默认开思考的模型:翻译任务关闭思考,降低延迟
+        disableThinking: !!providerCfg.disableThinking,
+      }));
+      return Object.assign(result, { provider: provider.id });
+    } catch (e) {
+      errors.push(provider.id + ": " + (e && e.message ? e.message : String(e)));
+    }
   }
 
   // 回退链:按配置依次尝试备用服务商(只尝试已配置 Key 的,避免连环失败浪费时间)
-  const fallbacks = Array.isArray(cfg.fallbackProviders) ? cfg.fallbackProviders : [];
+  const fallbacks = Array.isArray(cfg.fallbackProviders) ? cfg.fallbackProviders.slice() : [];
+  // Bing 免 Key 恒兜底:回退链末尾隐式补 bing(主服务商本身是 bing 时不重复)
+  if (provider.id !== "bing" && fallbacks.indexOf("bing") === -1) fallbacks.push("bing");
   for (const pid of fallbacks) {
     if (pid === provider.id) continue;
     const fb = providerRegistry.getProvider(pid);
     if (!fb) continue;
     const fc = (cfg[pid] || {});
     // 需要 Key 的服务商没配 Key 就跳过
-    if (pid !== "bing" && !fc.apiKey) continue;
+    if (pid !== "bing" && !fc.apiKey && !(Array.isArray(fc.providers) && fc.providers.length)) continue;
     try {
+      // 备用里的 openai 类也走多端点(有行才走,没有退回单 Key 旧路)
+      if (pid === "openai" && Array.isArray(fc.providers) && fc.providers.length) {
+        const rr = await fb.translateRows(text, baseOpts, fc.providers);
+        if (!rr.error) {
+          log("info", "fallback -> openai(rows): " + (rr.viaRow || ""));
+          return Object.assign(rr, { provider: pid, viaFallback: true });
+        }
+        errors.push(rr.error.message);
+        continue;
+      }
       const fbResult = await fb.translate(text, Object.assign({}, baseOpts, {
         apiKey: fc.apiKey,
         region: fc.region,
@@ -979,6 +1001,32 @@ async function handleApi(req, res, url, bodyObj) {
     return;
   }
 
+  if (p === "/api/v1/providers/test" && (req.method === "POST" || req.method === "GET")) {
+    // v2.3.0:网页设置页「测试连接」—— 对指定端点行(或指定 Key)发一句小请求
+    const bodyT = bodyFromRequest(url, bodyObj) || {};
+    const cfgT = configStore.load();
+    const rows = ((cfgT.openai && cfgT.openai.providers) || []);
+    const row = rows.find(function (r) { return r.id === bodyT.rowId; }) || rows[0];
+    if (!row) return sendJson(res, 404, { ok: false, error: "no_provider_row" });
+    const openaiMod = require("./providers/openai");
+    const out = await openaiMod.testRow(row, bodyT.keyId, 8000);
+    sendJson(res, 200, out);
+    return;
+  }
+
+  if (p === "/api/v1/providers/models" && (req.method === "POST" || req.method === "GET")) {
+    // v2.3.0:网页设置页「获取可用模型」—— 打端点 /models(Ollama 本地免 Key)
+    const bodyM = bodyFromRequest(url, bodyObj) || {};
+    const cfgM = configStore.load();
+    const rowsM = ((cfgM.openai && cfgM.openai.providers) || []);
+    const rowM = rowsM.find(function (r) { return r.id === bodyM.rowId; }) || rowsM[0];
+    if (!rowM) return sendJson(res, 404, { ok: false, error: "no_provider_row" });
+    const openaiModM = require("./providers/openai");
+    const outM = await openaiModM.fetchModels(rowM, 8000);
+    sendJson(res, 200, outM);
+    return;
+  }
+
   if (p === "/api/v1/test" && (req.method === "POST" || req.method === "GET")) {
     const cfg = configStore.load();
     const tBody = bodyFromRequest(url, bodyObj);
@@ -1003,7 +1051,7 @@ async function handleApi(req, res, url, bodyObj) {
       const d = url.searchParams.get("d");
       if (d) {
         let saveBody = null;
-        try { saveBody = JSON.parse(d); } catch (e) {}
+        try { saveBody = JSON.parse(d); } catch {}
         if (saveBody && saveBody.config) {
           const current = configStore.load();
           const next = configStore.applyMaskedUpdate(current, saveBody.config || {});
@@ -1051,7 +1099,7 @@ function readVersion() {
   if (versionCache !== null) return versionCache;
   try {
     versionCache = fs.readFileSync(path.join(__dirname, "..", "VERSION"), "utf8").trim() || "0.0.0";
-  } catch (e) {
+  } catch {
     versionCache = "0.0.0";
   }
   return versionCache;
@@ -1097,9 +1145,20 @@ const btipc = btipcTransport.createTransport({
   // 游戏侧开机同步专用(**不是**整份配置)。
   // 整份 masked 配置 1312 字节 = 132 帧,超过协议 128 帧上限 → op=config 走位信道必失败;
   // 这里只回 ui 段 + 各服务商 Key 是否已配,约 230 字节 = 23 帧。
+  // v2.3.0 起另带 openaiRows 端点摘要(每行 ~45B,3 行 +135B ≈ 总 450B = 45 帧,仍在 128 帧内)。
   ui: async () => {
     try {
       const c = configStore.load();
+      const oaRows = ((c.openai && c.openai.providers) || []).slice(0, 6).map(function (r) {
+        return {
+          id: r.id,
+          n: String(r.name || "").slice(0, 10),
+          bc: r.builtin ? 1 : 0,
+          k: (r.keys || []).length,
+          ke: (r.keys || []).filter(function (x) { return x.enabled !== false && x.value; }).length,
+          on: r.enabled !== false ? 1 : 0,
+        };
+      });
       return JSON.stringify({
         ok: true,
         ui: c.ui || {},
@@ -1115,6 +1174,8 @@ const btipc = btipcTransport.createTransport({
           deepl: !!(c.deepl && c.deepl.apiKey),
           google: !!(c.google && c.google.apiKey),
         },
+        // 端点列表摘要:游戏内「服务商」页只读展示 + 调顺序/整行开关(不碰 Key 明文)
+        openaiRows: oaRows,
       });
     } catch (e) {
       return JSON.stringify({ ok: false, error: (e && e.message) || "ui_failed" });
@@ -1128,7 +1189,7 @@ const btipc = btipcTransport.createTransport({
     try {
       const c = configStore.load();
       return JSON.stringify({ ok: true, provider: c.provider || "", version: readVersion() });
-    } catch (e) {
+    } catch {
       return JSON.stringify({ ok: false, error: "health_failed" });
     }
   },
@@ -1137,7 +1198,7 @@ const btipc = btipcTransport.createTransport({
     let payload = null;
     try {
       payload = JSON.parse(String(body === null || body === undefined ? "{}" : body));
-    } catch (e) {
+    } catch {
       payload = null;
     }
     if (!payload || typeof payload !== "object") return JSON.stringify({ ok: false, error: "bad_json" });
@@ -1165,7 +1226,7 @@ const server = http.createServer((req, res) => {
   let url;
   try {
     url = new URL(req.url, "http://127.0.0.1");
-  } catch (e) {
+  } catch {
     res.statusCode = 400;
     res.end("bad request");
     return;
@@ -1298,7 +1359,7 @@ overlay.start({
     }
     try {
       handleGameDiagLine(line);
-    } catch (e) {}
+    } catch {}
   },
 });
 startOverlayWatch();
@@ -1383,7 +1444,7 @@ function startHttpsBridge(cfgNow) {
 
 function stopHttpsBridge() {
   if (!httpsChild) return;
-  try { httpsChild.kill(); } catch (e) {}
+  try { httpsChild.kill(); } catch {}
   httpsChild = null;
 }
 

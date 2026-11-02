@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>DeadlockLingua — 服务商管理 v2(端点卡 + Key 池)· 原型</title>
+<link href="https://fonts.googleapis.com/css2?family=Poiret+One&family=Didact+Gothic&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #0a0e12; --panel: #121820; --panel2: #151b22;
+  --line: rgba(255,255,255,0.08);
+  --gold: #e7b96b; --gold-soft: rgba(231,185,107,0.14); --gold-line: rgba(231,185,107,0.45);
+  --patina: #4e8c7a; --text: #d8dee6; --dim: #8b95a3;
+  --ok: #6fcf9f; --err: #e07a6f; --idk: #5a6472;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: radial-gradient(1100px 640px at 50% -8%, #10161d, var(--bg));
+  color: var(--text); font-family: "Didact Gothic", "Microsoft YaHei", sans-serif;
+  font-size: 13px; min-height: 100vh; padding: 26px 16px 60px;
+}
+h1 { text-align: center; font-family: "Poiret One", sans-serif; font-size: 26px; color: var(--gold); letter-spacing: 2px; font-weight: normal; }
+.sub { text-align: center; color: var(--dim); font-size: 11.5px; margin: 6px 0 18px; line-height: 1.7; }
+.sub code { color: var(--gold); }
+
+.tabs { display: flex; gap: 10px; justify-content: center; margin-bottom: 20px; }
+.tab { padding: 8px 22px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel2); color: var(--dim); cursor: pointer; user-select: none; }
+.tab.on { background: var(--gold-soft); border-color: var(--gold-line); color: var(--gold); }
+.stage { display: none; } .stage.on { display: block; }
+.card { background: var(--panel); border: 1px solid var(--line); border-top: 1px solid var(--gold-line); border-radius: 10px; box-shadow: rgba(0,0,0,0.5) 0 18px 40px; }
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 7px; vertical-align: -1px; }
+.dot.ok { background: var(--ok); } .dot.err { background: var(--err); } .dot.idk { background: var(--idk); }
+.btn { font-family: inherit; cursor: pointer; border-radius: 6px; font-size: 12px; padding: 6px 13px; border: 1px solid var(--line); background: rgba(255,255,255,0.03); color: var(--text); }
+.btn:hover { background: rgba(255,255,255,0.08); border-color: rgba(231,185,107,0.4); }
+.btn.gold { background: var(--gold); color: #14100a; border-color: rgba(255,236,200,0.55); font-weight: bold; }
+.btn.gold:hover { background: #f0c97e; }
+.btn.mini { padding: 3px 9px; font-size: 11px; }
+.btn.ghost:hover { border-color: rgba(224,122,111,0.55); color: var(--err); }
+
+/* ============ ① Web 设置页版 ============ */
+#wcard { width: 980px; margin: 0 auto; padding: 26px 30px; }
+#wcard h2 { font-family: "Poiret One", sans-serif; font-size: 22px; color: var(--gold); letter-spacing: 1px; font-weight: normal; }
+.desc { color: var(--dim); font-size: 11.5px; margin: 4px 0 18px; }
+.presets { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+.preset { padding: 6px 14px; border-radius: 20px; border: 1px dashed var(--line); color: var(--dim); font-size: 12px; cursor: pointer; background: rgba(0,0,0,0.15); }
+.preset:hover { border-color: var(--gold-line); color: var(--gold); background: rgba(231,185,107,0.06); }
+.seclbl { font-size: 10px; color: var(--dim); letter-spacing: 1.6px; text-transform: uppercase; margin: 16px 0 10px; }
+
+/* 端点卡 */
+.chan { border: 1px solid var(--line); border-radius: 8px; background: var(--panel2); margin-bottom: 10px; transition: border-color .15s; }
+.chan:hover { border-color: rgba(231,185,107,0.3); }
+.chan.on { border-color: var(--gold-line); background: linear-gradient(180deg, var(--gold-soft), rgba(231,185,107,0.02)); }
+.chan-row1 { display: flex; align-items: center; gap: 10px; padding: 11px 14px; }
+.chan-rank { width: 22px; height: 22px; flex: none; border-radius: 50%; border: 1px solid var(--line); background: rgba(255,255,255,0.04); color: var(--dim); display: flex; align-items: center; justify-content: center; font-size: 11px; }
+.chan.on .chan-rank { background: var(--gold); border-color: transparent; color: #14100a; font-weight: bold; }
+.chan-name { font-size: 13px; font-weight: bold; color: var(--text); width: 130px; cursor: text; border-bottom: 1px dashed transparent; }
+.chan-name:hover { border-bottom-color: rgba(231,185,107,0.4); }
+.chan.meta { color: var(--dim); font-size: 11px; }
+.chan-lat { color: var(--patina); font-size: 11px; min-width: 52px; text-align: right; }
+.chan-lat n/a { color: var(--dim); }
+.chan-act { font-size: 10.5px; color: var(--gold); border: 1px solid var(--gold-line); background: rgba(231,185,107,0.08); padding: 2px 9px; border-radius: 20px; }
+/* key pool */
+.chan-row2 { display: flex; align-items: center; gap: 8px; padding: 0 14px 11px 46px; flex-wrap: wrap; }
+.kp { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; padding: 3px 10px; border-radius: 14px; border: 1px solid var(--line); background: rgba(0,0,0,0.25); color: var(--text); cursor: pointer; user-select: none; }
+.kp i { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); font-style: normal; }
+.kp.dead { color: var(--err); border-color: rgba(224,122,111,0.4); text-decoration: line-through; }
+.kp.dead i { background: var(--err); }
+.kp.add { color: var(--gold); border-style: dashed; background: transparent; }
+.kp.note { color: var(--dim); border: 0; background: none; padding: 0; cursor: default; font-size: 10.5px; }
+
+/* 回退链 */
+.chain { border: 1px dashed var(--line); border-radius: 8px; background: rgba(0,0,0,0.18); padding: 13px 16px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.chain .cnode { padding: 5px 13px; border-radius: 16px; border: 1px solid var(--line); background: var(--panel2); font-size: 12px; }
+.chain .cnode b { color: var(--gold); font-weight: normal; }
+.chain .cnode.dim { color: var(--dim); }
+.chain .carr { color: var(--patina); font-size: 14px; }
+.chain .clabel { width: 100%; font-size: 10px; color: var(--dim); letter-spacing: 1.2px; text-transform: uppercase; margin-bottom: 4px; }
+.otherrow { display: flex; align-items: center; gap: 10px; padding: 9px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel2); margin-bottom: 8px; }
+.otherrow .nm { font-weight: bold; width: 120px; }
+.otherrow .mt { color: var(--dim); font-size: 11px; flex: 1; }
+.fine { font-size: 10.5px; color: var(--dim); margin-top: 12px; line-height: 1.8; border-top: 1px solid var(--line); padding-top: 10px; }
+
+/* ============ ② 游戏内 /tr 紧凑版 ============ */
+#game { display: flex; justify-content: center; }
+.gpanel { width: 640px; height: 620px; border-radius: 10px; overflow: hidden; display: flex; flex-direction: column; background: linear-gradient(180deg, #121820, #0a0e12); }
+.ghead { height: 54px; flex: none; padding: 0 16px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid rgba(255,255,255,0.06); }
+.ghead .mark { width: 30px; height: 30px; border-radius: 8px; flex: none; background: linear-gradient(160deg, #ecc47c, #b98a3e); color: #14100a; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: bold; font-family: "Poiret One", sans-serif; }
+.ghead .tt { color: var(--gold); font-family: "Poiret One", sans-serif; font-size: 19px; letter-spacing: 1px; }
+.ghead .tt span { display: block; font-family: "Didact Gothic", "Microsoft YaHei", sans-serif; font-size: 9px; letter-spacing: 1.4px; color: var(--dim); }
+.ghead .seg { margin-left: auto; display: flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.ghead .seg div { padding: 5px 14px; font-size: 11.5px; color: var(--dim); cursor: pointer; }
+.ghead .seg div.on { background: var(--gold-soft); color: var(--gold); }
+.gbody { flex: 1; overflow-y: auto; padding: 14px 16px 6px; }
+.gbody::-webkit-scrollbar { width: 8px; } .gbody::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 4px; }
+.gchan { border: 1px solid var(--line); border-radius: 8px; background: var(--panel2); padding: 10px 12px; margin-bottom: 9px; cursor: pointer; transition: border-color .15s; }
+.gchan:hover { border-color: rgba(231,185,107,0.35); }
+.gchan.on { border-color: var(--gold-line); background: linear-gradient(180deg, var(--gold-soft), rgba(231,185,107,0.02)); }
+.grow { display: flex; align-items: center; gap: 9px; }
+.grow .nm { font-weight: bold; color: var(--text); flex: 1; }
+.gchan.on .nm { color: var(--gold); }
+.grow .mt { color: var(--dim); font-size: 10.5px; }
+.grow .lat { color: var(--patina); font-size: 10.5px; }
+.grow .op { display: flex; gap: 5px; }
+.gop { width: 24px; height: 24px; border-radius: 5px; border: 1px solid var(--line); background: transparent; color: var(--dim); cursor: pointer; font-size: 11px; }
+.gop:hover { border-color: rgba(231,185,107,0.5); color: var(--gold); }
+.gop.del:hover { border-color: rgba(224,122,111,0.55); color: var(--err); }
+.gkeys { display: flex; gap: 6px; align-items: center; margin-top: 8px; flex-wrap: wrap; }
+.gnote { font-size: 10px; color: var(--dim); }
+.gadd { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+.gadd .preset { padding: 5px 12px; font-size: 11.5px; }
+.gfoot { height: 56px; flex: none; border-top: 1px solid rgba(255,255,255,0.06); display: flex; align-items: center; gap: 10px; padding: 0 14px; }
+.gfoot .hint { flex: 1; font-size: 10.5px; color: var(--dim); line-height: 1.5; }
+.gfoot .hint b { color: var(--gold); font-weight: normal; }
+
+#toast { position: fixed; left: 50%; top: 18px; transform: translateX(-50%) translateY(-60px); background: var(--panel2); border: 1px solid var(--gold-line); border-radius: 6px; padding: 8px 20px; font-size: 12px; color: var(--gold); transition: transform .25s; z-index: 99; }
+#toast.show { transform: translateX(-50%) translateY(0); }
+</style>
+</head>
+<body>
+
+<h1>服务商管理 v2 · 原型</h1>
+<div class="sub">
+  设计参考:New-API/One-API 的「渠道(Channel)+ 渠道内 Multi-Key 轮询」、LiteLLM 的 weighted failover、U-Pool 的一键切换<br>
+  核心模型:<b style="color:var(--gold)">端点卡</b>(host+模型,顺序=回退顺序)→ 卡内 <b style="color:var(--gold)">Key 池</b>(自动轮询,失败自动禁用)→ 全部失败再走跨类别回退
+</div>
+
+<div class="tabs">
+  <div class="tab on" data-v="w" onclick="show('w')">① Web 设置页版</div>
+  <div class="tab" data-v="g" onclick="show('g')">② 游戏内 /tr 紧凑版</div>
+</div>
+<div id="toast"></div>
+
+<!-- ① Web -->
+<div id="w" class="stage on">
+  <div class="card" id="wcard">
+    <h2>服务商</h2>
+    <div class="desc">一个端点一张卡,可以放任意多个(DeepSeek 主力 / 备用账号 / 本地 Ollama 混着用)。卡片顺序 = 回退顺序;卡内多个 Key 自动轮询,躲单 Key 限额。</div>
+    <div class="presets" id="wPresets"></div>
+    <div id="wChans"></div>
+    <div class="seclbl">跨类别回退(openai 全部失败后)</div>
+    <div class="chain" id="wChain"></div>
+    <div class="fine">
+      兼容说明:老配置 <code>{openai:{apiKey,baseUrl,model}}</code> 首次读入自动包成第 1 张卡「默认」,Key 进 Key 池,不丢数据。<br>
+      其它类别(Microsoft / DeepL / Google)每类一个 Key,维持现状;Bing 免 Key 永远兜底。
+    </div>
+  </div>
+</div>
+
+<!-- ② 游戏内 -->
+<div id="g" class="stage">
+  <div class="card gpanel">
+    <div class="ghead">
+      <div class="mark">DL</div>
+      <div class="tt">服务商<span>PROVIDER</span></div>
+      <div class="seg"><div class="on">端点</div><div>跨类别</div></div>
+    </div>
+    <div class="gbody">
+      <div class="seclbl" style="margin-top:0">点卡片 = 设为最优先,失败自动按顺序回退</div>
+      <div class="gadd" id="gAdd"></div>
+      <div id="gChans"></div>
+    </div>
+    <div class="gfoot">
+      <span class="hint" id="gHint"></span>
+      <button class="btn gold mini" onclick="toast('原型:同 Web 版添加')">+ 添加端点</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ---------- 状态 ---------- */
+const PRESETS = [
+  { name: "DeepSeek",  baseUrl: "https://api.deepseek.com", model: "deepseek-chat", host: "api.deepseek.com" },
+  { name: "OpenAI",    baseUrl: "https://api.openai.com/v1", model: "gpt-4o-mini", host: "api.openai.com" },
+  { name: "Ollama 本地", baseUrl: "http://127.0.0.1:11434/v1", model: "llama3:8b", host: "127.0.0.1" },
+  { name: "OneAPI 网关", baseUrl: "https://your-oneapi.example/v1", model: "gpt-4o", host: "your-oneapi.example" },
+];
+let idSeq = 4;
+const state = {
+  chans: [
+    { name: "DeepSeek 主力", host: "api.deepseek.com", model: "deepseek-chat", lat: "213ms", st: "ok",
+      keys: [{ id: "k1", on: true }, { id: "k2", on: true }], note: "2 个 Key 轮询" },
+    { name: "Ollama 本地", host: "127.0.0.1:11434", model: "llama3:8b", lat: "1.2s", st: "ok",
+      keys: [{ id: "k3", on: true, local: true }], note: "本地免 Key" },
+  ],
+  primary: 0,
+  others: [
+    { n: "Bing", m: "免 Key · 兜底", st: "ok" },
+    { n: "Microsoft Azure", m: "已配置", st: "ok" },
+    { n: "DeepL", m: "未配置", st: "idk" },
+    { n: "Google", m: "未配置", st: "idk" },
+  ],
+};
+
+function toast(m) {
+  const t = document.getElementById("toast");
+  t.textContent = m; t.classList.add("show");
+  clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("show"), 1800);
+}
+function show(v) {
+  document.querySelectorAll(".tab").forEach(t => t.classList.toggle("on", t.dataset.v === v));
+  document.getElementById("w").classList.toggle("on", v === "w");
+  document.getElementById("g").classList.toggle("on", v === "g");
+}
+const DOT = s => '<i class="dot ' + s + '"></i>';
+
+/* ---------- Web ---------- */
+function renderW() {
+  const p = document.getElementById("wPresets");
+  p.innerHTML = PRESETS.map((x, i) => '<span class="preset" onclick="addChan(' + i + ')">+ ' + x.name + '</span>').join("")
+    + '<span class="preset" onclick="addChan(-1)">+ 自定义端点</span>';
+
+  const box = document.getElementById("wChans");
+  box.innerHTML = "";
+  state.chans.forEach((c, i) => {
+    const d = document.createElement("div");
+    d.className = "chan" + (i === state.primary ? " on" : "");
+    const keyPills = c.keys.map((k, ki) =>
+      '<span class="kp' + (k.on ? "" : " dead") + '" onclick="toggleKey(' + i + ',' + ki + ')" title="' + (k.on ? "点击禁用" : "连续失败被禁用,点击恢复") + '"><i></i>' +
+      (k.local ? "本地" : "Key " + String.fromCharCode(65 + ki)) + '</span>').join("")
+      + '<span class="kp add" onclick="addKey(' + i + ')">+ Key</span>';
+    d.innerHTML =
+      '<div class="chan-row1">' +
+        '<span class="chan-rank">' + (i + 1) + '</span>' +
+        '<span class="chan-name" title="双击改名" ondblclick="renameChan(' + i + ')">' + c.name + '</span>' +
+        '<span class="chan meta">' + c.host + ' · ' + c.model + '</span>' +
+        '<span class="chan-lat">' + (c.lat || '<n/a>未测试</n/a>') + '</span>' +
+        DOT(c.st) +
+        (i === state.primary ? '<span class="chan-act">★ 最优先</span>' : '<span class="chan-act" style="color:var(--dim);border-color:var(--line);background:transparent">备用</span>') +
+        '<span style="flex:1"></span>' +
+        '<button class="btn mini" onclick="testChan(' + i + ')">测试</button>' +
+        '<button class="btn mini" onclick="moveChan(' + i + ',-1)" ' + (i === 0 ? 'disabled style="opacity:.35"' : '') + '>↑</button>' +
+        '<button class="btn mini" onclick="moveChan(' + i + ',1)" ' + (i === state.chans.length - 1 ? 'disabled style="opacity:.35"' : '') + '>↓</button>' +
+        (i !== 0 ? '<button class="btn mini ghost" onclick="delChan(' + i + ')">删除</button>' : '') +
+      '</div>' +
+      '<div class="chan-row2">' + keyPills +
+        '<span class="kp note">Key 自动轮询 · 连续 3 次失败自动禁用 · ' + c.note + '</span>' +
+      '</div>';
+    box.appendChild(d);
+  });
+
+  const chain = document.getElementById("wChain");
+  const nodes = state.others.map(o =>
+    '<span class="cnode' + (o.st === "idk" ? " dim" : '') + '">' + DOT(o.st) + o.n + '</span>').join('<span class="carr">→</span>');
+  chain.innerHTML = '<span class="clabel">openai 端点全挂 → 按此顺序试其它类别 → Bing 恒兜底</span>' +
+    '<span class="cnode"><b>' + state.chans.map(c => c.name).join(' → ') + '</b></span>' +
+    '<span class="carr">→</span>' + nodes;
+}
+function addChan(pi) {
+  const base = pi >= 0 ? PRESETS[pi] : { name: "新端点 " + idSeq, host: "custom.example", baseUrl: "", model: "gpt-4o" };
+  state.chans.push({
+    name: base.name + " " + idSeq, host: base.host, model: base.model, lat: "", st: "idk",
+    keys: [{ id: "k" + (idSeq + 10), on: true }], note: "1 个 Key"
+  });
+  idSeq++;
+  renderW(); renderG(); toast("已添加端点「" + base.name + "」,旧端点不会被顶掉");
+}
+function delChan(i) {
+  state.chans.splice(i, 1);
+  if (state.primary >= state.chans.length) state.primary = Math.max(0, state.chans.length - 1);
+  if (i === 0 && state.chans.length) state.primary = 0;
+  renderW(); renderG();
+  if (!state.chans.length) toast("端点已清空,回退直接走跨类别(Bing 兜底)");
+}
+function moveChan(i, dir) {
+  const j = i + dir;
+  if (j < 0 || j >= state.chans.length) return;
+  [state.chans[i], state.chans[j]] = [state.chans[j], state.chans[i]];
+  const p = state.primary;
+  if (p === i) state.primary = j; else if (p === j) state.primary = i;
+  renderW(); renderG(); toast("回退顺序已调整");
+}
+function activateChan(i) { state.primary = i; renderW(); renderG(); toast("最优先已切到「" + state.chans[i].name + "」"); }
+function toggleKey(ci, ki) {
+  const k = state.chans[ci].keys[ki];
+  k.on = !k.on;
+  if (k.on) toast("「" + state.chans[ci].name + "」Key 已恢复轮询");
+  else toast("「" + state.chans[ci].name + "」该 Key 已停用(失败 Key 不烧钱)");
+  renderW(); renderG();
+}
+function addKey(ci) {
+  const c = state.chans[ci];
+  c.keys.push({ id: "k" + (idSeq + 20 + c.keys.length), on: true });
+  c.note = c.keys.length + " 个 Key";
+  renderW(); renderG(); toast("Key 已加入轮询池(粘贴新 Key 到 Web 设置保存)");
+}
+function testChan(i) {
+  const c = state.chans[i];
+  c.st = "err"; c.lat = ""; renderW(); renderG();
+  setTimeout(() => { c.st = "ok"; c.lat = (120 + Math.floor(Math.random() * 300)) + "ms"; renderW(); renderG(); toast("「" + c.name + "」测试通过 " + c.lat); }, 500);
+}
+function renameChan(i) {
+  const n = prompt("端点昵称:", state.chans[i].name);
+  if (n) { state.chans[i].name = n; renderW(); renderG(); }
+}
+
+/* ---------- 游戏内 ---------- */
+function renderG() {
+  const add = document.getElementById("gAdd");
+  add.innerHTML = PRESETS.map((x, i) => '<span class="preset" onclick="gAddChan(' + i + ')">+ ' + x.name + '</span>').join("");
+  const box = document.getElementById("gChans");
+  box.innerHTML = "";
+  state.chans.forEach((c, i) => {
+    const d = document.createElement("div");
+    d.className = "gchan" + (i === state.primary ? " on" : "");
+    d.onclick = () => activateChan(i);
+    const keys = c.keys.map((k, ki) =>
+      '<span class="kp' + (k.on ? "" : " dead") + '" onclick="event.stopPropagation();toggleKey(' + i + ',' + ki + ')"><i></i>' +
+      (k.local ? "本地" : String.fromCharCode(65 + ki)) + '</span>').join("")
+      + '<span class="kp add" onclick="event.stopPropagation();addKey(' + i + ')">+</span>';
+    d.innerHTML =
+      '<div class="grow">' + DOT(c.st) +
+        '<span class="nm">' + c.name + (i === state.primary ? ' <span class="chan-act">★</span>' : '') + '</span>' +
+        '<span class="mt">' + c.host + ' · ' + c.model + '</span>' +
+        '<span class="lat">' + (c.lat || "未测试") + '</span>' +
+        '<span class="op">' +
+          (i !== 0 ? '<button class="gop del" onclick="event.stopPropagation();delChan(' + i + ')" title="删除">✕</button>' : '') +
+        '</span>' +
+      '</div>' +
+      '<div class="gkeys">' + keys + '<span class="gnote">点卡片设最优先 · Key 点一下停用/启用 · 轮询躲限额</span></div>';
+    box.appendChild(d);
+  });
+  const c = state.chans[state.primary];
+  document.getElementById("gHint").innerHTML = c
+    ? '当前最优先:<b>' + c.name + '</b>(Key ' + c.keys.filter(k => k.on).length + ' 个在轮询)· 全挂自动按顺序回退,Bing 兜底'
+    : '没有端点 —— 走跨类别回退(Bing 兜底),点上方预设快速加一个';
+}
+function gAddChan(pi) { addChan(pi); }
+
+renderW(); renderG();
+</script>
+</body>
+</html>

@@ -175,10 +175,6 @@ const SPEC = [
   { group: "服务商 Key 与端点", tag: "一次性配置", fields: [
     { key: "microsoft.apiKey", label: "Microsoft Key", type: "secret" },
     { key: "microsoft.region", label: "Microsoft 区域", type: "text", placeholder: "如 eastasia" },
-    { key: "openai.apiKey", label: "OpenAI 兼容 Key", type: "secret" },
-    { key: "openai.baseUrl", label: "OpenAI Base URL", type: "text",
-      placeholder: "如 https://api.deepseek.com/v1" },
-    { key: "openai.model", label: "OpenAI 模型", type: "text", placeholder: "如 deepseek-chat" },
     { key: "deepl.apiKey", label: "DeepL Key", type: "secret" },
     { key: "google.apiKey", label: "Google Cloud Key", type: "secret" },
   ]},
@@ -196,6 +192,10 @@ const SPEC = [
     { key: "ui.timeoutMs", label: "出站翻译超时 (ms)", type: "int" },
     { key: "ui.translateOwn", label: "自己的发言也翻译", type: "bool" },
     { key: "ui.chatLog", label: "写聊天日志", type: "bool" },
+    { key: "ui.hudLinger", label: "顶栏气泡驻留", type: "bool",
+      hint: "顶栏气泡在译文在途/刚送达时不消失;行被游戏回收后,译文会落进顶栏驻留胶囊(原文 + 译文)" },
+    { key: "ui.hudLingerSeconds", label: "驻留时长 (秒)", type: "int",
+      hint: "译文送达后气泡/胶囊多停多久;0 = 送达后不驻留,只保证翻译完前不消失(1-60)" },
   ]},
   { group: "聊天日志", fields: [
     { key: "chatLog.enabled", label: "启用日志落盘", type: "bool",
@@ -230,6 +230,274 @@ const SPEC = [
 const MASK = "********";
 let serverCfg = null;
 let keyState = {};
+
+// ===== v2.3.0 多端点行式(OpenAI 兼容)=====
+const CAT_PRESETS = [
+  { name: "DeepSeek", host: "api.deepseek.com", baseUrl: "https://api.deepseek.com", model: "deepseek-chat", builtin: true },
+  { name: "OpenAI", host: "api.openai.com", baseUrl: "https://api.openai.com/v1", model: "gpt-4o-mini", builtin: true },
+  { name: "Ollama 本地", host: "127.0.0.1:11434", baseUrl: "http://127.0.0.1:11434/v1", model: "llama3:8b", builtin: true, local: true },
+];
+let provRows = [];       // 内存工作副本(从 masked 配置克隆)
+let provDirty = false;   // 有改动才下发 openai.providers
+let provOpen = null;     // 当前展开的编辑卡(row id,同时只开一张)
+let provAddOpen = false;
+let provAddMode = "catalog";
+let provSeq = 0;
+
+function newRowId() { return "p" + Date.now().toString(36) + (provSeq++).toString(36); }
+function newKeyId(n) { return "k" + (n + 1) + Math.random().toString(36).slice(2, 5); }
+
+// masked server 行 → 内存行(key 只带 mask,新增 Key 才有 value)
+function cloneServerRows() {
+  const src = (serverCfg && serverCfg.openai && serverCfg.openai.providers) || [];
+  provRows = src.map(function (r) {
+    return {
+      id: r.id, name: r.name || "自定义端点", builtin: !!r.builtin,
+      baseUrl: r.baseUrl || "", model: r.model || "", enabled: r.enabled !== false,
+      lastTest: "",
+      keys: (r.keys || []).map(function (k) {
+        return { id: k.id, mask: k.mask || "", value: "", enabled: k.enabled !== false };
+      }),
+    };
+  });
+  provOpen = null; provAddOpen = false; provDirty = false;
+}
+
+// 内存行 → 下发体(完整重写形态;Key 未改下发 mask 哨兵,新 Key 下发明文)
+function serializeRows() {
+  return provRows.map(function (r) {
+    return {
+      id: r.id, name: r.name, builtin: r.builtin,
+      baseUrl: r.baseUrl, model: r.model, enabled: r.enabled,
+      keys: r.keys.map(function (k) {
+        return { id: k.id, value: k.value || k.mask || "********", enabled: k.enabled };
+      }),
+    };
+  });
+}
+
+function provRowById(id) { for (let i = 0; i < provRows.length; i++) if (provRows[i].id === id) return provRows[i]; return null; }
+function provLiveKeys(r) { return r.keys.filter(function (k) { return k.enabled && (k.value || k.mask); }); }
+
+function buildProvidersSection() {
+  const d = el("details", { class: "group" });
+  d.setAttribute("open", "");
+  const sum = el("summary", {}, [el("span", { text: "OpenAI 兼容端点" })]);
+  sum.appendChild(el("span", { class: "tag", text: "行序=回退 · 行内 Key 轮询 · Key 只写脱敏" }));
+  d.appendChild(sum);
+  const body = el("div", { class: "gbody" });
+  const rowsBox = el("div", { id: "provRowsBox" });
+  const addBtn = el("button", { text: "＋ 添加模型提供商", style: "margin:10px 0 6px;width:100%" });
+  addBtn.addEventListener("click", function () { provAddOpen = !provAddOpen; provAddMode = "catalog"; provOpen = null; provDirty = true; renderProvSection(); });
+  const addBox = el("div", { id: "provAddBox" });
+  body.appendChild(rowsBox);
+  body.appendChild(addBtn);
+  body.appendChild(addBox);
+  body.appendChild(el("p", { class: "hint", text: "旧 openai.apiKey 单端点已自动迁到第 1 行;Bing 免 Key 恒兜底;全部端点失败才走下方「回退服务商」。" }));
+  d.appendChild(body);
+  renderProvSection();
+  return d;
+}
+
+function renderProvSection() {
+  const box = document.getElementById("provRowsBox");
+  if (!box) return;
+  box.textContent = "";
+  provRows.forEach(function (r, i) {
+    const live = provLiveKeys(r).length;
+    const configured = live > 0;
+    const row = el("div", { class: "prow" + (r.enabled ? "" : " off"), style: "border:1px solid var(--line);border-radius:8px;margin-bottom:8px;overflow:hidden" });
+    const m = el("div", { style: "display:flex;align-items:center;gap:8px;padding:10px 12px;flex-wrap:wrap" });
+    const dot = el("span", { style: "width:9px;height:9px;border-radius:50%;flex:none;background:" + (configured ? "var(--ok)" : "var(--line)") });
+    m.appendChild(dot);
+    m.appendChild(el("b", { text: r.name, style: "min-width:110px" }));
+    m.appendChild(el("span", { class: "chip" + (r.builtin ? "" : " off"), text: r.builtin ? "内置" : "自定义", style: "padding:1px 8px" }));
+    m.appendChild(el("span", { class: "hint", text: (r.baseUrl || "").replace(/^https?:\/\//, "") + " · " + live + "/" + r.keys.length + " Keys · " + (r.model || "未填模型"), style: "flex:1" }));
+    if (i === 0 && r.enabled && configured) m.appendChild(el("span", { class: "chip on", text: "★ 最优先", style: "padding:1px 8px" }));
+    if (r.lastTest) m.appendChild(el("span", { class: "hint", text: r.lastTest }));
+    const mk = function (t, fn, cls) { const b = el("button", { text: t }); b.className = cls || ""; b.style.cssText = "padding:3px 10px;font-size:12px;" + (cls ? "" : ""); b.addEventListener("click", fn); return b; };
+    const up = mk("↑", function () { if (i > 0) { const t = provRows[i - 1]; provRows[i - 1] = r; provRows[i] = t; provDirty = true; renderProvSection(); } });
+    const down = mk("↓", function () { if (i < provRows.length - 1) { const t = provRows[i + 1]; provRows[i + 1] = r; provRows[i] = t; provDirty = true; renderProvSection(); } });
+    if (i === 0) up.disabled = true; if (i === provRows.length - 1) down.disabled = true;
+    const edit = mk(provOpen === r.id ? "收起" : "编辑", function () { provOpen = provOpen === r.id ? null : r.id; provAddOpen = false; renderProvSection(); }, "ghost");
+    let delArmed = false;
+    const del = mk(delArmed ? "确认删除?" : "删除", function () {
+      if (!delArmed) { delArmed = true; del.textContent = "确认删除?"; del.classList.add("bad"); return; }
+      provRows.splice(i, 1); provDirty = true; if (provOpen === r.id) provOpen = null; renderProvSection();
+    }, "ghost");
+    m.appendChild(up); m.appendChild(down); m.appendChild(edit); m.appendChild(del);
+    row.appendChild(m);
+    if (provOpen === r.id) row.appendChild(buildProvEditor(r));
+    box.appendChild(row);
+  });
+  if (!provRows.length) {
+    box.appendChild(el("p", { class: "hint", text: "还没有端点 —— 旧 openai Key 会自动迁成第 1 行;也可点下方按钮添加。" }));
+  }
+  const ab = document.getElementById("provAddBox");
+  ab.textContent = "";
+  if (provAddOpen) ab.appendChild(buildProvAddCard());
+}
+
+function buildProvEditor(r) {
+  const c = el("div", { style: "border-top:1px solid var(--line);padding:12px;background:var(--surface2)" });
+  // 显示名称
+  const ni = el("input", { id: "provName" + r.id }); ni.value = r.name; ni.placeholder = "显示名称,例:DeepSeek 主力";
+  c.appendChild(el("p", { class: "hint", text: "显示名称" })); c.appendChild(ni);
+  // Base URL
+  const bu = el("input", {}); bu.value = r.baseUrl; bu.placeholder = "Base URL,例:https://api.deepseek.com";
+  c.appendChild(el("p", { class: "hint", text: "Base URL" })); c.appendChild(bu);
+  // 模型 + 获取可用模型
+  const moRow = el("div", { class: "inline" });
+  const mo = el("input", {}); mo.value = r.model; mo.placeholder = "模型,例:deepseek-chat";
+  moRow.appendChild(mo);
+  const fm = el("button", { text: "↻ 获取可用模型", class: "ghost" });
+  fm.addEventListener("click", function () {
+    fm.disabled = true;
+    fetch("/api/v1/providers/models", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ rowId: r.id }) })
+      .then(function (x) { return x.json(); })
+      .then(function (j) {
+        fm.disabled = false;
+        if (!j || !j.ok) { r.lastTest = "获取模型失败: " + ((j && j.error) || "未知"); renderProvSection(); return; }
+        const sel = el("select", {});
+        (j.models || []).forEach(function (mid) { const o = el("option", { value: mid, text: mid }); if (mid === r.model) o.selected = true; sel.appendChild(o); });
+        sel.addEventListener("change", function () { r.model = sel.value; provDirty = true; renderProvSection(); });
+        c.appendChild(el("p", { class: "hint", text: "该端点提供的模型(" + (j.models || []).length + ")" }));
+        c.appendChild(sel);
+      })
+      .catch(function (e) { fm.disabled = false; r.lastTest = "获取模型失败: 桥不可达"; renderProvSection(); });
+  });
+  moRow.appendChild(fm);
+  c.appendChild(el("p", { class: "hint", text: "模型(可用「获取可用模型」从端点 /models 拉目录)" })); c.appendChild(moRow);
+  // Key 池
+  const kp = el("div", { class: "stack", style: "margin:6px 0" });
+  r.keys.forEach(function (k, ki) {
+    const kr = el("div", { class: "inline", style: "border:1px solid var(--line);border-radius:6px;padding:5px 9px" });
+    kr.appendChild(el("span", { style: "font-family:ui-monospace,Consolas,monospace;min-width:88px", text: k.value ? "(新 Key)" : (k.mask || "") }));
+    const ks = el("span", { class: "hint", style: "flex:1", text: k.enabled ? "轮询中" : "已停用" });
+    kr.appendChild(ks);
+    const tg = el("button", { text: k.enabled ? "停用" : "启用", class: "ghost" });
+    tg.style.padding = "2px 8px";
+    tg.addEventListener("click", function () { k.enabled = !k.enabled; provDirty = true; renderProvSection(); });
+    kr.appendChild(tg);
+    const dl = el("button", { text: "✕", class: "ghost", title: "删除这把 Key" });
+    dl.style.padding = "2px 8px";
+    dl.addEventListener("click", function () { r.keys.splice(ki, 1); provDirty = true; renderProvSection(); });
+    kr.appendChild(dl);
+    kp.appendChild(kr);
+  });
+  const ka = el("div", { class: "inline" });
+  const kadd = el("input", {}); kadd.placeholder = "粘贴新 Key,英文逗号分隔可一次加多把,例:sk-aaa,sk-bbb";
+  ka.appendChild(kadd);
+  const addBtn2 = el("button", { text: "＋ 加 Key", style: "padding:7px 14px" });
+  addBtn2.addEventListener("click", function () {
+    const parts = (kadd.value || "").split(",").map(function (s) { return s.trim(); }).filter(Boolean);
+    if (!parts.length) return;
+    parts.forEach(function (v) { r.keys.push({ id: newKeyId(r.keys.length), value: v, mask: v.slice(0, 3) + "…" + v.slice(-4), enabled: true }); });
+    kadd.value = ""; provDirty = true; renderProvSection();
+  });
+  ka.appendChild(addBtn2);
+  kp.appendChild(ka);
+  c.appendChild(el("p", { class: "hint", text: "API 密钥池(只写:保存后只显示脱敏描述符) · 自动轮询,失败 Key 自动冷却跳过、恢复后自动回池" }));
+  c.appendChild(kp);
+  // 测试 + 整行开关
+  const foot = el("div", { class: "inline", style: "margin-top:8px" });
+  const tb = el("button", { text: "测试连接", class: "ghost" });
+  tb.addEventListener("click", function () {
+    tb.disabled = true;
+    fetch("/api/v1/providers/test", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ rowId: r.id }) })
+      .then(function (x) { return x.json(); })
+      .then(function (j) {
+        tb.disabled = false;
+        if (j && j.ok) { r.lastTest = "✓ " + j.latencyMs + "ms"; setStatus("「" + r.name + "」测试通过 " + j.latencyMs + "ms", "ok"); }
+        else { r.lastTest = "✕ " + ((j && j.error) || "测试失败"); setStatus("「" + r.name + "」测试失败: " + ((j && j.error) || "未知"), "bad"); }
+        renderProvSection();
+      })
+      .catch(function () { tb.disabled = false; r.lastTest = "✕ 桥不可达"; renderProvSection(); });
+  });
+  foot.appendChild(tb);
+  const tb2 = el("button", { text: "测试第一把 Key", class: "ghost" });
+  tb2.addEventListener("click", function () {
+    tb2.disabled = true;
+    const firstKey = provLiveKeys(r)[0];
+    fetch("/api/v1/providers/test", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ rowId: r.id, keyId: firstKey ? firstKey.id : "" }) })
+      .then(function (x) { return x.json(); })
+      .then(function (j) {
+        tb2.disabled = false;
+        r.lastTest = (j && j.ok ? "✓ K1 " + j.latencyMs + "ms" : "✕ K1 " + ((j && j.error) || "失败"));
+        renderProvSection();
+      })
+      .catch(function () { tb2.disabled = false; r.lastTest = "✕ K1 桥不可达"; renderProvSection(); });
+  });
+  foot.appendChild(tb2);
+  const en = el("button", { text: r.enabled ? "整行停用" : "整行启用", class: "ghost" });
+  en.addEventListener("click", function () { r.enabled = !r.enabled; provDirty = true; renderProvSection(); });
+  foot.appendChild(en);
+  foot.appendChild(el("span", { class: "hint", text: "保存后生效" }));
+  c.appendChild(foot);
+  // 字段回填
+  ni.addEventListener("change", function () { r.name = ni.value.trim() || r.name; provDirty = true; });
+  bu.addEventListener("change", function () { r.baseUrl = bu.value.trim(); provDirty = true; });
+  mo.addEventListener("change", function () { r.model = mo.value.trim(); provDirty = true; });
+  return c;
+}
+
+function buildProvAddCard() {
+  const c = el("div", { style: "border:1px solid var(--accent);border-radius:8px;padding:12px;background:var(--surface2);margin-top:8px" });
+  const seg = el("div", { class: "inline" });
+  const s1 = el("button", { text: "内置目录", style: "padding:4px 14px" + (provAddMode === "catalog" ? ";background:var(--accent);color:#0c0e12" : "") });
+  const s2 = el("button", { text: "自定义 API", style: "padding:4px 14px" + (provAddMode === "custom" ? ";background:var(--accent);color:#0c0e12" : "") });
+  s1.addEventListener("click", function () { provAddMode = "catalog"; provAddOpen = true; renderProvSection(); });
+  s2.addEventListener("click", function () { provAddMode = "custom"; provAddOpen = true; renderProvSection(); });
+  seg.appendChild(s1); seg.appendChild(s2);
+  c.appendChild(seg);
+  const host = el("div", { style: "margin-top:10px" });
+  c.appendChild(host);
+  if (provAddMode === "catalog") {
+    const sel = el("select", {});
+    CAT_PRESETS.forEach(function (x) { sel.appendChild(el("option", { value: x.name, text: x.name + " · " + x.host })); });
+    const row = el("div", { class: "inline" });
+    row.appendChild(sel);
+    const go = el("button", { text: "添加", style: "padding:7px 16px" });
+    go.addEventListener("click", function () {
+      const x = CAT_PRESETS.find(function (p) { return p.name === sel.value; }) || CAT_PRESETS[0];
+      provRows.push({
+        id: newRowId(), name: x.name, builtin: true, baseUrl: x.baseUrl, model: x.model, enabled: true, lastTest: "",
+        keys: x.local ? [] : [{ id: newKeyId(0), value: "", mask: "", enabled: true }],
+      });
+      provDirty = true; provAddOpen = false; renderProvSection();
+      setStatus("已添加「" + x.name + "」,填 Key 后保存", "ok");
+    });
+    row.appendChild(go);
+    host.appendChild(row);
+    host.appendChild(el("p", { class: "hint", text: "内置目录预填 Base URL 与默认模型;Ollama 本地免 Key;其余填入 Key 即可" }));
+  } else {
+    const nm = el("input", {}); nm.placeholder = "显示名称,例:OneAPI 网关";
+    const bu = el("input", {}); bu.placeholder = "Base URL,例:https://your-oneapi.example/v1";
+    const ky = el("input", {}); ky.placeholder = "API Key(逗号分隔可多把)";
+    const mo = el("input", {}); mo.placeholder = "模型,例:gpt-4o";
+    host.appendChild(el("p", { class: "hint", text: "显示名称" })); host.appendChild(nm);
+    host.appendChild(el("p", { class: "hint", text: "Base URL" })); host.appendChild(bu);
+    host.appendChild(el("p", { class: "hint", text: "API Key" })); host.appendChild(ky);
+    host.appendChild(el("p", { class: "hint", text: "模型" })); host.appendChild(mo);
+    const row2 = el("div", { class: "inline" });
+    const go2 = el("button", { text: "添加", style: "padding:7px 16px" });
+    go2.addEventListener("click", function () {
+      if (!bu.value.trim() || !mo.value.trim()) { setStatus("Base URL 和模型必填", "bad"); return; }
+      const parts = (ky.value || "").split(",").map(function (s) { return s.trim(); }).filter(Boolean);
+      provRows.push({
+        id: newRowId(), name: nm.value.trim() || "自定义", builtin: false, baseUrl: bu.value.trim(), model: mo.value.trim(), enabled: true, lastTest: "",
+        keys: parts.length ? parts.map(function (v) { return { id: newKeyId(0), value: v, mask: v.slice(0, 3) + "…" + v.slice(-4), enabled: true }; }) : [{ id: newKeyId(0), value: "", mask: "", enabled: true }],
+      });
+      provDirty = true; provAddOpen = false; renderProvSection();
+      setStatus("已添加自定义端点,保存后生效", "ok");
+    });
+    const can2 = el("button", { text: "取消", class: "ghost", style: "padding:7px 14px" });
+    can2.addEventListener("click", function () { provAddOpen = false; renderProvSection(); });
+    row2.appendChild(go2); row2.appendChild(can2);
+    host.appendChild(row2);
+  }
+  return c;
+}
 
 const getIn = (o, k) => k.split(".").reduce((a, p) => (a == null ? undefined : a[p]), o);
 function setIn(o, k, v) {
@@ -368,6 +636,10 @@ function render() {
   const form = document.getElementById("form");
   form.textContent = "";
   SPEC.forEach((sec) => {
+    // 多端点行式节:插到「服务商 Key 与端点」组后面
+    if (sec.group === "服务商 Key 与端点") {
+      // 先渲染本组,再插多端点组
+    }
     const d = el("details", { class: "group" });
     if (sec.open) d.setAttribute("open", "");
     const sum = el("summary", {}, [el("span", { text: sec.group })]);
@@ -377,6 +649,7 @@ function render() {
     sec.fields.forEach((f) => body.appendChild(buildField(f)));
     d.appendChild(body);
     form.appendChild(d);
+    if (sec.group === "服务商 Key 与端点") form.appendChild(buildProvidersSection());
   });
   paintKeyDots();
 }
@@ -431,6 +704,7 @@ async function load() {
       deepl: !!(serverCfg.deepl && serverCfg.deepl.hasApiKey),
       google: !!(serverCfg.google && serverCfg.google.hasApiKey),
     };
+    cloneServerRows();
     render();
     renderChips();
     setStatus("已载入", "ok");
@@ -454,6 +728,8 @@ async function save() {
       setIn(patch, f.key, v);
     });
   });
+  // v2.3.0 多端点:有改动才下发(完整重写形态,Key 只写语义)
+  if (provDirty) patch.openai = { providers: serializeRows() };
   if (clearKey) {
     patch.clearApiKey = true;
     patch.apiKey = "";
@@ -477,9 +753,10 @@ async function save() {
       deepl: !!(serverCfg.deepl && serverCfg.deepl.hasApiKey),
       google: !!(serverCfg.google && serverCfg.google.hasApiKey),
     };
+    cloneServerRows();
     render();
     renderChips();
-    setStatus("已保存（游戏内下一条消息生效）", "ok");
+    setStatus("已保存(游戏内下一条消息生效)" + (provDirty ? " · 端点列表已更新" : ""), "ok");
   } catch (e) {
     setStatus("保存失败:" + (e && e.message), "bad");
   } finally {

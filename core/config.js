@@ -19,6 +19,9 @@ const DEFAULTS = {
     apiKey: "",
     baseUrl: "https://api.openai.com/v1",
     model: "gpt-4o-mini",
+    // v2.3.0 多端点(DSH 行式):数组顺序 = 回退顺序,每行可挂多把 Key(轮询池)。
+    // 迁移:providers 为空且旧 apiKey 非空时,normalize() 自动包成第 1 行(不丢数据)。
+    providers: [],
   },
   deepl: {
     apiKey: "",
@@ -143,6 +146,8 @@ const DEFAULTS = {
     targetLanguage: "zh-Hans",
     force: false,
     timeoutMs: 15000,
+    hudLinger: true, // 顶栏气泡驻留:译文在途/刚送达时不让官方气泡消失
+    hudLingerSeconds: 8, // 译文送达后驻留秒数;0 = 送达后不驻留,只在途保活
   },
   // 进程监视:Deadlock 退出时是否连桥一起关闭。
   // 默认 false = 桥常驻:桥只在开机自启时拉起一次,游戏关闭时仅关闭悬浮窗。
@@ -180,8 +185,54 @@ function deepMerge(base, extra) {
   return out;
 }
 
+// v2.3.0 多端点 + 多 Key 池:把 config.openai.providers 洗干净,旧单端点自动包成第 1 行
+const rowIdGen = function () { return "p" + Math.random().toString(36).slice(2, 8); };
+
+function migrateOpenaiProviders(cfg) {
+  const oa = cfg.openai || (cfg.openai = {});
+  let rows = Array.isArray(oa.providers) ? oa.providers.filter(function (r) { return r && typeof r === "object"; }) : [];
+  rows = rows.map(function (r) {
+    return {
+      id: typeof r.id === "string" && r.id ? r.id : rowIdGen(),
+      name: typeof r.name === "string" && r.name ? r.name : "自定义端点",
+      builtin: r.builtin === true,
+      baseUrl: typeof r.baseUrl === "string" && r.baseUrl ? r.baseUrl : (oa.baseUrl || DEFAULTS.openai.baseUrl),
+      model: typeof r.model === "string" && r.model ? r.model : (oa.model || DEFAULTS.openai.model),
+      enabled: r.enabled !== false,
+      keys: (Array.isArray(r.keys) ? r.keys : [])
+        .filter(function (k) { return k && typeof k === "object" && typeof k.value === "string" && k.value; })
+        .map(function (k, i) {
+          return { id: (typeof k.id === "string" && k.id) ? k.id : "k" + (i + 1), value: k.value, enabled: k.enabled !== false };
+        }),
+    };
+  });
+  // 旧数据迁移:有旧 apiKey 但没端点列表 → 包成第 1 行,不丢数据
+  if (rows.length === 0 && oa.apiKey) {
+    rows = [{
+      id: "legacy",
+      name: "OpenAI 默认端点",
+      builtin: false,
+      baseUrl: oa.baseUrl || DEFAULTS.openai.baseUrl,
+      model: oa.model || DEFAULTS.openai.model,
+      enabled: true,
+      keys: [{ id: "k1", value: oa.apiKey, enabled: true }],
+    }];
+  }
+  oa.providers = rows;
+  return rows;
+}
+
+// Key 打码描述符(只写语义:GET/面板只拿得到这个,回存时用它匹配“保持原值”)
+function maskKeyValue(v) {
+  const s = String(v || "");
+  if (!s) return "";
+  if (s.length <= 8) return s.slice(0, 3) + "…";
+  return s.slice(0, 3) + "…" + s.slice(-4);
+}
+
 function normalize(raw) {
   const cfg = deepMerge(DEFAULTS, raw || {});
+  migrateOpenaiProviders(cfg);
   if (!Number.isFinite(Number(cfg.port))) cfg.port = DEFAULTS.port;
   if (!Number.isFinite(Number(cfg.timeoutMs))) cfg.timeoutMs = DEFAULTS.timeoutMs;
   if (!Number.isFinite(Number(cfg.maxQueue))) cfg.maxQueue = DEFAULTS.maxQueue;
@@ -244,6 +295,22 @@ function mask(cfg) {
       hasApiKey: !!openaiKey,
       baseUrl: (cfg.openai && cfg.openai.baseUrl) || DEFAULTS.openai.baseUrl,
       model: (cfg.openai && cfg.openai.model) || DEFAULTS.openai.model,
+      // v2.3.0 端点列表(Key 只回脱敏描述符,绝不回传明文)
+      providers: ((cfg.openai && cfg.openai.providers) || []).map(function (r) {
+        return {
+          id: r.id,
+          name: r.name,
+          builtin: !!r.builtin,
+          baseUrl: r.baseUrl,
+          model: r.model,
+          enabled: r.enabled !== false,
+          keyCount: (r.keys || []).length,
+          keysEnabled: (r.keys || []).filter(function (k) { return k.enabled !== false; }).length,
+          keys: (r.keys || []).map(function (k) {
+            return { id: k.id, enabled: k.enabled !== false, mask: maskKeyValue(k.value) };
+          }),
+        };
+      }),
     },
     deepl: {
       apiKey: deeplKey ? "********" : "",
@@ -316,6 +383,8 @@ function applyMaskedUpdate(current, incoming) {
     }
     if (typeof oa.baseUrl === "string" && oa.baseUrl) cfg.openai.baseUrl = oa.baseUrl;
     if (typeof oa.model === "string" && oa.model) cfg.openai.model = oa.model;
+    // v2.3.0 端点列表:完整重写(Web 设置页)或 id 合并(游戏面板调顺序/开关)
+    if (Array.isArray(oa.providers)) applyOpenaiProviders(cfg, oa.providers);
   }
   if (incoming.deepl) {
     const dl = incoming.deepl;
@@ -371,6 +440,10 @@ function applyMaskedUpdate(current, incoming) {
     if (typeof u.targetLanguage === "string" && u.targetLanguage) cfg.ui.targetLanguage = u.targetLanguage;
     if (typeof u.force === "boolean") cfg.ui.force = u.force;
     if (Number.isFinite(Number(u.timeoutMs))) cfg.ui.timeoutMs = Number(u.timeoutMs);
+    if (typeof u.hudLinger === "boolean") cfg.ui.hudLinger = u.hudLinger;
+    if (Number.isFinite(Number(u.hudLingerSeconds))) {
+      cfg.ui.hudLingerSeconds = Math.max(0, Math.min(60, Number(u.hudLingerSeconds)));
+    }
   }
   // 悬浮窗配置(由悬浮窗自身的设置面板提交,字段取白名单 + 数值夹紧,避免脏值写坏配置)
   if (incoming.overlay && typeof incoming.overlay === "object") {
@@ -432,4 +505,63 @@ function applyMaskedUpdate(current, incoming) {
   return cfg;
 }
 
-module.exports = { load, save, mask, applyMaskedUpdate, configPath, examplePath, DEFAULTS };
+// v2.3.0 openai 端点列表写入口:两种形态
+//   完整重写(Web 页): {id,name,baseUrl,model,enabled,keys:[{id?,value,enabled}]}
+//   id 合并(游戏面板): [{id,enabled}] 只调顺序/整行开关,baseUrl/model/keys 保持原样
+function applyOpenaiProviders(cfg, incomingRows) {
+  const cur = cfg.openai.providers || [];
+  const byId = new Map(cur.map(function (r) { return [r.id, r]; }));
+  const out = [];
+  incomingRows.forEach(function (rin) {
+    if (!rin || typeof rin !== "object") return;
+    const id = typeof rin.id === "string" && rin.id ? rin.id : rowIdGen();
+    const base = byId.get(id);
+    // id 合并形态:没带 baseUrl/keys → 保留原行,只改顺序/开关/名字
+    if (rin.baseUrl === undefined && rin.keys === undefined && base) {
+      out.push({
+        id: base.id, name: (typeof rin.name === "string" && rin.name) ? rin.name : base.name,
+        builtin: base.builtin, baseUrl: base.baseUrl, model: base.model,
+        enabled: typeof rin.enabled === "boolean" ? rin.enabled : (base.enabled !== false),
+        keys: base.keys,
+      });
+      return;
+    }
+    // 完整重写形态:重建 baseUrl/model/keys;Key 只写语义:值等于打码描述符/占位符 → 保留原值
+    const row = {
+      id: id,
+      name: (typeof rin.name === "string" && rin.name) ? rin.name : (base ? base.name : "自定义端点"),
+      builtin: rin.builtin === true,
+      baseUrl: (typeof rin.baseUrl === "string" && rin.baseUrl) ? rin.baseUrl : (base ? base.baseUrl : cfg.openai.baseUrl || DEFAULTS.openai.baseUrl),
+      model: (typeof rin.model === "string" && rin.model) ? rin.model : (base ? base.model : cfg.openai.model || DEFAULTS.openai.model),
+      enabled: typeof rin.enabled === "boolean" ? rin.enabled : (base ? base.enabled !== false : true),
+      keys: [],
+    };
+    if (Array.isArray(rin.keys)) {
+      const kbyId = new Map((base ? base.keys : []).map(function (k) { return [k.id, k]; }));
+      rin.keys.forEach(function (kin) {
+        if (!kin || typeof kin !== "object") return;
+        const kid = typeof kin.id === "string" && kin.id ? kin.id : null;
+        const prev = kid ? kbyId.get(kid) : null;
+        let value = typeof kin.value === "string" ? kin.value : (prev ? prev.value : "");
+        if (!value) return;
+        // 打码哨兵:回传的就是 GET 给过的描述符/占位符 → 用库里明文
+        if (prev && (value === "********" || value === maskKeyValue(prev.value) || value.indexOf("…") !== -1)) {
+          value = prev.value;
+        }
+        row.keys.push({ id: kid || ("k" + row.keys.length + Math.random().toString(36).slice(2, 5)), value: value, enabled: kin.enabled !== false });
+      });
+    }
+    out.push(row);
+  });
+  cfg.openai.providers = out;
+  // 旧字段回填第 1 个可用端点:op=ui 的 keys.openai 等旧读口依赖它
+  const first = out.find(function (r) { return r.enabled !== false && r.keys.some(function (k) { return k.enabled !== false; }); });
+  if (first) {
+    cfg.openai.baseUrl = first.baseUrl;
+    cfg.openai.model = first.model;
+    cfg.openai.apiKey = first.keys.length ? first.keys[0].value : "";
+  }
+  return out;
+}
+
+module.exports = { load, save, mask, applyMaskedUpdate, configPath, examplePath, DEFAULTS, maskKeyValue, normalize, migrateOpenaiProviders };

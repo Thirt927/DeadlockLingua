@@ -1,0 +1,565 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>DeadlockLingua — 服务商管理 v4(DSH 行式)· 原型</title>
+<link href="https://fonts.googleapis.com/css2?family=Poiret+One&family=Didact+Gothic&display=swap" rel="stylesheet">
+<style>
+/*
+  DSH(DeepSeek Harness)风格重做 · 参考其开源源码 packages/client/ui-settings-models
+  IA:一行一个提供商(状态点+badge+编辑/删除) · 同时只展开一张编辑卡 ·
+  添加=一个按钮(内置目录 | 自定义 API 双模式) · Key 只写(脱敏描述符) ·
+  模型列表一等公民(获取可用模型/手动加) · 删除两步确认
+  在其上保留本 mod 的多 Key 轮询池 + 回退顺序(↑↓)。纯 DOM 构建,无 innerHTML。
+*/
+:root {
+  --bg: #0a0e12; --panel: #121820; --panel2: #151b22;
+  --line: rgba(255,255,255,0.08);
+  --gold: #e7b96b; --gold-soft: rgba(231,185,107,0.14); --gold-line: rgba(231,185,107,0.45);
+  --patina: #4e8c7a; --text: #d8dee6; --dim: #8b95a3;
+  --ok: #6fcf9f; --err: #e07a6f; --idk: #5a6472;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: radial-gradient(1100px 640px at 50% -8%, #10161d, var(--bg));
+  color: var(--text); font-family: "Didact Gothic", "Microsoft YaHei", sans-serif;
+  font-size: 13px; min-height: 100vh; padding: 26px 16px 60px;
+}
+h1 { text-align: center; font-family: "Poiret One", sans-serif; font-size: 26px; color: var(--gold); letter-spacing: 2px; font-weight: normal; }
+.sub { text-align: center; color: var(--dim); font-size: 11.5px; margin: 6px 0 18px; line-height: 1.7; }
+.sub b { color: var(--gold); font-weight: normal; }
+.tabs { display: flex; gap: 10px; justify-content: center; margin-bottom: 20px; }
+.tab { padding: 8px 22px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel2); color: var(--dim); cursor: pointer; user-select: none; }
+.tab.on { background: var(--gold-soft); border-color: var(--gold-line); color: var(--gold); }
+.stage { display: none; } .stage.on { display: block; }
+.card { background: var(--panel); border: 1px solid var(--line); border-top: 1px solid var(--gold-line); border-radius: 10px; box-shadow: rgba(0,0,0,0.5) 0 18px 40px; }
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 8px; vertical-align: -1px; flex: none; }
+.dot.ok { background: var(--ok); } .dot.err { background: var(--err); } .dot.idk { background: transparent; border: 1.5px solid var(--idk); }
+.btn { font-family: inherit; cursor: pointer; border-radius: 6px; font-size: 12px; padding: 5px 12px; border: 1px solid var(--line); background: rgba(255,255,255,0.03); color: var(--text); }
+.btn:hover { background: rgba(255,255,255,0.08); border-color: rgba(231,185,107,0.4); }
+.btn.gold { background: var(--gold); color: #14100a; border-color: rgba(255,236,200,0.55); font-weight: bold; }
+.btn.gold:hover { background: #f0c97e; }
+.btn.mini { padding: 3px 9px; font-size: 11px; }
+.btn.ghost:hover { border-color: rgba(224,122,111,0.55); color: var(--err); }
+.btn.dis { opacity: 0.35; pointer-events: none; }
+.inp { font-family: inherit; font-size: 12px; background: rgba(0,0,0,0.25); border: 1px solid var(--line); border-radius: 6px; color: var(--text); padding: 6px 10px; width: 100%; }
+.inp:focus { outline: none; border-color: var(--gold-line); }
+.inp::placeholder { color: var(--dim); opacity: 0.7; }
+select.inp { appearance: auto; }
+.err2 { color: var(--err); font-size: 11px; margin: 4px 0 0; }
+.hint2 { color: var(--dim); font-size: 10.5px; margin: 4px 0 6px; }
+
+/* ============ ① Web(DSH 行式) ============ */
+#wcard { width: 900px; margin: 0 auto; padding: 26px 30px; }
+#wcard h2 { font-family: "Poiret One", sans-serif; font-size: 22px; color: var(--gold); letter-spacing: 1px; font-weight: normal; }
+.intro { color: var(--dim); font-size: 12px; margin: 5px 0 16px; }
+.rows { list-style: none; }
+.prow { border: 1px solid var(--line); border-radius: 8px; background: var(--panel2); margin-bottom: 8px; overflow: hidden; }
+.prow.off { opacity: 0.55; }
+.pmain { display: flex; align-items: center; gap: 10px; padding: 11px 14px; }
+.pmain .nm { font-weight: bold; color: var(--text); min-width: 120px; }
+.pmain .meta { color: var(--dim); font-size: 11px; flex: 1; }
+.badge { font-size: 10px; color: var(--dim); border: 1px solid var(--line); border-radius: 10px; padding: 1px 8px; background: rgba(0,0,0,0.2); }
+.badge.builtin { color: var(--patina); border-color: rgba(78,140,122,0.4); }
+.badge.on { color: var(--gold); border-color: var(--gold-line); background: rgba(231,185,107,0.07); }
+.op { display: flex; gap: 5px; }
+.op .o { min-width: 26px; height: 24px; padding: 0 6px; border-radius: 5px; border: 1px solid var(--line); background: transparent; color: var(--dim); cursor: pointer; font-size: 11px; text-align: center; }
+.op .o:hover { border-color: rgba(231,185,107,0.5); color: var(--gold); }
+.op .o.del:hover { border-color: rgba(224,122,111,0.55); color: var(--err); }
+.op .o.dis { opacity: 0.3; pointer-events: none; }
+/* 编辑卡(同时只开一张,原地展开) */
+.edcard { border-top: 1px solid var(--line); background: linear-gradient(180deg, rgba(231,185,107,0.04), transparent 60px), var(--panel2); padding: 14px; }
+.efld { margin-bottom: 10px; }
+.efld .lbl { display: block; font-size: 10px; color: var(--dim); letter-spacing: 1.4px; text-transform: uppercase; margin-bottom: 5px; }
+.frow { display: flex; gap: 8px; }
+.frow .inp { flex: 1; }
+.kpool { display: flex; flex-direction: column; gap: 5px; margin-top: 6px; }
+.krow { display: flex; align-items: center; gap: 8px; border: 1px solid var(--line); border-radius: 6px; background: rgba(0,0,0,0.2); padding: 5px 10px; }
+.krow .kl { font-size: 11.5px; font-family: Consolas, monospace; color: var(--text); }
+.krow.dead .kl { color: var(--err); text-decoration: line-through; }
+.krow .ks { font-size: 10.5px; color: var(--dim); flex: 1; }
+.krow.dead .ks { color: var(--err); }
+.krow .o { min-width: 22px; height: 20px; padding: 0 5px; border-radius: 4px; border: 1px solid var(--line); background: transparent; color: var(--dim); cursor: pointer; font-size: 10px; text-align: center; }
+.kadd { display: flex; gap: 6px; margin-top: 6px; }
+.kadd .inp { flex: 1; }
+.modelbox { border: 1px solid var(--line); border-radius: 6px; background: rgba(0,0,0,0.2); padding: 8px 10px; }
+.modelbox .mrow { display: flex; align-items: center; gap: 7px; padding: 3px 0; font-size: 12px; }
+.modelbox .mrow input { accent-color: var(--gold); }
+.modelbox .mrow .mid { font-family: Consolas, monospace; font-size: 11.5px; }
+.edfoot { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
+.edfoot .sp { flex: 1; }
+.addcard { border: 1px solid var(--gold-line); border-radius: 8px; background: linear-gradient(180deg, rgba(231,185,107,0.06), transparent 70px), var(--panel2); padding: 14px; margin-bottom: 10px; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; margin-bottom: 12px; }
+.seg div { padding: 5px 14px; font-size: 11.5px; color: var(--dim); cursor: pointer; user-select: none; }
+.seg div.on { background: var(--gold-soft); color: var(--gold); }
+.addbtn { display: flex; align-items: center; gap: 10px; margin-top: 14px; cursor: pointer; }
+.addbtn .plus { width: 30px; height: 30px; border-radius: 50%; border: 1px solid var(--gold-line); background: var(--gold-soft); color: var(--gold); font-size: 16px; display: flex; align-items: center; justify-content: center; }
+.addbtn .t2 { color: var(--gold); font-size: 13px; }
+.xsec { margin-top: 22px; }
+.xsec .seclbl { font-size: 10px; color: var(--dim); letter-spacing: 1.6px; text-transform: uppercase; margin-bottom: 8px; }
+.xrow { display: flex; align-items: center; gap: 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel2); padding: 7px 12px; margin-bottom: 6px; }
+.xrow .nm { font-weight: bold; min-width: 100px; }
+.xrow .mt { color: var(--dim); font-size: 11px; flex: 1; }
+.fine { font-size: 10.5px; color: var(--dim); margin-top: 14px; line-height: 1.8; border-top: 1px solid var(--line); padding-top: 10px; }
+
+/* ============ ② 游戏内 /tr 紧凑 ============ */
+#game { display: flex; justify-content: center; }
+.gpanel { width: 640px; height: 640px; border-radius: 10px; overflow: hidden; display: flex; flex-direction: column; background: linear-gradient(180deg, #121820, #0a0e12); }
+.ghead { height: 54px; flex: none; padding: 0 14px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid rgba(255,255,255,0.06); }
+.ghead .mark { width: 30px; height: 30px; border-radius: 8px; flex: none; background: linear-gradient(160deg, #ecc47c, #b98a3e); color: #14100a; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: bold; font-family: "Poiret One", sans-serif; }
+.ghead .tt { color: var(--gold); font-family: "Poiret One", sans-serif; font-size: 19px; letter-spacing: 1px; }
+.ghead .tt span { display: block; font-family: "Didact Gothic", "Microsoft YaHei", sans-serif; font-size: 9px; letter-spacing: 1.4px; color: var(--dim); }
+.ghead .sp { flex: 1; }
+.gbody { flex: 1; overflow-y: auto; padding: 12px 14px 6px; }
+.gbody::-webkit-scrollbar { width: 8px; } .gbody::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 4px; }
+.gnote { font-size: 10.5px; color: var(--dim); margin-bottom: 8px; line-height: 1.6; }
+.grow { border: 1px solid var(--line); border-radius: 7px; background: var(--panel2); margin-bottom: 6px; overflow: hidden; }
+.grow.on { border-color: var(--gold-line); }
+.grow.off { opacity: 0.55; }
+.gmain { display: flex; align-items: center; gap: 8px; padding: 9px 12px; cursor: pointer; }
+.gmain .nm { font-weight: bold; font-size: 12.5px; min-width: 110px; }
+.gmain .meta { color: var(--dim); font-size: 10.5px; flex: 1; }
+.gmain .badge { font-size: 9.5px; color: var(--dim); border: 1px solid var(--line); border-radius: 9px; padding: 0 7px; background: rgba(0,0,0,0.2); }
+.gmain .badge.builtin { color: var(--patina); border-color: rgba(78,140,122,0.4); }
+.gmain .badge.on { color: var(--gold); border-color: var(--gold-line); background: rgba(231,185,107,0.07); }
+.gfoot { height: 56px; flex: none; border-top: 1px solid rgba(255,255,255,0.06); display: flex; align-items: center; gap: 10px; padding: 0 14px; }
+.gfoot .hint { flex: 1; font-size: 10.5px; color: var(--dim); line-height: 1.5; }
+.gfoot .hint b { color: var(--gold); font-weight: normal; }
+#toast { position: fixed; left: 50%; top: 18px; transform: translateX(-50%) translateY(-60px); background: var(--panel2); border: 1px solid var(--gold-line); border-radius: 6px; padding: 8px 20px; font-size: 12px; color: var(--gold); transition: transform .25s; z-index: 99; }
+#toast.show { transform: translateX(-50%) translateY(0); }
+</style>
+</head>
+<body>
+
+<h1>服务商管理 v4 · DSH 行式原型</h1>
+<div class="sub">
+  IA 抄自开源 <b>DeepSeek Harness(deepseek-ai/deepseek-harness)</b> 的「设置 → 模型」页:<br>
+  一行一个提供商 + 同时只展开一张编辑卡 + 添加=一个按钮(内置目录|自定义 API)+ Key 只写脱敏 + 模型列表一等公民 + 删除两步确认<br>
+  在其上保留本 mod 的多 Key 轮询池、回退顺序(↑↓)、跨类别回退(Bing 兜底)
+</div>
+
+<div class="tabs">
+  <div class="tab on" data-v="w" onclick="show('w')">① Web 设置页</div>
+  <div class="tab" data-v="g" onclick="show('g')">② 游戏内 /tr 紧凑</div>
+</div>
+<div id="toast"></div>
+
+<!-- ① Web -->
+<div id="w" class="stage on">
+  <div class="card" id="wcard">
+    <h2>模型</h2>
+    <div class="intro">填入各提供商的 API 密钥即可使用其模型。行顺序 = 回退顺序;Key 保存后只显示脱敏描述符,不再回显明文。</div>
+    <div id="wAddSlot"></div>
+    <ul class="rows" id="wRows"></ul>
+    <div class="addbtn" id="wAddBtn">
+      <span class="plus">＋</span>
+      <span class="t2">添加模型提供商</span>
+    </div>
+    <div class="xsec">
+      <div class="seclbl">跨类别回退(openai 端点全挂后按序试 · Bing 免 Key 恒兜底)</div>
+      <div id="wCross"></div>
+    </div>
+    <div class="fine">
+      老配置自动迁移:原 <code>{openai:{apiKey,baseUrl,model}}</code> 读入时包成第 1 行「DeepSeek」(内置),Key 进轮询池,不丢数据。<br>
+      内置目录:DeepSeek / OpenAI / Ollama 本地(免 Key,填端口即);自定义 API:任意 OpenAI 兼容端点(OneAPI 网关、自建 vLLM 等)。
+    </div>
+  </div>
+</div>
+
+<!-- ② 游戏内 -->
+<div id="g" class="stage">
+  <div class="card gpanel">
+    <div class="ghead">
+      <div class="mark">DL</div>
+      <div class="tt">模型<span>PROVIDERS</span></div>
+      <div class="sp"></div>
+      <div class="seg" id="gSeg"><div class="on">提供商</div><div>跨类别</div></div>
+    </div>
+    <div class="gbody">
+      <div class="gnote" id="gNote">点行展开编辑(同时只开一张)· 行顺序 = 回退顺序 · Key 保存后只显示 sk-…abcd 描述符</div>
+      <div id="gCrossBox" style="display:none"></div>
+      <div id="gRows"></div>
+    </div>
+    <div class="gfoot">
+      <span class="hint" id="gHint"></span>
+      <button class="btn gold mini" id="gAddBtn">＋ 添加</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ---------- 数据 ---------- */
+const CAT = [
+  { name: "DeepSeek", host: "api.deepseek.com", baseUrl: "https://api.deepseek.com", model: "deepseek-chat", builtin: true },
+  { name: "OpenAI", host: "api.openai.com", baseUrl: "https://api.openai.com/v1", model: "gpt-4o-mini", builtin: true },
+  { name: "Ollama 本地", host: "127.0.0.1:11434", baseUrl: "http://127.0.0.1:11434/v1", model: "llama3:8b", builtin: true, local: true },
+];
+const state = {
+  provs: [
+    { id: "p1", name: "DeepSeek", builtin: true, host: "api.deepseek.com", baseUrl: "https://api.deepseek.com", protocol: "OpenAI 兼容",
+      keys: [ { id: "k1", mask: "sk-…abcd", on: true }, { id: "k2", mask: "sk-…efgh", on: false, why: "连续 3 次失败被自动禁用 · 点启用恢复" } ],
+      models: ["deepseek-chat", "deepseek-reasoner"], fetchable: ["deepseek-chat", "deepseek-reasoner", "deepseek-chat-v3"],
+      st: "ok", lat: "213ms", on: true },
+    { id: "p2", name: "Ollama 本地", builtin: true, host: "127.0.0.1:11434", baseUrl: "http://127.0.0.1:11434/v1", protocol: "OpenAI 兼容",
+      keys: [ { id: "k3", mask: "本地免 Key", on: true, local: true } ],
+      models: ["llama3:8b"], fetchable: ["llama3:8b", "qwen2.5:7b"],
+      st: "ok", lat: "1.2s", on: true },
+  ],
+  cross: [
+    { n: "Bing", m: "免 Key · 恒兜底", st: "ok" },
+    { n: "Microsoft", m: "已配置", st: "ok" },
+    { n: "DeepL", m: "未配置", st: "idk" },
+    { n: "Google", m: "未配置", st: "idk" },
+  ],
+  open: null, addOpen: false, addMode: "catalog",
+};
+let kid = 10;
+
+/* ---------- DOM 助手 ---------- */
+function el(tag, cls, text) {
+  const d = document.createElement(tag);
+  if (cls) d.className = cls;
+  if (text != null) d.textContent = text;
+  return d;
+}
+function btn(text, fn, cls) {
+  const b = el("button", "btn " + (cls || ""), text);
+  if (fn) b.onclick = fn;
+  return b;
+}
+function oBtn(glyph, title, fn, cls) {
+  const b = el("button", cls || "o", glyph);
+  b.title = title;
+  if (fn) b.onclick = fn;
+  return b;
+}
+function dot(st) {
+  const i = el("i", "dot " + st);
+  i.title = st === "ok" ? "已配置 · 可达" : st === "err" ? "测试失败" : "未配置 Key";
+  return i;
+}
+function toast(m) {
+  const t = document.getElementById("toast");
+  t.textContent = m; t.classList.add("show");
+  clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("show"), 2200);
+}
+function show(v) {
+  document.querySelectorAll(".tab").forEach(t => t.classList.toggle("on", t.dataset.v === v));
+  document.getElementById("w").classList.toggle("on", v === "w");
+  document.getElementById("g").classList.toggle("on", v === "g");
+}
+function move(i, d) {
+  const j = i + d;
+  if (j < 0 || j >= state.provs.length) return;
+  const t = state.provs[i];
+  state.provs[i] = state.provs[j]; state.provs[j] = t;
+  if (state.open === i) state.open = j; else if (state.open === j) state.open = i;
+  renderW(); renderG();
+  toast("回退顺序已调整:" + state.provs.map(p => p.name).join(" → "));
+}
+function quickKey(p, input) {
+  const parts = (input.value || "").split(",").map(s => s.trim()).filter(Boolean);
+  if (!parts.length) return;
+  parts.forEach(v => p.keys.push({ id: "k" + (kid++), mask: "sk-…" + v.slice(-4), on: true }));
+  if (input) input.value = "";
+  renderW(); renderG();
+  toast("「" + p.name + "」加入 " + parts.length + " 把 Key,进轮询池");
+}
+function mRow(p, i, mid, checked) {
+  const r = el("div", "mrow");
+  const cb = el("input"); cb.type = "checkbox"; cb.checked = checked;
+  cb.onchange = () => {
+    const at = p.models.indexOf(mid);
+    if (cb.checked && at < 0) p.models.push(mid);
+    if (!cb.checked && at >= 0) p.models.splice(at, 1);
+    renderW(); renderG();
+  };
+  r.appendChild(cb);
+  r.appendChild(el("span", "mid", mid));
+  return r;
+}
+
+/* ---------- 编辑卡(同时只一张,原地展开) ---------- */
+function editorCard(p, i, compact) {
+  const c = el("div", "edcard");
+  if (compact) c.style.padding = "10px 12px";
+  const addF = (lbl, node) => {
+    const f = el("div", "efld");
+    f.appendChild(el("span", "lbl", lbl));
+    f.appendChild(node);
+    c.appendChild(f);
+  };
+
+  const ni = el("input", "inp", p.name);
+  ni.onchange = e => { p.name = e.target.value || p.name; renderW(); renderG(); };
+  addF("显示名称", ni);
+
+  const fr = el("div", "frow");
+  const bu = el("input", "inp", p.baseUrl);
+  bu.onchange = e => { p.baseUrl = e.target.value; p.host = e.target.value.replace(/^https?:\/\//, ""); renderW(); renderG(); };
+  fr.appendChild(bu);
+  const sel = el("select", "inp");
+  ["OpenAI 兼容", "原生 DeepSeek"].forEach(x => sel.appendChild(el("option", null, x)));
+  sel.value = p.protocol || "OpenAI 兼容";
+  sel.onchange = e => { p.protocol = e.target.value; };
+  fr.appendChild(sel);
+  addF("Base URL · 协议", fr);
+
+  // API 密钥池(只写:脱敏描述符)
+  const kf = el("div", "efld");
+  kf.appendChild(el("span", "lbl", "API 密钥 · " + p.keys.filter(k => k.on).length + " 把在轮询"));
+  const pool = el("div", "kpool");
+  p.keys.forEach((k, ki) => {
+    const r = el("div", "krow" + (k.on ? "" : " dead"));
+    r.appendChild(dot(k.on ? "ok" : "err"));
+    r.appendChild(el("span", "kl", k.mask));
+    r.appendChild(el("span", "ks", k.why || (k.local ? "本地,无需 Key" : "轮询中")));
+    r.appendChild(oBtn("⇄", k.on ? "停用" : "启用", () => { k.on = !k.on; k.why = ""; renderW(); renderG(); }, "o"));
+    r.appendChild(oBtn("✕", "删除这把 Key", () => { p.keys.splice(ki, 1); renderW(); renderG(); }, "o del"));
+    pool.appendChild(r);
+  });
+  const ka = el("div", "kadd");
+  const ki = el("input", "inp", null); ki.placeholder = "粘贴 Key,英文逗号分隔可一次加多把,例:sk-aaa,sk-bbb";
+  ki.onkeydown = e => { if (e.key === "Enter") quickKey(p, ki); };
+  ka.appendChild(ki);
+  ka.appendChild(btn("＋ 添加", () => quickKey(p, ki), "gold mini"));
+  pool.appendChild(ka);
+  kf.appendChild(pool);
+  c.appendChild(kf);
+
+  // 模型列表(一等公民)
+  const mb = el("div", "modelbox");
+  const mstack = el("div");
+  p.models.forEach(mid => mstack.appendChild(mRow(p, i, mid, true)));
+  mb.appendChild(mstack);
+  const fa = el("div", "frow");
+  const fetchB = btn("↻ 获取可用模型", () => {
+    p.st = "idk"; renderW(); renderG();
+    setTimeout(() => {
+      p.st = "ok"; renderW(); renderG();
+      p.fetchable.forEach(fm => { if (!p.models.includes(fm)) mstack.appendChild(mRow(p, i, fm, false)); });
+      toast("已从 " + p.host + " 拉取模型目录(" + p.fetchable.length + " 个)");
+    }, 500);
+  }, "mini");
+  fa.appendChild(fetchB);
+  const mi = el("input", "inp", null); mi.placeholder = "手动加模型 ID";
+  mi.onkeydown = e => { if (e.key === "Enter" && e.target.value.trim()) { p.models.push(e.target.value.trim()); e.target.value = ""; renderW(); renderG(); } };
+  fa.appendChild(mi);
+  fa.appendChild(btn("添加", () => { if (mi.value.trim()) { p.models.push(mi.value.trim()); mi.value = ""; renderW(); renderG(); } }, "mini"));
+  mb.appendChild(fa);
+  addF("模型(勾选即用)", mb);
+
+  const foot = el("div", "edfoot");
+  foot.appendChild(btn("测试连接", () => {
+    p.st = "err"; renderW(); renderG();
+    setTimeout(() => { p.st = "ok"; p.lat = (120 + Math.floor(Math.random() * 400)) + "ms"; renderW(); renderG(); toast(p.name + " 测试通过 " + p.lat); }, 500);
+  }, "mini"));
+  foot.appendChild(btn(p.on ? "整行停用" : "整行启用", () => { p.on = !p.on; renderW(); renderG(); }, "mini ghost"));
+  foot.appendChild(el("span", "sp"));
+  foot.appendChild(btn("保存并收起", () => { state.open = null; renderW(); renderG(); toast("已保存「" + p.name + "」"); }, "gold mini"));
+  c.appendChild(foot);
+  return c;
+}
+
+/* ---------- Web 行 ---------- */
+function renderW() {
+  const box = document.getElementById("wRows");
+  box.textContent = "";
+  state.provs.forEach((p, i) => {
+    const row = el("li", "prow" + (p.on ? "" : " off"));
+    const m = el("div", "pmain");
+    m.appendChild(dot(p.st));
+    m.appendChild(el("span", "nm", p.name));
+    m.appendChild(el("span", "badge" + (p.builtin ? " builtin" : ""), p.builtin ? "内置" : "自定义"));
+    m.appendChild(el("span", "meta", p.host + " · " + (p.lat ? p.lat + " · " : "") + p.keys.filter(k => k.on).length + "/" + p.keys.length + " Keys · " + p.models.length + " 模型"));
+    if (i === 0) m.appendChild(el("span", "badge on", "★ 最优先"));
+    const op = el("span", "op");
+    op.appendChild(oBtn("↑", "上移回退顺序", () => move(i, -1), "o" + (i === 0 ? " dis" : "")));
+    op.appendChild(oBtn("↓", "下移回退顺序", () => move(i, 1), "o" + (i === state.provs.length - 1 ? " dis" : "")));
+    const eb = btn("编辑", () => { state.open = state.open === i ? null : i; renderW(); renderG(); }, "mini");
+    op.appendChild(eb);
+    let del1 = false;
+    const db = btn(del1 ? "确认删除?" : "删除", () => {
+      if (!del1) { del1 = true; db.textContent = "确认删除?"; db.classList.remove("ghost"); toast("再点一次确认删除「" + p.name + "」"); return; }
+      state.provs.splice(i, 1); if (state.open === i) state.open = null; renderW(); renderG(); toast("已删除「" + p.name + "」,回退顺序上移");
+    }, "mini ghost");
+    op.appendChild(db);
+    m.appendChild(op);
+    row.appendChild(m);
+    if (state.open === i) row.appendChild(editorCard(p, i, false));
+    box.appendChild(row);
+  });
+
+  const x = document.getElementById("wCross");
+  x.textContent = "";
+  state.cross.forEach(o => {
+    const r = el("div", "xrow");
+    r.appendChild(dot(o.st));
+    r.appendChild(el("span", "nm", o.n));
+    r.appendChild(el("span", "mt", o.m));
+    x.appendChild(r);
+  });
+
+  const slot = document.getElementById("wAddSlot");
+  slot.textContent = "";
+  document.getElementById("wAddBtn").style.display = state.addOpen ? "none" : "";
+  if (state.addOpen) slot.appendChild(addCard());
+}
+function addCard() {
+  const c = el("div", "addcard");
+  const seg = el("div", "seg");
+  const s1 = el("div", state.addMode === "catalog" ? "on" : "", "内置目录");
+  const s2 = el("div", state.addMode === "custom" ? "on" : "", "自定义 API");
+  s1.onclick = () => { state.addMode = "catalog"; renderW(); renderG(); };
+  s2.onclick = () => { state.addMode = "custom"; renderW(); renderG(); };
+  seg.appendChild(s1); seg.appendChild(s2);
+  c.appendChild(seg);
+  if (state.addMode === "catalog") {
+    const sel = el("select", "inp");
+    CAT.forEach(x => sel.appendChild(el("option", null, x.name + " · " + x.host)));
+    const pick = () => {
+      const x = CAT[sel.selectedIndex];
+      state.provs.push({ id: "p" + Date.now(), name: x.name, builtin: true, host: x.host, baseUrl: x.baseUrl, protocol: "OpenAI 兼容",
+        keys: x.local ? [{ id: "k" + (kid++), mask: "本地免 Key", on: true, local: true }] : [{ id: "k" + (kid++), mask: "(待粘贴)", on: true }],
+        models: [x.model], fetchable: [x.model], st: "idk", on: true });
+      state.addOpen = false; renderW(); renderG();
+      toast("已添加「" + x.name + "」,旧提供商自动变备用");
+    };
+    const fr = el("div", "frow");
+    fr.appendChild(sel);
+    fr.appendChild(btn("添加", pick, "gold mini"));
+    c.appendChild(fr);
+    c.appendChild(el("p", "hint2", "内置目录预填 Base URL 与默认模型;只填 Key 即可用,Key 支持逗号分隔多把"));
+  } else {
+    const nm = el("input", "inp", null); nm.placeholder = "显示名称,例:OneAPI 网关";
+    const bu = el("input", "inp", null); bu.placeholder = "Base URL,例:https://your-oneapi.example/v1";
+    const ky = el("input", "inp", null); ky.placeholder = "API Key,英文逗号分隔可多把";
+    const mo = el("input", "inp", null); mo.placeholder = "模型 ID,例:gpt-4o";
+    const pick = () => {
+      if (!bu.value.trim() || !ky.value.trim() || !mo.value.trim()) { toast("Base URL / Key / 模型 都要填"); return; }
+      const parts = ky.value.split(",").map(s => s.trim()).filter(Boolean);
+      state.provs.push({ id: "p" + Date.now(), name: nm.value.trim() || "自定义", builtin: false, host: bu.value.replace(/^https?:\/\//, ""), baseUrl: bu.value.trim(), protocol: "OpenAI 兼容",
+        keys: parts.map(v => ({ id: "k" + (kid++), mask: "sk-…" + v.slice(-4), on: true })),
+        models: [mo.value.trim()], fetchable: [mo.value.trim()], st: "idk", on: true });
+      state.addOpen = false; renderW(); renderG();
+      toast("已添加自定义端点「" + (nm.value.trim() || "自定义") + "」");
+    };
+    c.appendChild(el("p", "hint2", "显示名称")); c.appendChild(nm);
+    c.appendChild(el("p", "hint2", "Base URL")); c.appendChild(bu);
+    c.appendChild(el("p", "hint2", "API Key(逗号分隔多把)")); c.appendChild(ky);
+    c.appendChild(el("p", "hint2", "模型 ID")); c.appendChild(mo);
+    const stack = el("div", "frow");
+    stack.appendChild(btn("添加", pick, "gold mini"));
+    stack.appendChild(btn("取消", () => { state.addOpen = false; renderW(); }, "mini"));
+    c.appendChild(stack);
+  }
+  return c;
+}
+function openAdd() { state.addOpen = true; state.addMode = "catalog"; renderW(); renderG(); }
+
+/* ---------- 游戏内 ---------- */
+function renderG() {
+  const box = document.getElementById("gRows");
+  box.textContent = "";
+  if (state.addOpen) box.appendChild(gAddCard());
+  state.provs.forEach((p, i) => {
+    const row = el("div", "grow" + (i === 0 ? " on" : "") + (p.on ? "" : " off"));
+    const m = el("div", "gmain");
+    m.appendChild(dot(p.st));
+    m.appendChild(el("span", "nm", p.name));
+    m.appendChild(el("span", "badge" + (p.builtin ? " builtin" : ""), p.builtin ? "内置" : "自定义"));
+    m.appendChild(el("span", "meta", p.host + " · " + p.keys.filter(k => k.on).length + " Keys · " + (p.models[0] || "")));
+    if (i === 0) m.appendChild(el("span", "badge on", "★"));
+    const op = el("span", "op");
+    op.appendChild(oBtn("↑", "上移", () => move(i, -1), "o" + (i === 0 ? " dis" : "")));
+    op.appendChild(oBtn("↓", "下移", () => move(i, 1), "o" + (i === state.provs.length - 1 ? " dis" : "")));
+    op.appendChild(oBtn("✕", "删除(两步确认)", () => { state.provs.splice(i, 1); if (state.open === i) state.open = null; renderW(); renderG(); toast("已删除「" + p.name + "」"); }, "o del"));
+    m.appendChild(op);
+    m.onclick = () => { state.open = state.open === i ? null : i; renderW(); renderG(); };
+    row.appendChild(m);
+    if (state.open === i) row.appendChild(editorCard(p, i, true));
+    box.appendChild(row);
+  });
+
+  const xb = document.getElementById("gCrossBox");
+  xb.textContent = "";
+  state.cross.forEach(o => {
+    const r = el("div", "grow");
+    const m = el("div", "gmain");
+    m.appendChild(dot(o.st));
+    m.appendChild(el("span", "nm", o.n));
+    m.appendChild(el("span", "meta", o.m));
+    r.appendChild(m);
+    xb.appendChild(r);
+  });
+
+  const p = state.provs[0];
+  const hint = document.getElementById("gHint");
+  hint.textContent = "";
+  if (p) {
+    hint.appendChild(document.createTextNode("当前最优先:"));
+    hint.appendChild(el("b", p.name));
+    hint.appendChild(document.createTextNode(" · " + p.keys.filter(k => k.on).length + " 把 Key 轮询 · 全挂按顺序回退,Bing 兜底"));
+  }
+}
+function gAddCard() {
+  const c = el("div", "addcard");
+  c.style.marginBottom = "8px";
+  const seg = el("div", "seg");
+  const s1 = el("div", "on", "内置目录"); const s2 = el("div", "自定义 API");
+  const host = el("div");
+  c.appendChild(seg); c.appendChild(host);
+  function bodyCats() {
+    host.textContent = "";
+    const sel = el("select", "inp");
+    CAT.forEach(x => sel.appendChild(el("option", null, x.name)));
+    const fr = el("div", "frow");
+    fr.appendChild(sel);
+    fr.appendChild(btn("＋ 添加", () => {
+      const x = CAT[sel.selectedIndex];
+      state.provs.push({ id: "p" + Date.now(), name: x.name, builtin: true, host: x.host, baseUrl: x.baseUrl, protocol: "OpenAI 兼容",
+        keys: x.local ? [{ id: "k" + (kid++), mask: "本地免 Key", on: true, local: true }] : [{ id: "k" + (kid++), mask: "(待粘贴)", on: true }],
+        models: [x.model], fetchable: [x.model], st: "idk", on: true });
+      state.addOpen = false; renderW(); renderG();
+      toast("已添加「" + x.name + "」");
+    }, "gold mini"));
+    host.appendChild(fr);
+  }
+  function bodyCustom() {
+    host.textContent = "";
+    const bu = el("input", "inp", null); bu.placeholder = "Base URL";
+    const ky = el("input", "inp", null); ky.placeholder = "Key(逗号分隔多把)";
+    const mo = el("input", "inp", null); mo.placeholder = "模型 ID";
+    host.appendChild(bu); host.appendChild(ky); host.appendChild(mo);
+    const fr = el("div", "frow");
+    fr.appendChild(btn("＋ 添加", () => {
+      if (!bu.value.trim() || !mo.value.trim()) { toast("Base URL 和模型 ID 必填"); return; }
+      const parts = (ky.value || "sk-…new").split(",").map(s => s.trim()).filter(Boolean);
+      state.provs.push({ id: "p" + Date.now(), name: "自定义 " + (state.provs.length + 1), builtin: false, host: bu.value.replace(/^https?:\/\//, ""), baseUrl: bu.value.trim(), protocol: "OpenAI 兼容",
+        keys: parts.map(v => ({ id: "k" + (kid++), mask: "sk-…" + v.slice(-4), on: true })),
+        models: [mo.value.trim()], fetchable: [mo.value.trim()], st: "idk", on: true });
+      state.addOpen = false; renderW(); renderG();
+    }, "gold mini"));
+    host.appendChild(fr);
+  }
+  s1.onclick = () => { s1.className = "on"; s2.className = ""; bodyCats(); };
+  s2.onclick = () => { s1.className = ""; s2.className = "on"; bodyCustom(); };
+  bodyCats();
+  return c;
+}
+document.getElementById("wAddBtn").onclick = openAdd;
+document.getElementById("gAddBtn").onclick = openAdd;
+document.getElementById("gSeg").querySelectorAll("div").forEach((d, i) => {
+  d.onclick = () => {
+    d.parentElement.querySelectorAll("div").forEach(x => x.classList.remove("on"));
+    d.classList.add("on");
+    document.getElementById("gRows").style.display = i === 0 ? "" : "none";
+    document.getElementById("gNote").style.display = i === 0 ? "" : "none";
+    document.getElementById("gCrossBox").style.display = i === 1 ? "" : "none";
+  };
+});
+
+renderW(); renderG();
+</script>
+</body>
+</html>
